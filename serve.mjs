@@ -1,4 +1,4 @@
-// Stable local dev server for the Worker — wraps the same fetch handler in node:http.
+// Stable local dev server for the Worker - wraps the same fetch handler in node:http.
 // Unlike `wrangler dev`, this has no interactive hotkey loop, so it survives as a
 // detached background process. Binds to 127.0.0.1 (localhost only).
 //

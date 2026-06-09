@@ -1,4 +1,4 @@
-// RNGdle badge / EP calculator — Cloudflare Worker
+// RNGdle badge / EP calculator - Cloudflare Worker
 //
 // Enter any number 0..999999 and get the total EP plus the list of badges it earns.
 // EP per badge = the "Score (Decimal)" column from the source CSV.
@@ -71,7 +71,7 @@ const validPart = p => p.length === 1 || p[0] !== '0'; // no leading zeros excep
 
 // Can `str` split into `count` parts that are consecutive integers ascending in order?
 // multiDigit: require at least one part to be 2+ digits (so single-digit runs like
-// "12" are NOT counted as "consecutive numbers" — those are Neighbors instead).
+// "12" are NOT counted as "consecutive numbers" - those are Neighbors instead).
 function consecAsc(str, count, multiDigit) {
   for (const parts of partitions(str, count)) {
     if (!parts.every(validPart)) continue;
@@ -392,7 +392,7 @@ const BADGES = [
   }],
   ['RHYME', 'Rhyme', '🎶', 1872, 'Uncommon', c => {
     // Same 2+ digit substring appears twice WITHOUT overlapping (so "00" inside "000"
-    // does not count — that's why 455000 gets no Rhyme).
+    // does not count - that's why 455000 gets no Rhyme).
     for (let L = 2; L <= c.len - 1; L++)
       for (let i = 0; i + L <= c.len; i++)
         if (c.s.indexOf(c.s.slice(i, i + L), i + L) !== -1) return true;
@@ -510,7 +510,7 @@ const DESCRIPTIONS = {
   FIFTH_POWER: 'A perfect fifth power (n⁵).',
   JACKPOT_FIVE: 'Contains five 7s in a row.',
   POWER_OF_TWO: 'A power of 2 (2ⁿ).',
-  ROYAL_FLUSH: 'Contains 56789 — the highest possible straight.',
+  ROYAL_FLUSH: 'Contains 56789 - the highest possible straight.',
   BOOB_58008: 'Contains "58008" (spells BOOBS upside-down).',
   BOOB_80085: 'Contains "80085" (spells BOOBS).',
   PI_CONTAINS_5: 'Contains "31415".',
@@ -717,7 +717,7 @@ const PROBABILITIES = {
 
 // Format a percentage for display, keeping small values legible.
 function fmtProb(p) {
-  if (p === undefined) return '—';
+  if (p === undefined) return '-';
   if (p === 0) return '0%';
   if (p >= 1) return `${Number(p.toFixed(2))}%`;
   if (p >= 0.01) return `${Number(p.toFixed(3))}%`;
@@ -738,16 +738,16 @@ const SUPERSEDE_GROUPS = [
   ['DEEP_VOID_FIVE', 'DEEP_VOID_FOUR', 'DEEP_VOID_THREE', 'DEEP_VOID'], // contains 00000>0000>000>00
   ['CONTIGUOUS_BOAT', 'BOAT'], // Contiguous Full House supersedes Full House
   ['JACKPOT_SIX', 'JACKPOT_FIVE', 'JACKPOT_FOUR', 'JACKPOT'], // 7s in a row: 6>5>4>3
-  // Contiguous run tiers collapse to the highest — but Contiguous Pair is a base badge that
+  // Contiguous run tiers collapse to the highest - but Contiguous Pair is a base badge that
   // always scores (it's never in this group). Confirmed: 407777 keeps Contiguous Pair.
   ['CONTIGUOUS_SIXES', 'CONTIGUOUS_FIVES', 'CONTIGUOUS_QUADS', 'CONTIGUOUS_TRIPS'],
   ['QUADS', 'TRIPS'],      // Four of a Kind supersedes Three of a Kind
   ['MINI_ECHO', 'RHYME'],  // a Mini Echo (adjacent repeat) is a more specific Rhyme
-  // Single Digit is displayed but scores 0 — the exact digit badge (Two, Three…) implies it.
+  // Single Digit is displayed but scores 0 - the exact digit badge (Two, Three…) implies it.
   // Confirmed against prod: 2 = 119,610,065 (Single Digit's 10,000,010 is zeroed).
   ['DIGIT_ZERO', 'DIGIT_ONE', 'DIGIT_TWO', 'DIGIT_THREE', 'DIGIT_FOUR', 'DIGIT_FIVE',
     'DIGIT_SIX', 'DIGIT_SEVEN', 'DIGIT_EIGHT', 'DIGIT_NINE', 'ONE_DIGIT'],
-  // Perfect powers are one tier family — only the highest exponent earned scores; the rest
+  // Perfect powers are one tier family - only the highest exponent earned scores; the rest
   // display as 0. Confirmed via 0 (a perfect power of every exponent): only one 33,333,367
   // (the 19/17/13th tier) scores, the other 12 power badges are zeroed.
   ['NINETEENTH_POWER', 'SEVENTEENTH_POWER', 'THIRTEENTH_POWER', 'ELEVENTH_POWER', 'TENTH_POWER',
@@ -796,7 +796,7 @@ function compute(n) {
 // Worker request's CPU budget, so the analysis runs client-side in a Web Worker.
 // Rather than duplicate the 200+ badge rules, we GENERATE a self-contained ES
 // module from the live definitions via Function.prototype.toString(). Any edit to
-// a `test` function above automatically flows into this engine — no second copy.
+// a `test` function above automatically flows into this engine - no second copy.
 // ---------------------------------------------------------------------------
 
 function engineModuleSource() {
@@ -881,11 +881,11 @@ export { computeLean, BADGE_META };
 // ---------------------------------------------------------------------------
 // Analysis: client-side Web Worker + page controller.
 //
-// These two functions never run on the server — they are serialized with
+// These two functions never run on the server - they are serialized with
 // Function.prototype.toString() and shipped to the browser. The worker holds
 // the full 0..999,999 result cache (EP per number + a per-number badge bitmask)
 // so that re-filtering by length / badge is instant after the one-time sweep.
-// They must be self-contained (browser globals + args only — no module scope).
+// They must be self-contained (browser globals + args only - no module scope).
 // ---------------------------------------------------------------------------
 
 function analysisWorker() {
@@ -917,7 +917,7 @@ function analysisWorker() {
         const stride = Math.max(1, m.stride || 1);
         const lengths = (m.lengths && m.lengths.length ? m.lengths.slice() : [1, 2, 3, 4, 5, 6]).sort((a, b) => a - b);
         lastStride = stride; lastLengths = lengths; lastSampled6 = lengths.includes(6) && stride > 1;
-        // Only the 6-digit bucket (900k numbers) is ever sampled — lengths 1..5 total
+        // Only the 6-digit bucket (900k numbers) is ever sampled - lengths 1..5 total
         // just 100k, so they are always computed exactly. Sampling uses a hash of n,
         // NOT an arithmetic stride: a fixed stride only visits one residue class, which
         // wrecks every badge that depends on n mod d (Even/Odd/Prime/Eleven/last-digit).
@@ -968,7 +968,7 @@ function analysisWorker() {
         for (let k = 0; k < count; k++) {
           if (!matches(k, badges)) continue;
           // Each sampled 6-digit number stands in for `lastStride` real numbers, so weight
-          // its contribution accordingly — keeps the histogram true to the full 0..999,999.
+          // its contribution accordingly - keeps the histogram true to the full 0..999,999.
           const w = (lenArr[k] === 6 && lastStride > 1) ? lastStride : 1;
           const v = epArr[k];
           raw++; total += w; sum += v * w; if (v < mn) mn = v; if (v > mx) mx = v;
@@ -1040,7 +1040,7 @@ function analysisClient(WORKER_SRC) {
 
   // Length filter checkboxes (1..6 digits, all on). Changing the length set changes
   // WHICH numbers are computed (lengths 1..5 are only 100k total, so they cost almost
-  // nothing) — so a length change recomputes rather than just re-filtering.
+  // nothing) - so a length change recomputes rather than just re-filtering.
   for (let L = 1; L <= 6; L++) {
     const lab = document.createElement('label');
     lab.innerHTML = '<input type="checkbox" id="an-len-' + L + '" value="' + L + '" checked> ' + L + (L === 1 ? ' digit' : ' digits');
@@ -1121,8 +1121,8 @@ function analysisClient(WORKER_SRC) {
   function computedStatus(m) {
     const lenTxt = m.lengths.length === 6 ? 'all lengths' : 'length ' + m.lengths.join('/');
     let s = 'Analyzed ' + m.domainTrue.toLocaleString() + ' numbers (' + lenTxt + ')';
-    if (m.sampled6) s += ' — 6-digit sampled 1 in ' + m.stride + ' (' + m.count.toLocaleString() + ' scanned).';
-    else s += ' — every number.';
+    if (m.sampled6) s += ' - 6-digit sampled 1 in ' + m.stride + ' (' + m.count.toLocaleString() + ' scanned).';
+    else s += ' - every number.';
     return s;
   }
 
@@ -1143,10 +1143,10 @@ function analysisClient(WORKER_SRC) {
 
   function exportExamplesFile(m) {
     const lines = [];
-    lines.push('# RNGdle — example numbers for each badge');
+    lines.push('# RNGdle - example numbers for each badge');
     lines.push('# Columns: number, totalEP   (up to ' + (m.badges[0] ? Math.max(...m.badges.map(b => b.items.length)) : 0) + ' examples per badge)');
     lines.push('# Drawn from: ' + (m.lengths.length === 6 ? 'all lengths' : 'length ' + m.lengths.join('/')) +
-      (m.stride > 1 ? ', 6-digit sampled 1 in ' + m.stride + ' (some rare badges may have few/no examples — use Full resolution for complete coverage)' : ', every number'));
+      (m.stride > 1 ? ', 6-digit sampled 1 in ' + m.stride + ' (some rare badges may have few/no examples - use Full resolution for complete coverage)' : ', every number'));
     lines.push('');
     for (const b of m.badges) {
       lines.push('== ' + b.emoji + ' ' + b.label + ' (' + b.rarity + ') ==');
@@ -1206,7 +1206,7 @@ function analysisClient(WORKER_SRC) {
         svg += '<text x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '" fill="#868e96" font-size="10" text-anchor="end" transform="rotate(-45 ' + lx.toFixed(1) + ' ' + ly.toFixed(1) + ')">' + lab + '</text>';
       }
     });
-    svg += '<text x="' + (padL + plotW / 2) + '" y="' + (H - 4) + '" fill="#adb5bd" font-size="11" text-anchor="middle">Total EP (log scale) — bar height = count (log scale)</text>';
+    svg += '<text x="' + (padL + plotW / 2) + '" y="' + (H - 4) + '" fill="#adb5bd" font-size="11" text-anchor="middle">Total EP (log scale) - bar height = count (log scale)</text>';
     svg += '</svg>';
     chartEl.innerHTML = svg;
 
@@ -1229,7 +1229,7 @@ const RARITY_COLORS = {
   Rare: '#4895ef', Uncommon: '#52b788', Common: '#adb5bd',
 };
 
-// RNGdle Discord invite — where users should report discrepancies (warning banner).
+// RNGdle Discord invite - where users should report discrepancies (warning banner).
 const DISCORD_URL = 'https://discord.gg/kdD2P2xFY5';
 
 // Escape text for safe insertion into HTML (attribute values and text content).
@@ -1370,10 +1370,10 @@ function renderHTML(result, raw) {
 </style></head>
 <body><div class="wrap">
   <div class="warn" role="alert">
-    ⚠️ <strong>Heads up — this is full of assumptions.</strong> Many RNGdle badge rules are
+    ⚠️ <strong>Heads up - this is full of assumptions.</strong> Many RNGdle badge rules are
     ambiguous, so a lot of this calculator is my best guess and <em>may not match the live game</em>.
     Spotted a number that scores differently in-game? <a href="${esc(DISCORD_URL)}" target="_blank" rel="noopener">Ping me in the RNGdle Discord</a>
-    — and please include a <strong>link to the prod result</strong> so I can verify and fix it.
+    - and please include a <strong>link to the prod result</strong> so I can verify and fix it.
   </div>
   <h1>🎲 RNGdle EP Calculator</h1>
   <p class="tag">Enter a number from 0 to 999,999 to see its total EP and badges.</p>
