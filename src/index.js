@@ -1190,8 +1190,8 @@ function analysisClient(WORKER_SRC) {
     // y gridlines + labels at powers of ten
     for (let p = 1; p <= maxCount; p *= 10) {
       const y = yOf(p);
-      svg += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="#23262f"/>';
-      svg += '<text x="' + (padL - 6) + '" y="' + (y + 3).toFixed(1) + '" fill="#868e96" font-size="10" text-anchor="end">' + fmt(p) + '</text>';
+      svg += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="#24262d"/>';
+      svg += '<text x="' + (padL - 6) + '" y="' + (y + 3).toFixed(1) + '" fill="#8b8e97" font-size="10" text-anchor="end">' + fmt(p) + '</text>';
     }
     // bars
     const tickEvery = Math.ceil(nb / 16);
@@ -1199,17 +1199,17 @@ function analysisClient(WORKER_SRC) {
       const x = padL + i * bw, y = yOf(b.count), h = padT + plotH - y;
       const label = b.i === 0 ? '0 EP' : fmt(b.lo) + '–' + fmt(b.hi) + ' EP';
       const pct = (b.count / stats.total * 100);
-      const fill = b.i === 0 ? '#5c636a' : '#4895ef';
+      const fill = b.i === 0 ? '#4a4d55' : '#7aa2ff';
       svg += '<rect x="' + (x + 1).toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + Math.max(0, bw - 2).toFixed(1) +
         '" height="' + Math.max(0, h).toFixed(1) + '" fill="' + fill + '" rx="1">' +
         '<title>' + esc(label) + ': ' + Math.round(b.count).toLocaleString() + ' numbers (' + pct.toFixed(pct < 1 ? 2 : 1) + '%)</title></rect>';
       if (i % tickEvery === 0) {
         const lx = x + bw / 2, ly = padT + plotH + 12;
         const lab = b.i === 0 ? '0' : fmt(b.lo);
-        svg += '<text x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '" fill="#868e96" font-size="10" text-anchor="end" transform="rotate(-45 ' + lx.toFixed(1) + ' ' + ly.toFixed(1) + ')">' + lab + '</text>';
+        svg += '<text x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '" fill="#8b8e97" font-size="10" text-anchor="end" transform="rotate(-45 ' + lx.toFixed(1) + ' ' + ly.toFixed(1) + ')">' + lab + '</text>';
       }
     });
-    svg += '<text x="' + (padL + plotW / 2) + '" y="' + (H - 4) + '" fill="#adb5bd" font-size="11" text-anchor="middle">Total EP (log scale) - bar height = count (log scale)</text>';
+    svg += '<text x="' + (padL + plotW / 2) + '" y="' + (H - 4) + '" fill="#8b8e97" font-size="11" text-anchor="middle">Total EP (log scale) - bar height = count (log scale)</text>';
     svg += '</svg>';
     chartEl.innerHTML = svg;
 
@@ -1242,17 +1242,6 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-// Pick black or white text for legibility on a given hex background.
-function textColorFor(hex) {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
-  if (!m) return '#11131a';
-  const v = parseInt(m[1], 16);
-  const r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255;
-  // Relative luminance (sRGB-ish); bright backgrounds get dark text.
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return lum > 0.6 ? '#11131a' : '#fff';
-}
-
 function parseN(raw) {
   if (raw === null || raw === undefined || raw.trim() === '') return null;
   if (!/^\d+$/.test(raw.trim())) return NaN;
@@ -1269,11 +1258,12 @@ function renderHTML(result, raw) {
       const req = b.desc || 'No description.';
       const stat = `${b.rarity} · ${fmtProb(b.prob)} of all numbers earn this`;
       const tip = esc(`${req}\n${stat}`);
+      const zero = b.ep === 0 ? ' zero' : '';
       return `<tr>
          <td class="emoji">${b.emoji}</td>
-         <td><span class="badge-pill" style="background:${color};color:${textColorFor(color)}"
+         <td><span class="badge-pill" style="border-color:${color}"
                    tabindex="0" data-tip="${tip}" aria-label="${esc(b.label)}. ${tip}">${esc(b.label)}</span></td>
-         <td class="ep">${b.ep.toLocaleString()}</td>
+         <td class="ep${zero}">${b.ep.toLocaleString()}</td>
        </tr>`;
     }).join('');
     body = `
@@ -1296,89 +1286,116 @@ function renderHTML(result, raw) {
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RNGdle EP Calculator</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    --bg:#0b0c0e; --surface:#131419; --surface-2:#181a20; --border:#24262d; --border-2:#30333c;
+    --text:#e7e8ea; --muted:#8b8e97; --faint:#595c65; --accent:#7aa2ff; --accent-soft:#1a2336;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
   * { box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#11131a; color:#e9ecef; margin:0; padding:2rem 1rem; }
-  .wrap { max-width:760px; margin:0 auto; }
-  .warn { background:#2a210f; border:1px solid #6b4e16; border-left:4px solid #ffb703; color:#ffe2a8;
-    padding:.85rem 1.05rem; border-radius:10px; margin:0 0 1.5rem; font-size:.92rem; line-height:1.55; }
-  .warn strong { color:#ffd166; }
-  .warn a { color:#ffd166; font-weight:700; }
-  h1 { font-size:1.6rem; margin:0 0 .25rem; }
-  p.tag { color:#868e96; margin:0 0 1.5rem; }
-  form { display:flex; gap:.5rem; margin-bottom:1.5rem; }
-  input { flex:1; font-size:1.4rem; padding:.6rem .8rem; border-radius:10px; border:1px solid #2b2f3a; background:#1a1d27; color:#fff; }
-  button { font-size:1.1rem; padding:.6rem 1.4rem; border:0; border-radius:10px; background:#4895ef; color:#fff; cursor:pointer; font-weight:600; }
-  button:hover { background:#5aa0f2; }
-  .summary { text-align:center; margin-bottom:1.25rem; }
-  .big { font-size:3rem; font-weight:800; color:#ffd166; }
-  .big span { font-size:1.2rem; color:#868e96; }
-  .sub { color:#adb5bd; }
-  table { width:100%; border-collapse:collapse; background:#1a1d27; border-radius:12px; overflow:visible; }
-  th,td { text-align:left; padding:.55rem .8rem; border-bottom:1px solid #23262f; }
-  th { font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color:#868e96; }
-  td.emoji { font-size:1.3rem; width:2.2rem; }
-  td.ep { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; color:#ffd166; }
-  .badge-pill { position:relative; display:inline-block; padding:.18rem .6rem; border-radius:999px;
-    font-size:.85rem; font-weight:700; cursor:help; outline:none; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg);
+    color:var(--text); margin:0; padding:3.5rem 1.25rem 4rem; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:660px; margin:0 auto; }
+
+  .warn { border:1px solid var(--border); border-left:2px solid #c8922e; border-radius:8px;
+    color:var(--muted); padding:.8rem 1rem; margin:0 0 2.25rem; font-size:.84rem; line-height:1.6; }
+  .warn strong { color:var(--text); font-weight:600; }
+  .warn em { color:var(--text); font-style:normal; }
+  .warn a { color:var(--accent); text-decoration:none; }
+  .warn a:hover { text-decoration:underline; }
+
+  h1 { font-size:1.45rem; font-weight:600; letter-spacing:-.02em; margin:0 0 .3rem; }
+  p.tag { color:var(--muted); margin:0 0 2rem; font-size:.92rem; }
+
+  form { display:flex; gap:.5rem; margin-bottom:2rem; }
+  input { flex:1; font-size:1.05rem; padding:.65rem .8rem; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text); font-variant-numeric:tabular-nums; }
+  input::placeholder { color:var(--faint); }
+  input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  button { font-size:.92rem; padding:.65rem 1.1rem; border-radius:8px; cursor:pointer; font-weight:500;
+    border:1px solid var(--border-2); background:var(--surface-2); color:var(--text);
+    transition:background .12s, border-color .12s, opacity .12s; }
+  button:hover { background:#20232c; border-color:#3a3e49; }
+  form button { background:var(--text); color:#0b0c0e; border-color:var(--text); font-weight:600; }
+  form button:hover { background:#fff; border-color:#fff; }
+
+  .summary { margin-bottom:1.5rem; padding-bottom:1.4rem; border-bottom:1px solid var(--border); }
+  .big { font-family:var(--mono); font-size:2.3rem; font-weight:600; letter-spacing:-.03em; }
+  .big span { font-family:system-ui, sans-serif; font-size:.95rem; color:var(--muted); font-weight:500; margin-left:.3rem; letter-spacing:0; }
+  .sub { color:var(--muted); margin-top:.35rem; font-size:.92rem; }
+  .sub strong { color:var(--text); font-weight:600; font-variant-numeric:tabular-nums; }
+
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:.5rem .4rem; border-bottom:1px solid var(--border); }
+  th { font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; color:var(--faint); font-weight:600; }
+  th:last-child { text-align:right; }
+  tr:last-child td { border-bottom:0; }
+  td.emoji { font-size:1.15rem; width:1.8rem; text-align:center; }
+  td.ep { text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums; font-weight:500; white-space:nowrap; }
+  td.ep.zero { color:var(--faint); }
+
+  /* Outlined rarity pill: colored border, normal text. */
+  .badge-pill { position:relative; display:inline-block; padding:.1rem .55rem; border-radius:999px;
+    border:1px solid var(--border-2); color:var(--text); font-size:.8rem; font-weight:500; cursor:help; outline:none; }
+  .badge-pill:focus-visible { box-shadow:0 0 0 3px var(--accent-soft); }
   /* Hover/focus tooltip: requirement on line 1, rarity + probability on line 2. */
   .badge-pill::after, .badge-pill::before { opacity:0; pointer-events:none; transition:opacity .12s; position:absolute; z-index:10; }
   .badge-pill::after {
     content:attr(data-tip); white-space:pre-line; left:0; bottom:calc(100% + 8px);
     min-width:14rem; max-width:20rem; padding:.5rem .65rem; border-radius:8px;
-    background:#0a0c12; color:#e9ecef; border:1px solid #2b2f3a; box-shadow:0 6px 20px rgba(0,0,0,.5);
-    font-size:.78rem; font-weight:500; line-height:1.35; text-align:left; }
+    background:#06070a; color:var(--text); border:1px solid var(--border-2); box-shadow:0 8px 24px rgba(0,0,0,.6);
+    font-size:.76rem; font-weight:450; line-height:1.4; text-align:left; }
   .badge-pill::before {
-    content:""; left:1rem; bottom:calc(100% + 2px); border:6px solid transparent; border-top-color:#0a0c12; }
+    content:""; left:1rem; bottom:calc(100% + 3px); border:5px solid transparent; border-top-color:#06070a; }
   .badge-pill:hover::after, .badge-pill:hover::before,
   .badge-pill:focus::after, .badge-pill:focus::before { opacity:1; }
-  .none { text-align:center; color:#868e96; }
-  .error { color:#ff6b6b; }
-  footer { margin-top:2rem; color:#5c636a; font-size:.8rem; text-align:center; }
-  a { color:#4895ef; }
+  .none { text-align:center; color:var(--muted); padding:1rem; }
+  .error { color:#ff7a7a; font-size:.95rem; }
+  footer { margin-top:2.5rem; color:var(--faint); font-size:.8rem; }
+  footer code { color:var(--muted); font-family:var(--mono); }
+  a { color:var(--accent); }
 
   /* --- Analysis panel --- */
-  .an-bar { display:flex; justify-content:center; margin:-.5rem 0 1.5rem; }
-  #an-btn { background:#2b2f3a; }
-  #an-btn:hover { background:#3a3f4d; }
-  #analysis { background:#1a1d27; border:1px solid #23262f; border-radius:12px; padding:1rem 1.1rem 1.25rem; margin-bottom:1.5rem; }
-  #analysis h2 { font-size:1.1rem; margin:.1rem 0 .9rem; }
-  .an-controls { display:flex; flex-wrap:wrap; gap:1rem; margin-bottom:.9rem; }
-  .an-controls fieldset { border:1px solid #2b2f3a; border-radius:10px; padding:.5rem .7rem .65rem; margin:0; min-width:200px; flex:1; }
-  .an-controls legend { color:#868e96; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; padding:0 .3rem; }
-  #an-lengths { display:flex; flex-wrap:wrap; gap:.35rem .9rem; }
-  #an-lengths label, .an-badge { display:flex; align-items:center; gap:.35rem; font-size:.85rem; cursor:pointer; }
-  #an-badge-search { width:100%; font-size:.85rem; padding:.35rem .5rem; border-radius:8px; border:1px solid #2b2f3a; background:#11131a; color:#fff; margin-bottom:.4rem; }
-  .an-badge-list { max-height:150px; overflow:auto; display:flex; flex-direction:column; gap:.15rem; padding-right:.3rem; }
-  .an-badge { justify-content:flex-start; padding:.1rem .15rem; border-radius:6px; }
-  .an-badge:hover { background:#23262f; }
+  .an-bar { margin:2rem 0 1.5rem; }
+  #an-btn { width:100%; padding:.7rem; font-weight:500; }
+  #analysis { border:1px solid var(--border); border-radius:10px; padding:1.1rem 1.15rem 1.3rem; margin-bottom:1.5rem; }
+  #analysis h2 { font-size:1.05rem; font-weight:600; letter-spacing:-.01em; margin:0 0 1rem; }
+  .an-controls { display:flex; flex-wrap:wrap; gap:1rem; margin-bottom:1rem; }
+  .an-controls fieldset { border:1px solid var(--border); border-radius:8px; padding:.55rem .7rem .7rem; margin:0; min-width:200px; flex:1; }
+  .an-controls legend { color:var(--faint); font-size:.68rem; text-transform:uppercase; letter-spacing:.07em; padding:0 .35rem; font-weight:600; }
+  #an-lengths { display:flex; flex-wrap:wrap; gap:.4rem .9rem; }
+  #an-lengths label, .an-badge { display:flex; align-items:center; gap:.4rem; font-size:.85rem; cursor:pointer; }
+  #an-badge-search { width:100%; font-size:.85rem; padding:.4rem .55rem; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); margin-bottom:.45rem; }
+  #an-badge-search:focus { outline:none; border-color:var(--accent); }
+  .an-badge-list { max-height:150px; overflow:auto; display:flex; flex-direction:column; gap:.1rem; padding-right:.3rem; }
+  .an-badge { justify-content:flex-start; padding:.12rem .25rem; border-radius:5px; }
+  .an-badge:hover { background:var(--surface-2); }
   .an-badge span { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .an-badge em { color:#5c636a; font-style:normal; font-size:.72rem; }
-  .an-badge-sel { margin-top:.5rem; font-size:.78rem; color:#868e96; line-height:1.8; }
-  .an-chip { display:inline-block; background:#2b2f3a; color:#cdd3da; padding:.1rem .45rem; border-radius:999px; cursor:pointer; }
-  .an-chip:hover { background:#3a3f4d; color:#fff; }
-  .an-res { font-size:.85rem; padding:.35rem .5rem; border-radius:8px; border:1px solid #2b2f3a; background:#11131a; color:#fff; }
-  #an-status { color:#adb5bd; font-size:.85rem; min-height:1.2em; margin:.2rem 0 .6rem; }
-  #an-chart svg { background:#11131a; border-radius:10px; }
-  .an-empty { color:#868e96; text-align:center; padding:1.5rem; }
-  #an-stats { display:flex; flex-wrap:wrap; gap:.6rem; margin-top:.8rem; }
-  .an-stat { background:#11131a; border:1px solid #23262f; border-radius:10px; padding:.45rem .7rem; flex:1; min-width:110px; text-align:center; }
-  .an-stat span { display:block; color:#868e96; font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; }
-  .an-stat strong { color:#ffd166; font-size:1.1rem; font-variant-numeric:tabular-nums; }
-  .an-note { flex-basis:100%; color:#868e96; font-size:.75rem; margin:.2rem 0 0; }
+  .an-badge em { color:var(--faint); font-style:normal; font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; }
+  .an-badge-sel { margin-top:.55rem; font-size:.78rem; color:var(--muted); line-height:1.9; }
+  .an-chip { display:inline-block; border:1px solid var(--border-2); color:var(--text); padding:.08rem .5rem; border-radius:999px; cursor:pointer; font-size:.78rem; }
+  .an-chip:hover { border-color:#444a57; background:var(--surface-2); }
+  .an-res { font-size:.85rem; padding:.4rem .55rem; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); }
+  #an-status { color:var(--muted); font-size:.85rem; min-height:1.2em; margin:.3rem 0 .7rem; }
+  #an-chart svg { background:var(--bg); border:1px solid var(--border); border-radius:8px; }
+  .an-empty { color:var(--muted); text-align:center; padding:1.5rem; }
+  #an-stats { display:flex; flex-wrap:wrap; gap:.6rem; margin-top:.9rem; }
+  .an-stat { border:1px solid var(--border); border-radius:8px; padding:.5rem .7rem; flex:1; min-width:110px; }
+  .an-stat span { display:block; color:var(--faint); font-size:.66rem; text-transform:uppercase; letter-spacing:.06em; margin-bottom:.15rem; }
+  .an-stat strong { color:var(--text); font-size:1.05rem; font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; }
+  .an-note { flex-basis:100%; color:var(--muted); font-size:.75rem; margin:.3rem 0 0; }
   .an-actions { display:flex; flex-wrap:wrap; gap:.6rem; margin-top:1rem; }
-  .an-actions button { background:#2b2f3a; font-size:.9rem; padding:.5rem 1rem; }
-  .an-actions button:hover { background:#3a3f4d; }
+  .an-actions button { font-size:.85rem; padding:.5rem .9rem; }
   .an-actions button:disabled { opacity:.4; cursor:not-allowed; }
 </style></head>
 <body><div class="wrap">
   <div class="warn" role="alert">
-    ⚠️ <strong>Heads up - this is full of assumptions.</strong> Many RNGdle badge rules are
+    <strong>Heads up - this is full of assumptions.</strong> Many RNGdle badge rules are
     ambiguous, so a lot of this calculator is my best guess and <em>may not match the live game</em>.
     Spotted a number that scores differently in-game? <a href="${esc(DISCORD_URL)}" target="_blank" rel="noopener">Ping me in the RNGdle Discord</a>
     - and please include a <strong>link to the prod result</strong> so I can verify and fix it.
   </div>
-  <h1>🎲 RNGdle EP Calculator</h1>
+  <h1>RNGdle EP Calculator</h1>
   <p class="tag">Enter a number from 0 to 999,999 to see its total EP and badges.</p>
   <form method="GET" action="/">
     <input type="number" name="n" min="0" max="999999" step="1" placeholder="e.g. 696969"
@@ -1387,7 +1404,7 @@ function renderHTML(result, raw) {
   </form>
   ${body}
 
-  <div class="an-bar"><button type="button" id="an-btn">📊 Analyze all scores</button></div>
+  <div class="an-bar"><button type="button" id="an-btn">Analyze all scores</button></div>
 
   <section id="analysis" hidden>
     <h2>EP distribution across 0–999,999</h2>
@@ -1416,8 +1433,8 @@ function renderHTML(result, raw) {
     <div id="an-chart"></div>
     <div id="an-stats"></div>
     <div class="an-actions">
-      <button type="button" id="an-export-csv">⬇ Matching numbers (.csv)</button>
-      <button type="button" id="an-export-examples">⬇ Examples per badge (.txt)</button>
+      <button type="button" id="an-export-csv">Matching numbers (.csv)</button>
+      <button type="button" id="an-export-examples">Examples per badge (.txt)</button>
     </div>
   </section>
 
