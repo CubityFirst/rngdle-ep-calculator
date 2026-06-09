@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Wrangler / Cloudflare local state
+.wrangler/
+.dev.vars
+
+# Logs
+*.log
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+
+# Local reverse-engineering research (neocities/prod blobs, comparison harnesses).
+research/
+
+# Exported conversation transcripts
+/20??-??-??-*.txt
