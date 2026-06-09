@@ -875,7 +875,10 @@ function computeLean(n) {
 
 export { computeLean, BADGE_META };
 `;
-  return [namedSrc, constSrc, dataSrc, badgesSrc, supSrc, rest].join('\n');
+  // __name shim: when this Worker is bundled (esbuild keepNames), function source returned
+  // by toString() contains __name(fn,"fn") calls. That helper only exists in the bundled
+  // scope, so we redefine a no-op here for the browser module context. Harmless unbundled.
+  return ['var __name = (f) => f;', namedSrc, constSrc, dataSrc, badgesSrc, supSrc, rest].join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -1421,7 +1424,11 @@ function renderHTML(result, raw) {
   <footer>JSON API: <code>/api?n=696969</code></footer>
 </div>
 <script type="module">
-const __WORKER_SRC = ${JSON.stringify('(' + analysisWorker.toString() + ')()')};
+// __name no-op shim: when bundled (esbuild keepNames), the serialized client/worker source
+// below references a __name() helper that only exists in the bundled Worker scope. Redefine
+// it here (page context) and inside the worker blob so the source runs standalone.
+var __name = (f) => f;
+const __WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + analysisWorker.toString() + ')()')};
 (${analysisClient.toString()})(__WORKER_SRC);
 </script>
 </body></html>`;
