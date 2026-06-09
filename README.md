@@ -45,70 +45,87 @@ Web Worker (the work is far past a single Worker request's CPU budget) and plots
 For an input `n`, every `test` runs against a precomputed context (digit array,
 counts, sum, product, substring helper, etc.); matches are summed into `totalEP`.
 
-## ⚠️ Assumptions (please verify against the live game)
+## Rules (verified at full parity with prod)
 
-Many badge rules are described in prose in the CSV and are ambiguous. These are the
-judgment calls I made - if any disagree with the real game, tell me the badge and
-the intended rule and I'll fix the single `test` function.
+The badge `test` functions and the `FAMILIES` map were reconciled against the live game's
+own bundled scoring engine (scraped from rngdle.com) and now match it **exactly**: every
+number in `0..1,000,000` produces the identical total EP (see `test/full-parity.mjs`, which
+checks all 1,000,001 numbers against a faithful reconstruction of prod's scorer in
+`test/prod-scorer.mjs`). The consecutive / sequence / contiguous-pair badges call helpers
+transcribed verbatim from prod (the `p*` functions in `src/index.js`). Notable rules worth
+calling out (all confirmed against prod):
 
 - **Number format:** the number is its plain decimal string with no leading zeros
   (e.g. `42` → `"42"`, `0` → `"0"`).
-- **Tier supersession:** some badges are nested tiers of the same idea - earning a higher
-  tier implies the lower ones, so only the **highest earned tier scores EP**; lower tiers
-  are still displayed but score **0**. Handled via `SUPERSEDE_GROUPS` in `src/index.js`.
-  Currently applied to (confirmed against prod):
-  - **Contiguous Pair → Pair** (`634700` = 18,194)
-  - **Pi: exact Pi → Slice (5) → Slice (4) → Slice (3)**
-  - **E: exact E → Slice (5) → Slice (4) → Slice (3)** (same structure as Pi)
-  - **Deep Void (5) → (4) → (3) → Deep Void** and **Contiguous Full House → Full House**
-    (`455000` = 1,188,838)
-  - **Jackpot Six → Five → Four → Jackpot** (7s in a row)
-  - **Contiguous Sixes → Fives → Quads → Trips** - note **Contiguous Pair is excluded**:
-    it's a base badge that always scores, even with a longer run present
-  - **Four of a Kind → Three of a Kind**
-  - **Mini Echo → Rhyme** (a mini echo is a more specific repeat) - all confirmed by
-    `407777` = 409,497
-  - **Perfect powers** (19th → 17th → … → Cube → Square) - only the highest exponent earned
-    scores; confirmed by `0` = 139,927,162 (a perfect power of every exponent)
-  - **Exact digit → Single Digit** (Two/Three/… supersedes Single Digit), confirmed by `2`
+- **Family supersession:** the live game tags each badge with a `family`, and within a
+  family only the **single highest-EP earned badge scores**; the rest are still displayed
+  but score **0**. The full family map (35 families / 138 badges) is mirrored verbatim from
+  prod's `BADGE_DEFINITIONS` as `FAMILIES` in `src/index.js`; the other 65 badges are
+  standalone and always score. This was extracted from the live JS, so it matches prod
+  exactly (the per-number EP totals across the whole range now diverge from prod only on
+  badge *membership* rules, not on supersession). Notable families:
+  - **PAIRS** - the whole pair ladder collapses: `Framed/Two/Three Pair`, their contiguous
+    variants, `Contiguous Pair`, and `Pair`. So `6161` earns Pair + Two Pair but only Two
+    Pair (447) scores. A lone pair (e.g. `5051`) still scores 120 because it's the only
+    pair-family badge present (and `407777` keeps Contiguous Pair = 249 for the same reason).
+  - **POWER** - all 13 perfect-power badges. The top three (13th/17th/19th) **tie** at EP
+    33,333,367, and prod keeps the **first** (13th), so the 13th is what scores - not the
+    highest exponent. Confirmed by `0` = 139,927,162.
+  - **PI / E** - `exact → Slice (5) → (4) → (3)`. **VOID_DEPTH** - `Deep Void (5)…(3) → Deep
+    Void`. **JACKPOT** - `exact/Six/Five/Four → Jackpot`. **CONTIGUOUS_RUN** -
+    `Sixes → Fives → Quads → Trips` (Contiguous Pair lives in PAIRS, not here).
+    **OF_A_KIND** - `Framed Triple/Quads → Trips`. **REPEAT** - `Mini Echo → Rhyme`.
+    **SINGLE_DIGIT** - the exact digit (Two/Three/…) supersedes `Single Digit` (`2`).
+    Plus thematic exact/base pairs: `NICE`, `DEVIL`, `LEET`, `HELL`, `BOOB`, `BOTANIST`,
+    `EMERGENCY`, `SIXTY_SEVEN`, `STRAIGHT`, `BOOKENDS`, `CALENDAR`, and more - see `FAMILIES`.
 
-  Note: "ends in zeros" is NOT a supersession tier - `Millennium` (ends 000) and
-  `Century` (ends 00) both score in full, confirmed by `455000`. Likewise some "base"
-  badges (Contiguous Pair, Lucky Seven) keep scoring even when a stronger badge implies
-  them - only the families listed above collapse.
-- **A pair means a digit appearing exactly twice.** A triple/quad is not counted as a
-  "pair", so `455000` (5×2, 0×3) is a Full House, not Two Pair. Applies to **Two Pair**,
-  **Three Pair**, and the contiguous pair-count badges (run-length based).
+  Note: "ends in zeros" is NOT a family - `Millennium` (ends 000) and `Century` (ends 00)
+  both score in full, confirmed by `455000`. Standalone badges (e.g. Lucky Seven) always
+  score even when a stronger badge implies them - only members of a shared family collapse.
+- **Pair / Two Pair / Three Pair** = a digit appearing **exactly twice**; a triple/quad is
+  not a pair, so `455000` (5×2, 0×3) is a Full House, not Two Pair. **Contiguous Two/Three
+  Pair** = two/three digits that each occur exactly twice *and adjacently* (`dd`), with the
+  `dd` blocks themselves adjacent (`ddee` / `ddeeff`) - so `112211` is **not** a contiguous
+  two-pair (digit 1 occurs four times, not twice).
 - **Rhyme** needs the repeated 2+ digit substring to appear **non-overlapping**, so the
   `00` inside `000` does not by itself make a rhyme.
 - **Perfect powers** (square, cube, 4th…19th power): **`0` and `1` both count** as perfect
   powers of *every* exponent (`0 = 0ⁿ`, `1 = 1ⁿ`) and earn all 13 power badges - but they
-  form **one tier family**, so only the highest exponent scores (the rest display as 0).
-  `0` is confirmed against prod (`0` = **139,927,162**); **`1` is assumed by request and not
-  yet prod-verified**. (`1` is still not a *Power of Two/Three*, which require exponent ≥ 1.)
-- **Power of 2 / Power of 3:** exponent **≥ 1**, so `1` does **not** count.
+  form **one family**, so only the highest-EP member scores (the 13th-power tier; the rest
+  display as 0). Confirmed against prod: `0` = **139,927,162**, `1` = **162,575,449**.
+- **Power of 2 / Power of 3:** `1` **does** count (`1 = 2⁰ = 3⁰`) - prod uses
+  `n>0 && (n&(n-1))===0` for powers of two and a multiply-up loop for powers of three.
 - **Factorial** includes `1` (= 0! and 1!). **Fibonacci** and **Pronic** include `0`.
 - **Single-digit numbers:** prod *does* award the badges that are simply true of a one-char
   string - **Palindrome, Flush, Heterogeneous** - but *not* the ones that imply repetition or
   two positions (Homogeneous, Equilibrium). Confirmed against prod: `2` = **119,610,065**.
   Also, **Single Digit** is displayed but scores **0**: the exact digit badge (Two, Three…)
-  supersedes it (see `SUPERSEDE_GROUPS`). Single digits still get digit-set/value badges
+  supersedes it (see `FAMILIES`). Single digits still get digit-set/value badges
   (Void, Prime, Low Ball…).
-- **Sequence (3/4/6)** = contiguous **ascending** run only. **Straight (5)** =
-  ascending *or* descending (as the CSV explicitly states for that one).
-- **"Consecutive Numbers" (pair) badges** require at least one **multi-digit** part:
-  `1213` (12, 13) counts, but a single-digit run like `12` does not - single-digit
-  consecutive pairs are covered by **Neighbors** instead. (Confirmed against the live
-  game: `3125` = 6,271,772 EP.) Triple/quad consecutive badges still allow single-digit
-  splits (e.g. `1234`), since 4 multi-digit consecutive numbers won't fit in 6 digits.
-- **Spy / Even Spacing / arithmetic** badges require ≥ 2 / ≥ 3 digits respectively.
-- **Echo** requires even length ≥ 4 (so `"11"` is treated as a Pair, not an Echo).
+- **Sequence (3/4/6)** = a contiguous run of consecutive digits, **ascending OR descending**
+  (e.g. `654321` earns Sequence (6)). **Straight (5)** likewise ascending or descending.
+- **"Consecutive Numbers" badges** (pair/triple/quad) require at least one **multi-digit**
+  part, so a single-digit run like `1234` is a *Sequence*, **not** "4 Consecutive Numbers".
+  The variants differ by coverage: **Exact** = the whole number splits into N consecutive
+  integers; **Contains** = N adjacent consecutive substrings that do *not* span the whole
+  number (so `1213`=12,13 is Exact-only; `91011`=9,10,11 is Contains); **Scrambled** = the
+  whole number splits into N consecutive integers but out of order. Confirmed: `3125` =
+  6,271,772.
+- **Neighbors** = two **positionally adjacent** digits whose *values* differ by 1
+  (e.g. `…34…`), not any two digits anywhere.
+- **Spy** = digit sum equals digit product, excluding only `1` and `2`; so single digits
+  `0` and `3`–`9` **are** spies (`5`: 5 = 5), but `1` and `2` are not.
+- **Even Spacing / arithmetic** badges require ≥ 3 digits.
+- **Echo** = even length ≥ 2 with the first half equal to the second, so `"11"` **is** an
+  Echo (as well as a Pair - different families, both score).
+- **Balanced** requires **even length** (first-half digit-sum = second-half). **Firefly** /
+  **Hopscotch (Double Hop)** / **Hills** / **Zipper** match prod's exact length and
+  distinct-digit guards (see the `test` functions).
 - **Divisible by Three** = every *digit* ∈ {0,3,6,9} (per the CSV wording), not
   "number divisible by 3".
 - **Framed / consecutive-split** badges disallow leading-zero parts (except `"0"`).
 - `0` is **Even** but does **not** earn the other modular badges (Eleven, Dozen, Lucky
   Seven Div) - prod requires `n > 0` for those even though `0 % k === 0`. Harshad also
-  excludes it (digit sum 0). `0` *does* earn **Spy** (sum 0 = product 0), unlike the other
-  single digits. All confirmed against prod: `0` = 139,927,162.
+  excludes it (digit sum 0). All confirmed against prod: `0` = 139,927,162.
 
 Edit any `test` in `src/index.js` to change behavior - each is one self-contained line.

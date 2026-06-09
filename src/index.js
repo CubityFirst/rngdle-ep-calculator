@@ -200,6 +200,125 @@ function strobogrammatic(s) {
 }
 
 // ---------------------------------------------------------------------------
+// Prod-ported helpers: transcribed (faithful semantics) from the live game's
+// BADGE_DEFINITIONS util module so the consecutive / sequence / contiguous-pair
+// badges match rngdle.com byte-for-byte. Do not "simplify" without re-checking
+// parity (test/divergence.mjs). These operate on the raw digit string.
+// ---------------------------------------------------------------------------
+function pLeadingZero(s) { return s.length > 1 && s[0] === '0'; }
+function pMultiPart(parts) { return parts.some(p => p.length >= 2); }
+function pConsecSet(nums) { const t = [...nums].sort((a, b) => a - b); for (let i = 1; i < t.length; i++) if (t[i] - t[i - 1] !== 1) return false; return true; }
+function pDigitCounts(s) { const m = new Map(); for (const ch of s) m.set(ch, (m.get(ch) ?? 0) + 1); return m; }
+function pContig(s, digit, count) { return s.includes(digit.repeat(count)); }
+function pOrdered(nums) { if (nums.length < 2) return true; let inc = true, dec = true; for (let i = 1; i < nums.length; i++) { if (nums[i] <= nums[i - 1]) inc = false; if (nums[i] >= nums[i - 1]) dec = false; } return inc || dec; }
+function pHasSequence(s, len, strictAsc = true) {
+  if (s.length < len || len <= 0) return false;
+  for (let i = 0; i <= s.length - len; i++) {
+    const a = s.charCodeAt(i);
+    if (strictAsc) {
+      let ok = true; for (let k = 1; k < len; k++) if (s.charCodeAt(i + k) !== a + k) { ok = false; break; }
+      if (ok) return true;
+    } else {
+      const dir = s.charCodeAt(i + 1) - a;
+      if (dir === 1 || dir === -1) { let ok = true; for (let k = 1; k < len; k++) if (s.charCodeAt(i + k) !== a + k * dir) { ok = false; break; } if (ok) return true; }
+    }
+  }
+  return false;
+}
+function pPairExact(s) {
+  for (let t = 1; t < s.length; t++) {
+    const i = s.slice(0, t), r = s.slice(t);
+    if (pLeadingZero(i) || pLeadingZero(r) || !pMultiPart([i, r])) continue;
+    const a = parseInt(i, 10), b = parseInt(r, 10);
+    if (Math.abs(a - b) === 1) return { numbers: [a, b], splits: [0, t] };
+  }
+  return null;
+}
+function pTripleExact(s) {
+  for (let t = 1; t < s.length - 1; t++) for (let i = t + 1; i < s.length; i++) {
+    const parts = [s.slice(0, t), s.slice(t, i), s.slice(i)];
+    if (parts.some(pLeadingZero) || !pMultiPart(parts)) continue;
+    const nums = parts.map(p => parseInt(p, 10));
+    if (pConsecSet(nums)) return { numbers: nums, splits: [0, t, i] };
+  }
+  return null;
+}
+function pQuadExact(s) {
+  for (let t = 1; t < s.length - 2; t++) for (let i = t + 1; i < s.length - 1; i++) for (let r = i + 1; r < s.length; r++) {
+    const parts = [s.slice(0, t), s.slice(t, i), s.slice(i, r), s.slice(r)];
+    if (parts.some(pLeadingZero) || !pMultiPart(parts)) continue;
+    const nums = parts.map(p => parseInt(p, 10));
+    if (pConsecSet(nums)) return { numbers: nums, splits: [0, t, i, r] };
+  }
+  return null;
+}
+function pPairAdjacent(s) {
+  for (let t = 0; t < s.length; t++) for (let i = 1; i <= s.length - t - 1; i++) {
+    const r = s.slice(t, t + i); if (pLeadingZero(r)) continue;
+    const a = parseInt(r, 10);
+    for (const v of [a + 1, a - 1]) {
+      if (v < 0) continue;
+      const ns = v.toString(), o = t + i + ns.length; if (o > s.length) continue;
+      const seg = s.slice(t + i, o);
+      if (seg === ns && pMultiPart([r, seg])) { if (t === 0 && o === s.length) continue; return { numbers: [a, v], splits: [t, t + i], start: t }; }
+    }
+  }
+  return null;
+}
+function pPairNearby(s) {
+  const subs = [];
+  for (let i = 0; i < s.length; i++) for (let r = 1; r <= s.length - i; r++) { const a = s.slice(i, i + r); if (!pLeadingZero(a)) subs.push({ value: parseInt(a, 10), start: i, end: i + r, str: a }); }
+  for (let e = 0; e < subs.length; e++) for (let i = e + 1; i < subs.length; i++) {
+    const r = subs[e], a = subs[i];
+    if (Math.abs(r.value - a.value) === 1 && pMultiPart([r.str, a.str]) &&
+        ((!(r.end > a.start) && !(a.end > r.start)) || r.end <= a.start || a.end <= r.start) &&
+        r.end !== a.start && a.end !== r.start) return { a: r, b: a };
+  }
+  return null;
+}
+function pNAdjacentBuild(s, start, firstLen, firstVal, dir, count) {
+  const numbers = [firstVal], splits = [start]; let cursor = start + firstLen; const parts = [s.slice(start, start + firstLen)];
+  for (let k = 1; k < count; k++) {
+    const v = firstVal + k * dir; if (v < 0) return null;
+    const vs = v.toString(); if (cursor + vs.length > s.length) return null;
+    const seg = s.slice(cursor, cursor + vs.length); if (seg !== vs) return null;
+    numbers.push(v); splits.push(cursor); parts.push(seg); cursor += vs.length;
+  }
+  return pMultiPart(parts) ? { numbers, splits, start, end: cursor } : null;
+}
+function pNAdjacentAt(s, count, start) {
+  if (count < 2) return null;
+  for (let len = 1; len <= s.length - start - (count - 1); len++) {
+    const part = s.slice(start, start + len); if (pLeadingZero(part)) continue;
+    const val = parseInt(part, 10);
+    const up = pNAdjacentBuild(s, start, len, val, 1, count); if (up) return up;
+    const down = pNAdjacentBuild(s, start, len, val, -1, count); if (down) return down;
+  }
+  return null;
+}
+function pNAdjacent(s, count) {
+  for (let i = 0; i < s.length; i++) {
+    const r = pNAdjacentAt(s, count, i);
+    if (r) { if (r.start === 0 && r.end === s.length) continue; return r; }
+  }
+  return null;
+}
+// Start indices of "contiguous pairs": a digit that occurs EXACTLY twice in the whole
+// number, with both occurrences adjacent ("dd"). Contiguous Two/Three Pair then look for
+// 2 or 3 of these starting exactly 2 apart (ddee / ddeeff).
+function pContigPairStarts(s) {
+  const counts = pDigitCounts(s);
+  const starts = [];
+  for (const [digit, n] of counts.entries()) {
+    if (n === 2 && pContig(s, digit, 2)) {
+      for (let t = 0; t < s.length - 1; t++) if (s[t] === digit && s[t + 1] === digit) { starts.push(t); break; }
+    }
+  }
+  starts.sort((a, b) => a - b);
+  return starts;
+}
+
+// ---------------------------------------------------------------------------
 // Badge definitions: [id, label, emoji, ep, rarity, test(c)]
 // c = { n, s, len, d, counts, distinct, sum, prod, maxCount, has(sub), cnt(digit), withCount(k) }
 // ---------------------------------------------------------------------------
@@ -248,22 +367,22 @@ const BADGES = [
   ['ELEVENTH_POWER', '11th Power', '🕚', 25000025, 'Mythic', c => isPerfectPower(c.n, 11)],
   ['PI', 'Pi', '🥧', 25000025, 'Mythic', c => [314, 3141, 31415, 314159].includes(c.n)],
   ['E', "Euler's Number", '📈', 25000025, 'Mythic', c => [271, 2718, 27182, 271828].includes(c.n)],
-  ['CONSEC_QUAD_EXACT', '4 Consecutive Numbers', '⛓️', 25000025, 'Mythic', c => consecAsc(c.s, 4)],
+  ['CONSEC_QUAD_EXACT', '4 Consecutive Numbers', '⛓️', 25000025, 'Mythic', c => { const r = pQuadExact(c.s); return !!r && pOrdered(r.numbers); }],
   ['NINTH_POWER', '9th Power', '☁️', 20000020, 'Mythic', c => isPerfectPower(c.n, 9)],
   ['EIGHTH_POWER', '8th Power', '🎱', 16666683, 'Mythic', c => isPerfectPower(c.n, 8)],
   ['SEVENTH_POWER', '7th Power', '🌈', 12500013, 'Mythic', c => isPerfectPower(c.n, 7)],
   ['FACTORIAL', 'Factorial', '❗', 11111122, 'Mythic', c => FACTORIALS.has(c.n)],
   ['HELLO', 'Hello', '👋', 11111122, 'Mythic', c => c.has('07734')],
-  ['SEQUENCE_6', 'Sequence (6)', '🔢', 11111122, 'Mythic', c => seqAsc(c.d, 6)],
+  ['SEQUENCE_6', 'Sequence (6)', '🔢', 11111122, 'Mythic', c => pHasSequence(c.s, 6, false)],
   ['CONTIGUOUS_SIXES', 'Contiguous Sixes', '➖➖➖➖', 10000010, 'Mythic', c => /(\d)\1{5}/.test(c.s)],
   ['DEEP_VOID_FIVE', 'Deep Void (5)', '⚫', 10000010, 'Mythic', c => c.has('00000')],
   ['ONE_DIGIT', 'Single Digit', '☝️', 10000010, 'Mythic', c => c.len === 1],
   ['QUINT_NINE', 'Quint Nine', '🥳', 10000010, 'Mythic', c => c.s.endsWith('99999')],
   ['SIXTH_POWER', '6th Power', '🎲', 9090918, 'Anomaly', c => isPerfectPower(c.n, 6)],
-  ['POWER_OF_THREE', 'Power of Three', '🔺', 7692315, 'Anomaly', c => isPowerOf(c.n, 3)],
+  ['POWER_OF_THREE', 'Power of Three', '🔺', 7692315, 'Anomaly', c => { if (c.n <= 0) return false; let v = 1; while (v < c.n) v *= 3; return v === c.n; }], // prod: 1 (=3^0) counts
   ['FIFTH_POWER', '5th Power', '🖐️', 6250006, 'Anomaly', c => isPerfectPower(c.n, 5)],
   ['JACKPOT_FIVE', 'Jackpot Five', '💰💰💰', 5263163, 'Anomaly', c => c.has('77777')],
-  ['POWER_OF_TWO', 'Power of Two', '💾', 5000005, 'Anomaly', c => isPowerOf(c.n, 2)],
+  ['POWER_OF_TWO', 'Power of Two', '💾', 5000005, 'Anomaly', c => c.n > 0 && (c.n & (c.n - 1)) === 0], // prod: 1 (=2^0) counts
   ['ROYAL_FLUSH', 'Royal Flush', '👑', 5000005, 'Anomaly', c => c.has('56789')],
   ['BOOB_58008', '58008', '🔠', 5000005, 'Anomaly', c => c.has('58008')],
   ['BOOB_80085', '80085', '🅱️', 5000005, 'Anomaly', c => c.has('80085')],
@@ -273,22 +392,22 @@ const BADGES = [
   ['FIBONACCI', 'Fibonacci Number', '🐚', 3333337, 'Anomaly', c => FIBS.has(c.n)],
   ['FOURTH_POWER', '4th Power', '📦', 3125003, 'Anomaly', c => isPerfectPower(c.n, 4)],
   ['WATERFALL', 'Waterfall', '🚿', 2857146, 'Anomaly', c => consecDec(c.d)],
-  ['CONSEC_QUAD_CONTAINS', '4 Consecutive Numbers (Contains)', '🔗', 2631582, 'Anomaly', c => containsConsec(c.s, 4)],
-  ['CONSEC_QUAD_SCRAMBLED', '4 Consecutive Numbers (Scrambled)', '🔀', 2272730, 'Anomaly', c => consecScrambled(c.s, 4)],
+  ['CONSEC_QUAD_CONTAINS', '4 Consecutive Numbers (Contains)', '🔗', 2631582, 'Anomaly', c => pNAdjacent(c.s, 4) !== null],
+  ['CONSEC_QUAD_SCRAMBLED', '4 Consecutive Numbers (Scrambled)', '🔀', 2272730, 'Anomaly', c => { const r = pQuadExact(c.s); return !!r && !pOrdered(r.numbers); }],
   ['HOMOGENEOUS', 'Homogeneous', '🥛', 2222224, 'Anomaly', c => c.len >= 2 && c.distinct === 1],
   ['BINARY_SOUL', 'Binary Soul', '🤖', 1538463, 'Anomaly', c => /^[01]+$/.test(c.s)],
   ['STRAIGHT_FLUSH', 'Straight Flush', '🃏', 1449277, 'Anomaly', c => c.has('02468') || c.has('13579') || c.has('86420') || c.has('97531')],
   ['TWO_DIGITS', 'Two Digits', '✌️', 1111112, 'Anomaly', c => c.len === 2],
   // sum === product. Excludes single digits (1..9 are trivially true) but prod DOES
   // award it to 0 (sum 0 = product 0), so 0 is allowed through. Confirmed via 0 vs 2.
-  ['SPY', 'Spy Number', '🕵️', 1030929, 'Anomaly', c => (c.len >= 2 || c.n === 0) && c.sum === c.prod],
+  ['SPY', 'Spy Number', '🕵️', 1030929, 'Anomaly', c => c.n !== 1 && c.n !== 2 && c.sum === c.prod], // prod excludes only 1 and 2
   ['QUAD_NINE', 'Quad Nine', '🎊', 1000001, 'Anomaly', c => c.s.endsWith('9999')],
   ['SEMI_EPOCH', 'Semi-Epoch', '🗿', 1000001, 'Anomaly', c => c.s.endsWith('5000')],
   ['CUBE', '3rd Power', '🧊', 990100, 'Anomaly', c => isPerfectPower(c.n, 3)],
   ['EVEN_SPACING', 'Even Spacing', '📏', 862070, 'Anomaly', c => arithmetic(c.d)],
 
   // --- Epic ---
-  ['CONSEC_TRIPLE_EXACT', '3 Consecutive Numbers', '⛓️', 555556, 'Epic', c => consecAsc(c.s, 3)],
+  ['CONSEC_TRIPLE_EXACT', '3 Consecutive Numbers', '⛓️', 555556, 'Epic', c => { const r = pTripleExact(c.s); return !!r && pOrdered(r.numbers); }],
   ['CONTIGUOUS_FIVES', 'Contiguous Fives', '➖➖➖', 552487, 'Epic', c => /(\d)\1{4}/.test(c.s)],
   ['DEEP_VOID_FOUR', 'Deep Void (4)', '🌌', 552487, 'Epic', c => c.has('0000')],
   ['STROBOGRAMMATIC', 'Strobogrammatic', '🙃', 502513, 'Epic', c => strobogrammatic(c.s)],
@@ -303,16 +422,16 @@ const BADGES = [
   ['BIG_BROTHER', 'Big Brother', '👁️', 333334, 'Epic', c => c.has('1984')],
   ['PI_CONTAINS_4', 'Pi Slice (4)', '🥧', 333334, 'Epic', c => c.has('3141')],
   ['E_CONTAINS_4', 'E Slice (4)', '📈', 333334, 'Epic', c => c.has('2718')],
-  ['CONSEC_TRIPLE_SCRAMBLED', '3 Consecutive Numbers (Scrambled)', '🔀', 277778, 'Epic', c => consecScrambled(c.s, 3)],
-  ['ZIPPER', 'Zipper', '🤐', 246914, 'Epic', c => c.len >= 3 && c.distinct === 2 && [...c.s].every((ch, i) => ch === c.s[i % 2]) && c.s[0] !== c.s[1]],
+  ['CONSEC_TRIPLE_SCRAMBLED', '3 Consecutive Numbers (Scrambled)', '🔀', 277778, 'Epic', c => { const r = pTripleExact(c.s); return !!r && !pOrdered(r.numbers); }],
+  ['ZIPPER', 'Zipper', '🤐', 246914, 'Epic', c => c.len >= 2 && c.distinct === 2 && c.d.every((x, i) => i === 0 || x !== c.d[i - 1])],
   ['ASCENSION', 'Ascension', '📈', 219298, 'Epic', c => strictInc(c.d)],
-  ['CONSEC_TRIPLE_CONTAINS', '3 Consecutive Numbers (Contains)', '🔗', 157978, 'Epic', c => containsConsec(c.s, 3)],
-  ['CONTIGUOUS_THREE_PAIR', 'Contiguous Three Pair', '👨‍👩‍👧‍👦👯', 154321, 'Epic', c => { for (let i = 0; i + 2 < c.runs.length; i++) if (c.runs[i] === 2 && c.runs[i + 1] === 2 && c.runs[i + 2] === 2) return true; return false; }],
+  ['CONSEC_TRIPLE_CONTAINS', '3 Consecutive Numbers (Contains)', '🔗', 157978, 'Epic', c => pNAdjacent(c.s, 3) !== null],
+  ['CONTIGUOUS_THREE_PAIR', 'Contiguous Three Pair', '👨‍👩‍👧‍👦👯', 154321, 'Epic', c => { const a = pContigPairStarts(c.s); for (let i = 0; i < a.length - 2; i++) if (a[i] + 2 === a[i + 1] && a[i + 1] + 2 === a[i + 2]) return true; return false; }],
   ['FRAMED_PAIR', 'Framed Pair', '🖼️', 137174, 'Epic', c => c.len === 4 && c.d[1] === c.d[2] && c.d[0] !== c.d[1] && c.d[3] !== c.d[1]],
   ['FRAMED_TRIPLE', 'Framed Triple', '🖼️🖼️', 137174, 'Epic', c => c.len === 5 && c.d[1] === c.d[2] && c.d[2] === c.d[3] && c.d[0] !== c.d[1] && c.d[4] !== c.d[1]],
   ['DECAY', 'Decay', '📉', 119474, 'Epic', c => strictDec(c.d)],
   ['THREE_DIGITS', 'Three Digits', '🤟', 111111, 'Epic', c => c.len === 3],
-  ['ECHO', 'Echo', '📣', 100100, 'Epic', c => c.len >= 4 && c.len % 2 === 0 && c.s.slice(0, c.len / 2) === c.s.slice(c.len / 2)],
+  ['ECHO', 'Echo', '📣', 100100, 'Epic', c => c.len >= 2 && c.len % 2 === 0 && c.s.slice(0, c.len / 2) === c.s.slice(c.len / 2)],
   ['MILLENNIUM', 'Millennium', '🗓️', 100000, 'Epic', c => c.s.endsWith('000')],
   ['PRONIC', 'Pronic Number', '🧮', 100000, 'Epic', c => PRONICS.has(c.n)],
   ['TRIPLE_NINE', 'Triple Nine', '🎉', 100000, 'Epic', c => c.s.endsWith('999')],
@@ -321,11 +440,10 @@ const BADGES = [
   ['SQUARE', '2nd Power', '🟦', 99900, 'Epic', c => isPerfectPower(c.n, 2)],
   ['EVEN_SPACING_ABS', 'Even Spacing (Absolute)', '📐', 90992, 'Epic', c => absArith(c.d)],
   ['FIREFLY', 'Firefly', '🪲', 82237, 'Epic', c => {
-    if (c.len < 3 || c.distinct !== 2) return false;
-    const cs = Object.values(c.counts).sort((a, b) => a - b);
-    return cs[0] === 1 && cs[1] === c.len - 1;
+    if (c.len < 4 || c.distinct !== 2) return false; // prod requires length >= 4
+    return Object.values(c.counts).some(v => v === 1); // one digit appears exactly once
   }],
-  ['CONSEC_PAIR_EXACT', '2 Consecutive Numbers', '🔗', 50505, 'Epic', c => consecAsc(c.s, 2, true)],
+  ['CONSEC_PAIR_EXACT', '2 Consecutive Numbers', '🔗', 50505, 'Epic', c => pPairExact(c.s) !== null],
   ['PALINDROME', 'Palindrome', '🪞', 50025, 'Epic', c => c.s === [...c.s].reverse().join('')],
 
   // --- Rare ---
@@ -340,7 +458,7 @@ const BADGES = [
   }],
   ['JACKPOT', 'Jackpot', '💰', 27027, 'Rare', c => c.has('777')],
   ['DEVIL', 'Devil', '😈', 27027, 'Rare', c => c.has('666')],
-  ['SEQUENCE_4', 'Sequence (4)', '🔢', 25907, 'Rare', c => seqAsc(c.d, 4)],
+  ['SEQUENCE_4', 'Sequence (4)', '🔢', 25907, 'Rare', c => pHasSequence(c.s, 4, false)],
   ['ERROR', 'Error 404', '🚫', 25132, 'Rare', c => c.has('404')],
   ['ORIENTATION', 'Orientation', '🧭', 25132, 'Rare', c => c.has('101')],
   ['BOTANIST', 'Botanist', '🌿', 25006, 'Rare', c => c.has('420')],
@@ -365,9 +483,9 @@ const BADGES = [
   // --- Uncommon ---
   ['QUADS', 'Four of a Kind', '🍀', 8436, 'Uncommon', c => c.maxCount >= 4],
   ['LOW_BALL', 'Low Ball', '📉', 6400, 'Uncommon', c => /^[0-4]+$/.test(c.s)],
-  ['CONTIGUOUS_TWO_PAIR', 'Contiguous Two Pair', '👨‍👩‍👧‍👦', 6142, 'Uncommon', c => { for (let i = 0; i + 1 < c.runs.length; i++) if (c.runs[i] === 2 && c.runs[i + 1] === 2) return true; return false; }],
+  ['CONTIGUOUS_TWO_PAIR', 'Contiguous Two Pair', '👨‍👩‍👧‍👦', 6142, 'Uncommon', c => { const a = pContigPairStarts(c.s); for (let i = 0; i < a.length - 1; i++) if (a[i] + 2 === a[i + 1]) return true; return false; }],
   ['MOUNTAIN', 'Mountain', '🏔️', 5885, 'Uncommon', c => mountain(c.d)],
-  ['DOUBLE_HOP', 'Double Hop', '🦘🦘', 5321, 'Uncommon', c => { for (let k = 0; k + 4 < c.len; k++) if (c.s[k] === c.s[k + 2] && c.s[k] === c.s[k + 4]) return true; return false; }],
+  ['DOUBLE_HOP', 'Double Hop', '🦘🦘', 5321, 'Uncommon', c => { if (c.len < 5 || c.distinct < 2) return false; for (let e = 0; e <= c.len - 5; e++) if (c.s[e + 2] === c.s[e] && c.s[e + 4] === c.s[e]) return true; return false; }],
   ['HIGH_ROLLER', 'High Roller', '🤑', 5120, 'Uncommon', c => /^[5-9]+$/.test(c.s)],
   ['VALLEY', 'Valley', '🏜️', 4199, 'Uncommon', c => valley(c.d)],
   ['MINI_ECHO', 'Mini Echo', '🔂', 3704, 'Uncommon', c => /(\d\d)\1/.test(c.s)],
@@ -384,10 +502,10 @@ const BADGES = [
   ['SIXTY_SEVEN', 'Six-Seven', '🫠', 2024, 'Uncommon', c => c.has('67')],
   ['EIGHTY_SIX', 'Eighty-Six', '🍽️', 2024, 'Uncommon', c => c.has('86')],
   ['BALANCED', 'Balanced', '⚖️', 1959, 'Uncommon', c => {
-    if (c.len < 2) return false;
-    const h = Math.floor(c.len / 2);
+    if (c.len < 2 || c.len % 2 !== 0) return false; // prod: even length only
+    const h = c.len / 2;
     let a = 0, b = 0;
-    for (let i = 0; i < h; i++) { a += c.d[i]; b += c.d[c.len - 1 - i]; }
+    for (let i = 0; i < h; i++) { a += c.d[i]; b += c.d[h + i]; }
     return a === b;
   }],
   ['RHYME', 'Rhyme', '🎶', 1872, 'Uncommon', c => {
@@ -398,9 +516,9 @@ const BADGES = [
         if (c.s.indexOf(c.s.slice(i, i + L), i + L) !== -1) return true;
     return false;
   }],
-  ['SEQUENCE_3', 'Sequence (3)', '🔢', 1716, 'Uncommon', c => seqAsc(c.d, 3)],
-  ['CONSEC_PAIR_ADJACENT', '2 Consecutive Numbers (Contains)', '🔗', 1659, 'Uncommon', c => containsConsec(c.s, 2, true)],
-  ['CONSEC_PAIR_NEARBY', '2 Consecutive Numbers (Nearby)', '🔗', 1575, 'Uncommon', c => pairNearby(c.s, true)],
+  ['SEQUENCE_3', 'Sequence (3)', '🔢', 1716, 'Uncommon', c => pHasSequence(c.s, 3, false)],
+  ['CONSEC_PAIR_ADJACENT', '2 Consecutive Numbers (Contains)', '🔗', 1659, 'Uncommon', c => pPairAdjacent(c.s) !== null],
+  ['CONSEC_PAIR_NEARBY', '2 Consecutive Numbers (Nearby)', '🔗', 1575, 'Uncommon', c => pPairNearby(c.s) !== null],
   ['PRIME', 'Prime Number', '💎', 1274, 'Uncommon', c => isPrime(c.n)],
   ['TRINITY', 'Trinity', '⚜️', 1265, 'Uncommon', c => c.distinct === 3],
   ['DOZEN', 'Dozen', '🍩', 1200, 'Uncommon', c => c.n > 0 && c.n % 12 === 0],
@@ -413,13 +531,23 @@ const BADGES = [
   ['SANDWICH', 'Sandwich', '🥪', 1000, 'Uncommon', c => c.len >= 3 && c.d[0] === c.d[c.len - 1] && c.d.slice(1, -1).some(x => x !== c.d[0])],
 
   // --- Common ---
-  ['HILLS', 'Hills', '🏞️', 733, 'Common', c => hills(c.d)],
-  ['TRIPS', 'Three of a Kind', '🎰', 724, 'Common', c => c.maxCount >= 3],
+  ['HILLS', 'Hills', '🏞️', 733, 'Common', c => c.len >= 4 && hills(c.d)], // prod requires length >= 4
+  ['TRIPS', 'Three of a Kind', '🎰', 724, 'Common', c => c.countExact(3) > 0], // exactly 3 (a quad is not trips)
   ['LUCKY_SEVEN_DIV', 'Lucky Seven (Divisible)', '🎰', 700, 'Common', c => c.n > 0 && c.n % 7 === 0],
   ['HETEROGENEOUS', 'Heterogeneous', '🥗', 593, 'Common', c => c.distinct === c.len],
   ['GAP_ONE', 'Gap One', '↕️', 529, 'Common', c => c.len >= 2 && Math.abs(c.d[0] - c.d[c.len - 1]) === 1],
   ['TWO_PAIR', 'Two Pair', '👯‍♀️', 447, 'Common', c => c.countExact(2) >= 2],
-  ['HOPSCOTCH', 'Hopscotch', '🦘', 312, 'Common', c => { for (let k = 0; k + 2 < c.len; k++) if (c.s[k] === c.s[k + 2]) return true; return false; }],
+  ['HOPSCOTCH', 'Hopscotch', '🦘', 312, 'Common', c => {
+    if (c.len < 3 || c.distinct < 2) return false;
+    for (let e = 0; e <= c.len - 3; e++) {
+      if (c.s[e + 2] === c.s[e]) {
+        const ahead = c.len > e + 4 && c.s[e + 4] === c.s[e];
+        const behind = e >= 2 && c.s[e - 2] === c.s[e];
+        if (!ahead && !behind) return true; // exactly a 2-long every-other run
+      }
+    }
+    return false;
+  }],
   ['GHOST', 'Ghost', '👻', 309, 'Common', c => (c.counts[0] || 0) === 1],
   ['QUARTET', 'Quartet', '🎻', 290, 'Common', c => c.distinct === 4],
   ['HYDROGEN', 'Hydrogen (1)', '💧', 282, 'Common', c => (c.counts[1] || 0) === 1],
@@ -439,7 +567,7 @@ const BADGES = [
   ['LIFTOFF', 'Liftoff', '🚀', 200, 'Common', c => c.len >= 2 && c.d[0] > c.d[c.len - 1]],
   ['VOID', 'Void', '🕳️', 167, 'Common', c => !c.has('0')],
   ['NEIGHBORS', 'Neighbors', '🏘️', 161, 'Common', c => {
-    for (let i = 0; i < c.len; i++) for (let j = i + 1; j < c.len; j++) if (Math.abs(c.d[i] - c.d[j]) === 1) return true;
+    for (let i = 0; i + 1 < c.len; i++) if (Math.abs(c.d[i] - c.d[i + 1]) === 1) return true; // adjacent positions only
     return false;
   }],
   // CSV lists Pair at 120, but the live game scores it 0 (see the "Pair Fix" toggle /
@@ -728,31 +856,48 @@ function fmtProb(p) {
 // Compute
 // ---------------------------------------------------------------------------
 
-// Supersession: within each group (ordered highest-tier first), only the highest-tier
-// earned badge scores EP. Lower tiers are still displayed as earned but score 0, because
-// the higher tier already implies them. Confirmed against prod for the Pair and Pi families.
-const SUPERSEDE_GROUPS = [
-  ['PI', 'PI_CONTAINS_5', 'PI_CONTAINS_4', 'PI_CONTAINS_3'],
-  ['E', 'E_CONTAINS_5', 'E_CONTAINS_4', 'E_CONTAINS_3'],
-  ['CONTIGUOUS_PAIR', 'PAIR'],
-  ['DEEP_VOID_FIVE', 'DEEP_VOID_FOUR', 'DEEP_VOID_THREE', 'DEEP_VOID'], // contains 00000>0000>000>00
-  ['CONTIGUOUS_BOAT', 'BOAT'], // Contiguous Full House supersedes Full House
-  ['JACKPOT_SIX', 'JACKPOT_FIVE', 'JACKPOT_FOUR', 'JACKPOT'], // 7s in a row: 6>5>4>3
-  // Contiguous run tiers collapse to the highest - but Contiguous Pair is a base badge that
-  // always scores (it's never in this group). Confirmed: 407777 keeps Contiguous Pair.
-  ['CONTIGUOUS_SIXES', 'CONTIGUOUS_FIVES', 'CONTIGUOUS_QUADS', 'CONTIGUOUS_TRIPS'],
-  ['QUADS', 'TRIPS'],      // Four of a Kind supersedes Three of a Kind
-  ['MINI_ECHO', 'RHYME'],  // a Mini Echo (adjacent repeat) is a more specific Rhyme
-  // Single Digit is displayed but scores 0 - the exact digit badge (Two, Three…) implies it.
-  // Confirmed against prod: 2 = 119,610,065 (Single Digit's 10,000,010 is zeroed).
-  ['DIGIT_ZERO', 'DIGIT_ONE', 'DIGIT_TWO', 'DIGIT_THREE', 'DIGIT_FOUR', 'DIGIT_FIVE',
-    'DIGIT_SIX', 'DIGIT_SEVEN', 'DIGIT_EIGHT', 'DIGIT_NINE', 'ONE_DIGIT'],
-  // Perfect powers are one tier family - only the highest exponent earned scores; the rest
-  // display as 0. Confirmed via 0 (a perfect power of every exponent): only one 33,333,367
-  // (the 19/17/13th tier) scores, the other 12 power badges are zeroed.
-  ['NINETEENTH_POWER', 'SEVENTEENTH_POWER', 'THIRTEENTH_POWER', 'ELEVENTH_POWER', 'TENTH_POWER',
-    'NINTH_POWER', 'EIGHTH_POWER', 'SEVENTH_POWER', 'SIXTH_POWER', 'FIFTH_POWER', 'FOURTH_POWER',
-    'CUBE', 'SQUARE'],
+// Supersession families: prod tags each badge with a `family` and, within a family, only
+// the single HIGHEST-EP earned badge scores - the rest are still displayed as earned but
+// score 0, because the higher tier already implies them. This list is the full family map
+// extracted from the live game's BADGE_DEFINITIONS (35 families / 138 badges); the remaining
+// 65 badges are standalone and always score. Member order is irrelevant - the scorer keeps
+// the max-EP member - but each family is listed highest-EP first for readability.
+const FAMILIES = [
+  ['THIRTEENTH_POWER', 'SEVENTEENTH_POWER', 'NINETEENTH_POWER', 'TENTH_POWER', 'ELEVENTH_POWER', 'NINTH_POWER', 'EIGHTH_POWER', 'SEVENTH_POWER', 'SIXTH_POWER', 'FIFTH_POWER', 'FOURTH_POWER', 'CUBE', 'SQUARE'], // POWER
+  ['DIGIT_ZERO', 'DIGIT_ONE', 'DIGIT_TWO', 'DIGIT_THREE', 'DIGIT_FOUR', 'DIGIT_FIVE', 'DIGIT_SIX', 'DIGIT_SEVEN', 'DIGIT_EIGHT', 'DIGIT_NINE', 'ONE_DIGIT'], // SINGLE_DIGIT
+  ['CONSEC_QUAD_EXACT', 'CONSEC_QUAD_CONTAINS', 'CONSEC_QUAD_SCRAMBLED', 'CONSEC_TRIPLE_EXACT', 'CONSEC_TRIPLE_SCRAMBLED', 'CONSEC_TRIPLE_CONTAINS', 'CONSEC_PAIR_EXACT', 'CONSEC_PAIR_ADJACENT', 'CONSEC_PAIR_NEARBY'], // CONSECUTIVE
+  ['SEQUENCE_6', 'CASCADE', 'WATERFALL', 'EVEN_SPACING', 'EVEN_SPACING_ABS', 'TURTLE', 'SEQUENCE_4', 'SCRAMBLE', 'SEQUENCE_3'], // PROGRESSION
+  ['CONTIGUOUS_THREE_PAIR', 'FRAMED_PAIR', 'FRAMED_DOUBLE', 'THREE_PAIR', 'CONTIGUOUS_TWO_PAIR', 'TWO_PAIR', 'CONTIGUOUS_PAIR', 'PAIR'], // PAIRS
+  ['EXACT_BOOB_80085', 'EXACT_BOOB', 'BOOB_58008', 'BOOB_80085', 'BOOB_8008'], // BOOB
+  ['BOTANIST_EXACT', 'MEANING_EXACT', 'HOTBOX', 'BOTANIST', 'MEANING'], // BOTANIST
+  ['JACKPOT_EXACT', 'JACKPOT_SIX', 'JACKPOT_FIVE', 'JACKPOT_FOUR', 'JACKPOT'], // JACKPOT
+  ['CONTIGUOUS_SIXES', 'CONTIGUOUS_FIVES', 'CONTIGUOUS_QUADS', 'CONTIGUOUS_TRIPS'], // CONTIGUOUS_RUN
+  ['E', 'E_CONTAINS_5', 'E_CONTAINS_4', 'E_CONTAINS_3'], // E
+  ['NICE_EXACT', 'VERY_VERY_NICE', 'VERY_NICE', 'NICE'], // NICE
+  ['QUINT_NINE', 'QUAD_NINE', 'TRIPLE_NINE', 'DOUBLE_NINE'], // NINE_ENDING
+  ['PI', 'PI_CONTAINS_5', 'PI_CONTAINS_4', 'PI_CONTAINS_3'], // PI
+  ['SIXTY_SEVEN_EXACT', 'BRAINROT', 'SIXTY_SEVEN_DOUBLE', 'SIXTY_SEVEN'], // SIXTY_SEVEN
+  ['DEEP_VOID_FIVE', 'DEEP_VOID_FOUR', 'DEEP_VOID_THREE', 'DEEP_VOID'], // VOID_DEPTH
+  ['PAIRED_BOOKENDS', 'BOOKENDS', 'MIRROR_BOOKENDS'], // BOOKENDS
+  ['CALENDAR_EXACT', 'GROUNDHOG_DAY', 'CALENDAR'], // CALENDAR
+  ['EMERGENCY_EXACT', 'MAYDAY', 'EMERGENCY'], // EMERGENCY
+  ['FRAMED_TRIPLE', 'QUADS', 'TRIPS'], // OF_A_KIND
+  ['ROYAL_FLUSH', 'STRAIGHT_FLUSH', 'STRAIGHT'], // STRAIGHT
+  ['BIG_BROTHER_EXACT', 'BIG_BROTHER'], // BIG_BROTHER
+  ['CONTIGUOUS_BOAT', 'BOAT'], // BOAT
+  ['DEVIL_EXACT', 'DEVIL'], // DEVIL
+  ['FIREFLY', 'DUALITY'], // DUALITY
+  ['EIGHTY_SIX_EXACT', 'EIGHTY_SIX'], // EIGHTY_SIX
+  ['EQUILIBRIUM', 'SANDWICH'], // EQUILIBRIUM
+  ['EXACT_HELL', 'HELL'], // HELL
+  ['DOUBLE_HOP', 'HOPSCOTCH'], // HOPSCOTCH
+  ['LEET_EXACT', 'LEET'], // LEET
+  ['UNIVERSAL_ANSWER', 'DEEPER_MEANING'], // MEANING
+  ['ASCENSION', 'DECAY'], // MONOTONIC
+  ['ORIENTATION_EXACT', 'ORIENTATION'], // ORIENTATION
+  ['MOUNTAIN', 'VALLEY'], // PEAK
+  ['MINI_ECHO', 'RHYME'], // REPEAT
+  ['TREE_FIDDY_EXACT', 'TREE_FIDDY'], // TREE_FIDDY
 ];
 
 function compute(n) {
@@ -778,11 +923,14 @@ function compute(n) {
     try { ok = test(c); } catch (e) { ok = false; }
     if (ok) earned.push({ id, label, emoji, ep, rarity, desc: DESCRIPTIONS[id], prob: PROBABILITIES[id] });
   }
-  // Apply tier supersession: keep only the highest earned tier scoring in each group.
-  const earnedIds = new Set(earned.map(b => b.id));
-  for (const group of SUPERSEDE_GROUPS) {
-    const present = group.filter(id => earnedIds.has(id));
-    for (const b of earned) if (present.slice(1).includes(b.id)) b.ep = 0; // zero all but the top tier
+  // Apply family supersession: within each family, only the highest-EP earned badge scores;
+  // the rest stay in the earned list (displayed) but score 0. Matches prod's max-score-wins.
+  for (const fam of FAMILIES) {
+    const members = earned.filter(b => fam.includes(b.id));
+    if (members.length < 2) continue;
+    let top = members[0];
+    for (const b of members) if (b.ep > top.ep) top = b;
+    for (const b of members) if (b !== top) b.ep = 0;
   }
   const total = earned.reduce((s, b) => s + b.ep, 0);
   earned.sort((a, b) => b.ep - a.ep);
@@ -805,6 +953,10 @@ function engineModuleSource() {
     ipow, isPerfectPower, isPowerOf, isPrime, partitions, consecAsc, consecScrambled,
     containsConsec, pairNearby, seqAsc, straightRun, mountain, valley, hills,
     runLengths, strobogrammatic,
+    // prod-ported helpers (must ship to the browser engine too)
+    pLeadingZero, pMultiPart, pConsecSet, pDigitCounts, pContig, pOrdered, pHasSequence,
+    pPairExact, pTripleExact, pQuadExact, pPairAdjacent, pPairNearby,
+    pNAdjacentBuild, pNAdjacentAt, pNAdjacent, pContigPairStarts,
   ];
   const namedSrc = named.map(f => f.toString()).join('\n');
 
@@ -829,14 +981,14 @@ function engineModuleSource() {
     `${b[3]},${JSON.stringify(b[4])},${b[5].toString()}]`
   ).join(',\n') + '\n];';
 
-  const supSrc = `const SUPERSEDE_GROUPS = ${JSON.stringify(SUPERSEDE_GROUPS)};`;
+  const supSrc = `const FAMILIES = ${JSON.stringify(FAMILIES)};`;
 
   // Lean compute: post-supersession total EP + earned badge indices, no UI metadata.
   const rest = `
 const BADGE_META = BADGES.map(b => ({ id: b[0], label: b[1], emoji: b[2], rarity: b[4] }));
 const SUP_INDEX = (() => {
   const idToIdx = new Map(BADGES.map((b, i) => [b[0], i]));
-  return SUPERSEDE_GROUPS.map(g => g.map(id => idToIdx.get(id)).filter(i => i !== undefined));
+  return FAMILIES.map(g => g.map(id => idToIdx.get(id)).filter(i => i !== undefined));
 })();
 
 function computeLean(n) {
@@ -865,8 +1017,11 @@ function computeLean(n) {
   }
   const earnedSet = new Set(earned);
   for (const g of SUP_INDEX) {
-    const present = g.filter(i => earnedSet.has(i));
-    for (let j = 1; j < present.length; j++) epOf.set(present[j], 0); // zero lower tiers
+    const members = g.filter(i => earnedSet.has(i));
+    if (members.length < 2) continue;
+    let top = members[0];
+    for (const i of members) if (epOf.get(i) > epOf.get(top)) top = i;
+    for (const i of members) if (i !== top) epOf.set(i, 0); // zero all but the max-EP member
   }
   let total = 0;
   for (const v of epOf.values()) total += v;
