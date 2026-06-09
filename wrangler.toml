@@ -1,0 +1,9 @@
+name = "rngdle-ep-calculator"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Custom domain (zone cubityfir.st must be on this Cloudflare account).
+# Wrangler provisions the hostname + cert on `wrangler deploy`.
+[[routes]]
+pattern = "rng.cubityfir.st"
+custom_domain = true

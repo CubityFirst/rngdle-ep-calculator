@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Wrangler / Cloudflare local state
+.wrangler/
+.dev.vars
+
+# Logs
+*.log
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
