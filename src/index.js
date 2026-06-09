@@ -1229,8 +1229,8 @@ const RARITY_COLORS = {
   Rare: '#4895ef', Uncommon: '#52b788', Common: '#adb5bd',
 };
 
-// Where users should report discrepancies (shown in the warning banner).
-const DISCORD_URL = 'https://discord.com/users/583803279503523843';
+// RNGdle Discord invite — where users should report discrepancies (warning banner).
+const DISCORD_URL = 'https://discord.gg/kdD2P2xFY5';
 
 // Escape text for safe insertion into HTML (attribute values and text content).
 function esc(s) {
