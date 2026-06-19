@@ -1958,7 +1958,7 @@ const __WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + analysisWorker.toS
 
 function gridWorker() {
   let E = null, origin = '';
-  let counts = null, bits = null, ROW = 0, cmin = 0, cmax = 0;
+  let counts = null, bits = null, epArr = null, ROW = 0, cmin = 0, cmax = 0, emin = 0, emax = 0;
   const DB = 'rngdle-grid', STORE = 'ds', KEY = 'sweep';
   function idbStore(mode) {
     return new Promise((res, rej) => {
@@ -2000,30 +2000,35 @@ function gridWorker() {
 
       const ver = await version();
       const hit = msg.force ? null : await idbGet(KEY);
-      if (hit && hit.ver === ver && hit.counts && hit.counts.length === 1000000) {
-        counts = hit.counts; bits = hit.bits; ROW = hit.row; cmin = hit.min; cmax = hit.max;
+      if (hit && hit.ver === ver && hit.counts && hit.counts.length === 1000000 && hit.ep) {
+        counts = hit.counts; bits = hit.bits; epArr = hit.ep; ROW = hit.row;
+        cmin = hit.min; cmax = hit.max; emin = hit.emin; emax = hit.emax;
       } else {
-        // Full 0..999,999 sweep: per-number badge count + a packed earned-badge bitmask.
+        // Full 0..999,999 sweep: per-number badge count, total EP, and a packed
+        // earned-badge bitmask (for per-badge membership maps).
         const N = 1000000, B = E.BADGE_META.length;
         ROW = (B + 7) >> 3;
         counts = new Uint8Array(N);
+        epArr = new Float64Array(N);
         bits = new Uint8Array(N * ROW);
-        let mn = 255, mx = 0;
+        let mn = 255, mx = 0, en = Infinity, ex = 0;
         for (let n = 0; n < N; n++) {
-          const earned = E.computeLean(n).earned, len = earned.length;
-          counts[n] = len;
+          const r = E.computeLean(n), earned = r.earned, len = earned.length;
+          counts[n] = len; epArr[n] = r.ep;
           if (len < mn) mn = len;
           if (len > mx) mx = len;
+          if (r.ep < en) en = r.ep;
+          if (r.ep > ex) ex = r.ep;
           const base = n * ROW;
           for (let j = 0; j < len; j++) { const bi = earned[j]; bits[base + (bi >> 3)] |= (1 << (bi & 7)); }
           if ((n & 0x7FFF) === 0) self.postMessage({ type: 'progress', pct: n / N });
         }
-        cmin = mn; cmax = mx;
-        await idbPut(KEY, { ver, counts, bits, row: ROW, min: mn, max: mx });
+        cmin = mn; cmax = mx; emin = en; emax = ex;
+        await idbPut(KEY, { ver, counts, ep: epArr, bits, row: ROW, min: mn, max: mx, emin: en, emax: ex });
       }
-      // counts + bits stay resident for membership(); ship the page a copy of counts.
-      const c = counts.slice();
-      self.postMessage({ type: 'done', counts: c.buffer, min: cmin, max: cmax, cached: !!hit }, [c.buffer]);
+      // counts + bits stay resident for membership(); ship the page copies of counts + ep.
+      const c = counts.slice(), e = epArr.slice();
+      self.postMessage({ type: 'done', counts: c.buffer, ep: e.buffer, min: cmin, max: cmax, emin: emin, emax: emax, cached: !!hit }, [c.buffer, e.buffer]);
     } catch (e) {
       self.postMessage({ type: 'error', message: String(e && e.message || e) });
     }
@@ -2040,18 +2045,55 @@ function gridClient(WORKER_SRC, LABELS) {
   const ovtext = document.getElementById('ovtext');
   const listEl = document.getElementById('list');
   const searchEl = document.getElementById('search');
-  const legendEl = document.getElementById('legend');
+  const legendEl = document.getElementById('legbar');
+  const cmapSel = document.getElementById('cmap');
   const titleEl = document.getElementById('vtitle');
+  const toast = document.getElementById('toast');
+  let toastT = 0;
+  function flash(msg) {
+    toast.textContent = msg; toast.classList.add('show');
+    clearTimeout(toastT); toastT = setTimeout(() => toast.classList.remove('show'), 1800);
+  }
 
   let counts = null, cmin = 0, cmax = 1;
-  let countCanvas = null;          // monochrome badge-count heatmap (the default view)
+  let epArr = null, emin = 0, emax = 1;
+  let countCanvas = null;          // badge-count heatmap (the default view)
+  let epCanvas = null;             // log-scaled total-EP heatmap
   let src = null;                  // currently displayed 1000x1000 source canvas
-  let member = null;               // Uint8Array membership for the active badge (or null in count mode)
-  let view = 'count';              // 'count' | a badge label
+  let member = null;               // Uint8Array membership for the active badge (or null in count/ep mode)
+  let view = 'count';              // 'count' | 'ep' | a badge label
   const memCache = new Map();      // label -> Uint8Array, so re-selecting a badge is instant
   let scale = 1, ox = 0, oy = 0, minScale = 1;
   const maxScale = 80;
   let cw = 0, ch = 0, dpr = 1;
+
+  // Perceptually-uniform colour scales (anchor stops, evenly spaced over [0,1]).
+  // Grayscale is the default; the others are matplotlib's viridis family.
+  const CMAPS = {
+    Grayscale: [[0,0,0],[255,255,255]],
+    Viridis: [[68,1,84],[72,40,120],[62,73,137],[49,104,142],[38,130,142],[31,158,137],[53,183,121],[110,206,88],[181,222,43],[253,231,37]],
+    Magma: [[0,0,4],[28,16,68],[79,18,123],[129,37,129],[181,54,122],[229,80,100],[251,135,97],[254,194,135],[252,253,191]],
+    Inferno: [[0,0,4],[31,12,72],[85,15,109],[136,34,106],[186,54,85],[227,89,51],[249,140,10],[249,201,50],[252,255,164]],
+    Plasma: [[13,8,135],[84,2,163],[139,10,165],[185,50,137],[219,92,104],[244,136,73],[254,188,43],[240,249,33]],
+    Cividis: [[0,32,76],[0,42,102],[45,63,112],[76,85,107],[108,110,107],[142,136,96],[179,164,77],[219,194,55],[255,233,69]],
+  };
+  let currentCmap = 'Grayscale';
+  function cmap(t) {
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const s = CMAPS[currentCmap], n = s.length - 1, x = t * n, i = Math.floor(x), f = x - i;
+    if (i >= n) return s[n];
+    const a = s[i], b = s[i + 1];
+    return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+  }
+  function buildLUT() {
+    const L = new Uint8ClampedArray(768);
+    for (let i = 0; i < 256; i++) { const c = cmap(i / 255), q = i * 3; L[q] = c[0]; L[q + 1] = c[1]; L[q + 2] = c[2]; }
+    return L;
+  }
+  function cmapCSS() {
+    const s = CMAPS[currentCmap], n = s.length - 1;
+    return s.map((c, i) => 'rgb(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ') ' + Math.round(i / n * 100) + '%').join(',');
+  }
 
   function grayCanvas(paint) {
     const cnv = document.createElement('canvas');
@@ -2060,20 +2102,47 @@ function gridClient(WORKER_SRC, LABELS) {
     return cnv;
   }
   function buildCount() {
+    const L = buildLUT();
     countCanvas = grayCanvas(sctx => {
       const img = sctx.createImageData(SIZE, SIZE), d = img.data;
-      const lut = new Uint8Array(cmax + 1);
-      for (let v = 0; v <= cmax; v++) lut[v] = cmax === cmin ? 0 : Math.round((v - cmin) / (cmax - cmin) * 255);
-      for (let i = 0; i < counts.length; i++) { const g = lut[counts[i]], p = i << 2; d[p] = d[p + 1] = d[p + 2] = g; d[p + 3] = 255; }
+      for (let i = 0; i < counts.length; i++) {
+        const t = cmax === cmin ? 0 : (counts[i] - cmin) / (cmax - cmin);
+        const q = ((t * 255 + 0.5) | 0) * 3, p = i << 2;
+        d[p] = L[q]; d[p + 1] = L[q + 1]; d[p + 2] = L[q + 2]; d[p + 3] = 255;
+      }
       sctx.putImageData(img, 0, 0);
     });
   }
   function buildMember(m) {
+    const c = cmap(1), r = c[0] | 0, g = c[1] | 0, b = c[2] | 0;   // members get the colormap's hot end
     return grayCanvas(sctx => {
       const img = sctx.createImageData(SIZE, SIZE), d = img.data;
-      for (let i = 0; i < m.length; i++) { const g = m[i] ? 255 : 17, p = i << 2; d[p] = d[p + 1] = d[p + 2] = g; d[p + 3] = 255; }
+      for (let i = 0; i < m.length; i++) {
+        const p = i << 2;
+        if (m[i]) { d[p] = r; d[p + 1] = g; d[p + 2] = b; } else { d[p] = 10; d[p + 1] = 12; d[p + 2] = 18; }
+        d[p + 3] = 255;
+      }
       sctx.putImageData(img, 0, 0);
     });
+  }
+  // EP spans many orders of magnitude, so the EP heatmap is log-scaled.
+  function buildEP() {
+    const L = buildLUT(), lo = Math.log(emin + 1), span = (Math.log(emax + 1) - lo) || 1;
+    epCanvas = grayCanvas(sctx => {
+      const img = sctx.createImageData(SIZE, SIZE), d = img.data;
+      for (let i = 0; i < epArr.length; i++) {
+        const t = (Math.log(epArr[i] + 1) - lo) / span, q = ((t * 255 + 0.5) | 0) * 3, p = i << 2;
+        d[p] = L[q]; d[p + 1] = L[q + 1]; d[p + 2] = L[q + 2]; d[p + 3] = 255;
+      }
+      sctx.putImageData(img, 0, 0);
+    });
+  }
+  function fmtEP(n) {
+    n = Math.round(n);
+    if (n < 1000) return '' + n;
+    const u = ['K', 'M', 'B']; let i = -1, x = n;
+    while (x >= 1000 && i < 2) { x /= 1000; i++; }
+    return (x < 10 ? x.toFixed(1) : '' + Math.round(x)) + u[i];
   }
 
   function resize() {
@@ -2120,22 +2189,43 @@ function gridClient(WORKER_SRC, LABELS) {
 
   // --- view selection -------------------------------------------------------
   function fmtPct(p) { return (p < 1 ? p.toFixed(3) : p.toFixed(2)) + '%'; }
+  function scaleSpan(grad) { return '<span class="scale" style="background:linear-gradient(90deg,' + grad + ')"></span>'; }
   function updateLegend() {
     if (view === 'count') {
       titleEl.textContent = 'All numbers - badge count';
-      legendEl.innerHTML = '<span class="lab">' + cmin + '</span><span class="scale count"></span><span class="lab">' + cmax + ' badges</span>';
+      legendEl.innerHTML = '<span class="lab">' + cmin + '</span>' + scaleSpan(cmapCSS()) + '<span class="lab">' + cmax + ' badges</span>';
+    } else if (view === 'ep') {
+      titleEl.textContent = 'Total EP - ' + fmtEP(emin) + ' to ' + fmtEP(emax) + ' (log scale)';
+      legendEl.innerHTML = '<span class="lab">' + fmtEP(emin) + '</span>' + scaleSpan(cmapCSS()) + '<span class="lab">' + fmtEP(emax) + ' EP</span>';
     } else {
       let cnt = 0; if (member) for (let i = 0; i < member.length; i++) cnt += member[i];
       titleEl.textContent = member ? (view + ' - ' + cnt.toLocaleString() + ' / 1,000,000 (' + fmtPct(cnt / 1e6 * 100) + ')') : (view + ' …');
-      legendEl.innerHTML = '<span class="lab">none</span><span class="scale binary"></span><span class="lab">earns ' + view + '</span>';
+      const c = cmap(1), mc = 'rgb(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ')';
+      legendEl.innerHTML = '<span class="lab">none</span>' + scaleSpan('#0a0c12 0 50%, ' + mc + ' 50% 100%') + '<span class="lab">earns ' + view + '</span>';
     }
   }
   function highlight() {
     for (const b of listEl.children) b.classList.toggle('on', b.dataset.v === view);
   }
   function selectCount() {
-    view = 'count'; member = null; src = countCanvas;
+    view = 'count'; member = null;
+    if (!countCanvas) buildCount();
+    src = countCanvas;
     highlight(); updateLegend(); render();
+  }
+  function selectEP() {
+    view = 'ep'; member = null;
+    if (!epCanvas) buildEP();
+    src = epCanvas;
+    highlight(); updateLegend(); render();
+  }
+  // Repaint the active view with the current colormap (invalidates cached canvases).
+  function recolor() {
+    countCanvas = null; epCanvas = null;
+    if (view === 'count') selectCount();
+    else if (view === 'ep') selectEP();
+    else if (member) applyMember(view);
+    else updateLegend();
   }
   function applyMember(label) {
     member = memCache.get(label);
@@ -2150,12 +2240,15 @@ function gridClient(WORKER_SRC, LABELS) {
   }
   function buildList() {
     listEl.innerHTML = '';
-    const items = [{ label: 'All numbers (badge count)', v: 'count', idx: -1 }];
+    const items = [
+      { label: 'All numbers (badge count)', v: 'count', idx: -1 },
+      { label: 'Total EP', v: 'ep', idx: -2 },
+    ];
     for (let i = 0; i < LABELS.length; i++) items.push({ label: LABELS[i], v: LABELS[i], idx: i });
     for (const it of items) {
       const b = document.createElement('button');
       b.className = 'item'; b.textContent = it.label; b.dataset.v = it.v; b.dataset.idx = it.idx;
-      b.onclick = () => { it.idx < 0 ? selectCount() : selectBadge(it.label, it.idx); };
+      b.onclick = () => { it.v === 'count' ? selectCount() : it.v === 'ep' ? selectEP() : selectBadge(it.label, it.idx); };
       listEl.appendChild(b);
     }
     highlight();
@@ -2163,7 +2256,7 @@ function gridClient(WORKER_SRC, LABELS) {
   searchEl.addEventListener('input', () => {
     const q = searchEl.value.toLowerCase();
     for (const b of listEl.children) {
-      if (b.dataset.idx === '-1') continue;
+      if (Number(b.dataset.idx) < 0) continue;   // keep the count + EP entries pinned
       b.style.display = b.textContent.toLowerCase().includes(q) ? '' : 'none';
     }
   });
@@ -2175,7 +2268,7 @@ function gridClient(WORKER_SRC, LABELS) {
     const [mx, my] = rel(e);
     zoomAt(mx, my, e.deltaY < 0 ? 1.18 : 1 / 1.18);
   }, { passive: false });
-  cv.addEventListener('pointerdown', e => { down = true; moved = 0; const [x, y] = rel(e); lx = x; ly = y; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointerdown', e => { if (e.button !== 0) return; down = true; moved = 0; const [x, y] = rel(e); lx = x; ly = y; cv.setPointerCapture(e.pointerId); });
   cv.addEventListener('pointermove', e => {
     const [x, y] = rel(e);
     if (down) {
@@ -2185,6 +2278,7 @@ function gridClient(WORKER_SRC, LABELS) {
       if (hit) {
         let detail;
         if (view === 'count') { const c = counts[hit.n]; detail = c + ' badge' + (c === 1 ? '' : 's'); }
+        else if (view === 'ep') { detail = Math.round(epArr[hit.n]).toLocaleString() + ' EP'; }
         else { detail = (member && member[hit.n]) ? 'earns ' + view : 'no ' + view; }
         tip.style.display = 'block';
         tip.innerHTML = '<b>' + hit.n.toLocaleString() + '</b><span>' + detail + ' - click to open</span>';
@@ -2195,16 +2289,31 @@ function gridClient(WORKER_SRC, LABELS) {
     }
   });
   cv.addEventListener('pointerup', e => {
+    if (e.button !== 0) return;
     down = false;
     const [x, y] = rel(e);
     if (moved < 5) { const hit = numberAt(x, y); if (hit) location.href = '/?n=' + hit.n; }
   });
   cv.addEventListener('pointerleave', () => { tip.style.display = 'none'; });
   cv.addEventListener('dblclick', e => { e.preventDefault(); const [mx, my] = rel(e); zoomAt(mx, my, 2.2); });
+  // Right-click copies a PNG of the current 1000x1000 view to the clipboard.
+  cv.addEventListener('contextmenu', async e => {
+    e.preventDefault();
+    if (!src) { flash('Still building the grid…'); return; }
+    try {
+      const blob = await new Promise((res, rej) => src.toBlob(b => b ? res(b) : rej(new Error('encode failed')), 'image/png'));
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      const what = view === 'count' ? 'badge-count grid' : view === 'ep' ? 'total-EP grid' : view + ' grid';
+      flash('Copied ' + what + ' to clipboard');
+    } catch (err) {
+      flash('Copy failed: ' + (err && err.message || err));
+    }
+  });
   window.addEventListener('resize', () => { const wasFit = scale <= minScale + 1e-6; resize(); if (wasFit) fit(); render(); });
   document.getElementById('zin').onclick = () => zoomAt(cw / 2, ch / 2, 1.5);
   document.getElementById('zout').onclick = () => zoomAt(cw / 2, ch / 2, 1 / 1.5);
   document.getElementById('zreset').onclick = () => { fit(); render(); };
+  cmapSel.addEventListener('change', () => { currentCmap = cmapSel.value; recolor(); });
 
   // --- worker ---------------------------------------------------------------
   const worker = new Worker(URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' })), { type: 'module' });
@@ -2216,6 +2325,8 @@ function gridClient(WORKER_SRC, LABELS) {
       ovtext.textContent = 'Scoring ' + pct + '% of 1,000,000 numbers…';
     } else if (m.type === 'done') {
       counts = new Uint8Array(m.counts); cmin = m.min; cmax = m.max;
+      epArr = new Float64Array(m.ep); emin = m.emin; emax = m.emax;
+      epCanvas = null;
       buildCount();
       ov.style.display = 'none';
       buildList();
@@ -2272,15 +2383,21 @@ function renderGrid() {
   #ctrls button { width: 34px; height: 34px; font-size: 17px; color: #e8eaf0;
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
   #ctrls button:hover { background: rgba(255,255,255,.14); }
-  #legend { bottom: 12px; right: 12px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; font-size: 12px; }
-  #legend .scale { width: 130px; height: 10px; border-radius: 5px; }
-  #legend .scale.count { background: linear-gradient(90deg, #000, #fff); }
-  #legend .scale.binary { background: linear-gradient(90deg, #111 0 50%, #fff 50% 100%); }
+  #legend { bottom: 12px; right: 12px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+  #legbar { display: flex; align-items: center; gap: 8px; }
+  #legend .scale { width: 150px; height: 10px; border-radius: 5px; }
   #legend .lab { color: #9aa1b2; }
+  #cmap { font-family: inherit; font-size: 12px; color: #e8eaf0; background: rgba(255,255,255,.06);
+    -webkit-appearance: none; appearance: none; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 3px 6px; cursor: pointer; }
+  #cmap option { color: #000; }
   #tip { position: fixed; z-index: 6; display: none; pointer-events: none; padding: 6px 9px;
     background: rgba(8,10,16,.92); border: 1px solid rgba(255,255,255,.18); border-radius: 8px; font-size: 12px; white-space: nowrap; }
   #tip b { font-size: 14px; }
   #tip span { display: block; color: #9aa1b2; font-size: 11px; margin-top: 1px; }
+  #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 8;
+    padding: 8px 14px; font-size: 13px; color: #e8eaf0; background: rgba(8,10,16,.94);
+    border: 1px solid rgba(255,255,255,.18); border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
   #ov { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 14px; background: #05060a; }
   #ov h2 { margin: 0; font-weight: 600; font-size: 16px; }
@@ -2303,8 +2420,14 @@ function renderGrid() {
   <button id="zreset" title="Fit">⤢</button>
   <button id="zin" title="Zoom in">+</button>
 </div>
-<div id="legend" class="panel"></div>
+<div id="legend" class="panel">
+  <select id="cmap" title="Colour scale (perceptually uniform)">
+    <option>Grayscale</option><option>Viridis</option><option>Magma</option><option>Inferno</option><option>Plasma</option><option>Cividis</option>
+  </select>
+  <div id="legbar"></div>
+</div>
 <div id="tip"></div>
+<div id="toast"></div>
 <div id="ov">
   <h2>Building the grid…</h2>
   <div id="track"><div id="bar"></div></div>
