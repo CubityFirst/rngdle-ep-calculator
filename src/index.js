@@ -2159,8 +2159,10 @@ function gridClient(WORKER_SRC, LABELS) {
   }
   function clampPan() {
     const w = SIZE * scale, h = SIZE * scale;
-    ox = w <= cw ? (cw - w) / 2 : Math.min(0, Math.max(cw - w, ox));
-    oy = h <= ch ? (ch - h) / 2 : Math.min(0, Math.max(ch - h, oy));
+    // Let the grid be dragged until an edge reaches the window centre (not just the
+    // viewport edge), so corners are easy to reach when zoomed in.
+    ox = w <= cw ? (cw - w) / 2 : Math.min(cw / 2, Math.max(cw / 2 - w, ox));
+    oy = h <= ch ? (ch - h) / 2 : Math.min(ch / 2, Math.max(ch / 2 - h, oy));
   }
   function render() {
     if (!src) return;
@@ -2526,8 +2528,10 @@ function imagesClient(LABELS) {
   }
   function clampPan() {
     const w = SIZE * scale, h = SIZE * scale;
-    ox = w <= cw ? (cw - w) / 2 : Math.min(0, Math.max(cw - w, ox));
-    oy = h <= ch ? (ch - h) / 2 : Math.min(0, Math.max(ch - h, oy));
+    // Let the grid be dragged until an edge reaches the window centre (not just the
+    // viewport edge), so corners are easy to reach when zoomed in.
+    ox = w <= cw ? (cw - w) / 2 : Math.min(cw / 2, Math.max(cw / 2 - w, ox));
+    oy = h <= ch ? (ch - h) / 2 : Math.min(ch / 2, Math.max(ch / 2 - h, oy));
   }
   function render() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
