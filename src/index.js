@@ -2114,12 +2114,13 @@ function gridClient(WORKER_SRC, LABELS) {
     });
   }
   function buildMember(m) {
-    const c = cmap(1), r = c[0] | 0, g = c[1] | 0, b = c[2] | 0;   // members get the colormap's hot end
+    const hi = cmap(1), hr = hi[0] | 0, hg = hi[1] | 0, hb = hi[2] | 0;   // members: colormap's hot end
+    const lo = cmap(0), lr = lo[0] | 0, lg = lo[1] | 0, lb = lo[2] | 0;   // non-members: colormap's dark end (black for Grayscale)
     return grayCanvas(sctx => {
       const img = sctx.createImageData(SIZE, SIZE), d = img.data;
       for (let i = 0; i < m.length; i++) {
         const p = i << 2;
-        if (m[i]) { d[p] = r; d[p + 1] = g; d[p + 2] = b; } else { d[p] = 10; d[p + 1] = 12; d[p + 2] = 18; }
+        if (m[i]) { d[p] = hr; d[p + 1] = hg; d[p + 2] = hb; } else { d[p] = lr; d[p + 1] = lg; d[p + 2] = lb; }
         d[p + 3] = 255;
       }
       sctx.putImageData(img, 0, 0);
@@ -2200,8 +2201,10 @@ function gridClient(WORKER_SRC, LABELS) {
     } else {
       let cnt = 0; if (member) for (let i = 0; i < member.length; i++) cnt += member[i];
       titleEl.textContent = member ? (view + ' - ' + cnt.toLocaleString() + ' / 1,000,000 (' + fmtPct(cnt / 1e6 * 100) + ')') : (view + ' …');
-      const c = cmap(1), mc = 'rgb(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ')';
-      legendEl.innerHTML = '<span class="lab">none</span>' + scaleSpan('#0a0c12 0 50%, ' + mc + ' 50% 100%') + '<span class="lab">earns ' + view + '</span>';
+      const hi = cmap(1), lo = cmap(0);
+      const hc = 'rgb(' + (hi[0] | 0) + ',' + (hi[1] | 0) + ',' + (hi[2] | 0) + ')';
+      const lc = 'rgb(' + (lo[0] | 0) + ',' + (lo[1] | 0) + ',' + (lo[2] | 0) + ')';
+      legendEl.innerHTML = '<span class="lab">none</span>' + scaleSpan(lc + ' 0 50%, ' + hc + ' 50% 100%') + '<span class="lab">earns ' + view + '</span>';
     }
   }
   function highlight() {
@@ -2313,6 +2316,8 @@ function gridClient(WORKER_SRC, LABELS) {
   document.getElementById('zin').onclick = () => zoomAt(cw / 2, ch / 2, 1.5);
   document.getElementById('zout').onclick = () => zoomAt(cw / 2, ch / 2, 1 / 1.5);
   document.getElementById('zreset').onclick = () => { fit(); render(); };
+  document.getElementById('sidehide').onclick = () => document.body.classList.add('nav-collapsed');
+  document.getElementById('sideshow').onclick = () => document.body.classList.remove('nav-collapsed');
   cmapSel.addEventListener('change', () => { currentCmap = cmapSel.value; recolor(); });
 
   // --- worker ---------------------------------------------------------------
@@ -2363,7 +2368,15 @@ function renderGrid() {
   .panel { position: fixed; z-index: 5; background: rgba(12,14,22,.86);
     border: 1px solid rgba(255,255,255,.12); border-radius: 10px; backdrop-filter: blur(6px); }
   #side { top: 12px; left: 12px; bottom: 12px; width: 250px; max-width: calc(100vw - 24px);
-    display: flex; flex-direction: column; padding: 12px; gap: 10px; }
+    display: flex; flex-direction: column; padding: 12px; gap: 10px; transition: transform .25s ease; }
+  body.nav-collapsed #side { transform: translateX(calc(-100% - 16px)); }
+  .sidehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .sidehead h1 { flex: 1; }
+  #sidehide, #sideshow { flex: 0 0 auto; width: 30px; height: 30px; font-size: 15px; color: #e8eaf0;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
+  #sidehide:hover, #sideshow:hover { background: rgba(255,255,255,.14); }
+  #sideshow { position: fixed; top: 12px; left: 12px; z-index: 7; display: none; padding: 0; }
+  body.nav-collapsed #sideshow { display: block; }
   #side h1 { margin: 0; font-size: 14px; font-weight: 650; }
   #side .nav { font-size: 12px; color: #9aa1b2; }
   #side .nav a { color: #ff8a5c; text-decoration: none; }
@@ -2407,8 +2420,9 @@ function renderGrid() {
 </style></head>
 <body>
 <canvas id="grid"></canvas>
+<button id="sideshow" class="panel" title="Show panel">≡</button>
 <div id="side" class="panel">
-  <h1>All 1,000,000 numbers</h1>
+  <div class="sidehead"><h1>All 1,000,000 numbers</h1><button id="sidehide" title="Hide panel">⟨</button></div>
   <div class="nav"><a href="/">&larr; calculator</a> &middot; <a href="/images">badge images &rarr;</a></div>
   <div id="vtitle">All numbers - badge count</div>
   <input id="search" type="search" placeholder="Filter 203 badges…" autocomplete="off">
@@ -2516,6 +2530,8 @@ function imagesClient(LABELS) {
   document.getElementById('zin').onclick = () => zoomAt(cw / 2, ch / 2, 1.6);
   document.getElementById('zout').onclick = () => zoomAt(cw / 2, ch / 2, 1 / 1.6);
   document.getElementById('zreset').onclick = () => { fit(); render(); };
+  document.getElementById('sidehide').onclick = () => document.body.classList.add('nav-collapsed');
+  document.getElementById('sideshow').onclick = () => document.body.classList.remove('nav-collapsed');
 
   function highlight() { for (const b of listEl.children) b.classList.toggle('on', b.textContent === current); }
   function load(label) {
@@ -2568,7 +2584,15 @@ function renderImages() {
   .panel { position: fixed; z-index: 5; background: rgba(12,14,22,.86);
     border: 1px solid rgba(255,255,255,.12); border-radius: 10px; backdrop-filter: blur(6px); }
   #side { top: 12px; left: 12px; bottom: 12px; width: 250px; max-width: calc(100vw - 24px);
-    display: flex; flex-direction: column; padding: 12px; gap: 10px; }
+    display: flex; flex-direction: column; padding: 12px; gap: 10px; transition: transform .25s ease; }
+  body.nav-collapsed #side { transform: translateX(calc(-100% - 16px)); }
+  .sidehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .sidehead #credit { flex: 1; }
+  #sidehide, #sideshow { flex: 0 0 auto; width: 30px; height: 30px; font-size: 15px; color: #e8eaf0;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
+  #sidehide:hover, #sideshow:hover { background: rgba(255,255,255,.14); }
+  #sideshow { position: fixed; top: 12px; left: 12px; z-index: 7; display: none; padding: 0; }
+  body.nav-collapsed #sideshow { display: block; }
   #credit { font-size: 13px; }
   #credit b { color: #ff8a5c; }
   #credit .sub { display: block; font-size: 12px; color: #9aa1b2; margin-top: 2px; }
@@ -2602,9 +2626,13 @@ function renderImages() {
 <canvas id="view"></canvas>
 <div id="empty"><span>Select a badge to view its number map</span></div>
 <div id="toast"></div>
+<button id="sideshow" class="panel" title="Show panel">≡</button>
 <div id="side" class="panel">
-  <div id="credit">Badge maps by <b>basiliotornado</b>
-    <span class="sub">Each image is 1000×1000 - one pixel per number (0–999,999). <a href="/grid">interactive grid &rarr;</a> &middot; <a href="/">calculator</a></span>
+  <div class="sidehead">
+    <div id="credit">Badge maps by <b>basiliotornado</b>
+      <span class="sub">Each image is 1000×1000 - one pixel per number (0–999,999). <a href="/grid">interactive grid &rarr;</a> &middot; <a href="/">calculator</a></span>
+    </div>
+    <button id="sidehide" title="Hide panel">⟨</button>
   </div>
   <div id="vtitle">203 badges</div>
   <input id="search" type="search" placeholder="Filter 203 badges…" autocomplete="off">
