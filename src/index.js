@@ -2185,8 +2185,9 @@ function gridClient(WORKER_SRC, LABELS) {
   }
   function rel(e) { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
 
-  // Test hook: number under canvas-relative (x, y) given the live transform.
+  // Test hooks: number under canvas-relative (x, y), and the live transform.
   window.__numAt = (x, y) => { const h = numberAt(x, y); return h ? h.n : null; };
+  window.__view = () => ({ scale: scale, ox: ox, oy: oy });
 
   // --- view selection -------------------------------------------------------
   function fmtPct(p) { return (p < 1 ? p.toFixed(3) : p.toFixed(2)) + '%'; }
@@ -2265,18 +2266,47 @@ function gridClient(WORKER_SRC, LABELS) {
   });
 
   // --- interaction ----------------------------------------------------------
-  let down = false, moved = 0, lx = 0, ly = 0;
+  // Pointer handling: 1 pointer pans (and click/tap opens a number); 2 pointers
+  // pinch-zoom toward their midpoint (and pan together). touch-action:none on the
+  // canvas keeps the browser from hijacking the gesture.
+  const pointers = new Map();      // pointerId -> {x, y}
+  let moved = 0, lx = 0, ly = 0, pinch = null;
+  function startPinch() {
+    const pts = [...pointers.values()];
+    const dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
+    pinch = { dist: Math.hypot(dx, dy) || 1, mx: (pts[0].x + pts[1].x) / 2, my: (pts[0].y + pts[1].y) / 2, scale, ox, oy };
+    moved = 999;                   // a pinch is never a click
+  }
   cv.addEventListener('wheel', e => {
     e.preventDefault();
     const [mx, my] = rel(e);
     zoomAt(mx, my, e.deltaY < 0 ? 1.18 : 1 / 1.18);
   }, { passive: false });
-  cv.addEventListener('pointerdown', e => { if (e.button !== 0) return; down = true; moved = 0; const [x, y] = rel(e); lx = x; ly = y; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;   // ignore right/middle mouse
+    const [x, y] = rel(e);
+    pointers.set(e.pointerId, { x, y });
+    try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    if (pointers.size === 1) { moved = 0; lx = x; ly = y; }
+    else if (pointers.size === 2) startPinch();
+  });
   cv.addEventListener('pointermove', e => {
     const [x, y] = rel(e);
-    if (down) {
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x, y });
+    if (pinch && pointers.size >= 2) {
+      const pts = [...pointers.values()];
+      const dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
+      const dist = Math.hypot(dx, dy) || 1, mx = (pts[0].x + pts[1].x) / 2, my = (pts[0].y + pts[1].y) / 2;
+      const ns = Math.min(maxScale, Math.max(minScale, pinch.scale * dist / pinch.dist));
+      const sx = (pinch.mx - pinch.ox) / pinch.scale, sy = (pinch.my - pinch.oy) / pinch.scale;
+      scale = ns; ox = mx - sx * ns; oy = my - sy * ns; render();
+      return;
+    }
+    if (pointers.size === 1 && pointers.has(e.pointerId)) {
       ox += x - lx; oy += y - ly; moved += Math.abs(x - lx) + Math.abs(y - ly); lx = x; ly = y; render();
-    } else {
+      return;
+    }
+    if (pointers.size === 0) {     // hover (mouse only)
       const hit = numberAt(x, y);
       if (hit) {
         let detail;
@@ -2291,13 +2321,19 @@ function gridClient(WORKER_SRC, LABELS) {
       } else { tip.style.display = 'none'; cv.style.cursor = 'grab'; }
     }
   });
-  cv.addEventListener('pointerup', e => {
-    if (e.button !== 0) return;
-    down = false;
-    const [x, y] = rel(e);
-    if (moved < 5) { const hit = numberAt(x, y); if (hit) location.href = '/?n=' + hit.n; }
-  });
-  cv.addEventListener('pointerleave', () => { tip.style.display = 'none'; });
+  function endPointer(e) {
+    const had = pointers.delete(e.pointerId);
+    try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (pointers.size === 1) {     // pinch -> single drag: rebase, don't treat as a tap
+      const p = [...pointers.values()][0]; lx = p.x; ly = p.y; pinch = null; moved = 999;
+    } else if (pointers.size === 0) {
+      pinch = null;
+      if (had && moved < 5) { const [x, y] = rel(e); const hit = numberAt(x, y); if (hit) location.href = '/?n=' + hit.n; }
+    }
+  }
+  cv.addEventListener('pointerup', endPointer);
+  cv.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null; });
+  cv.addEventListener('pointerleave', () => { if (pointers.size === 0) tip.style.display = 'none'; });
   cv.addEventListener('dblclick', e => { e.preventDefault(); const [mx, my] = rel(e); zoomAt(mx, my, 2.2); });
   // Right-click copies a PNG of the current 1000x1000 view to the clipboard.
   cv.addEventListener('contextmenu', async e => {
@@ -2511,11 +2547,45 @@ function imagesClient(LABELS) {
   }
   function rel(e) { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
 
-  let down = false, lx = 0, ly = 0;
+  // 1 pointer pans; 2 pointers pinch-zoom toward their midpoint (and pan together).
+  const pointers = new Map();
+  let lx = 0, ly = 0, pinch = null;
+  function startPinch() {
+    const pts = [...pointers.values()];
+    const dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
+    pinch = { dist: Math.hypot(dx, dy) || 1, mx: (pts[0].x + pts[1].x) / 2, my: (pts[0].y + pts[1].y) / 2, scale, ox, oy };
+  }
   cv.addEventListener('wheel', e => { e.preventDefault(); const [mx, my] = rel(e); zoomAt(mx, my, e.deltaY < 0 ? 1.2 : 1 / 1.2); }, { passive: false });
-  cv.addEventListener('pointerdown', e => { down = true; const [x, y] = rel(e); lx = x; ly = y; cv.setPointerCapture(e.pointerId); });
-  cv.addEventListener('pointermove', e => { if (!down) return; const [x, y] = rel(e); ox += x - lx; oy += y - ly; lx = x; ly = y; render(); });
-  cv.addEventListener('pointerup', () => { down = false; });
+  cv.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const [x, y] = rel(e);
+    pointers.set(e.pointerId, { x, y });
+    try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    if (pointers.size === 1) { lx = x; ly = y; }
+    else if (pointers.size === 2) startPinch();
+  });
+  cv.addEventListener('pointermove', e => {
+    const [x, y] = rel(e);
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x, y });
+    if (pinch && pointers.size >= 2) {
+      const pts = [...pointers.values()];
+      const dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
+      const dist = Math.hypot(dx, dy) || 1, mx = (pts[0].x + pts[1].x) / 2, my = (pts[0].y + pts[1].y) / 2;
+      const ns = Math.min(maxScale, Math.max(minScale, pinch.scale * dist / pinch.dist));
+      const sx = (pinch.mx - pinch.ox) / pinch.scale, sy = (pinch.my - pinch.oy) / pinch.scale;
+      scale = ns; ox = mx - sx * ns; oy = my - sy * ns; render();
+      return;
+    }
+    if (pointers.size === 1 && pointers.has(e.pointerId)) { ox += x - lx; oy += y - ly; lx = x; ly = y; render(); }
+  });
+  function endPointer(e) {
+    pointers.delete(e.pointerId);
+    try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (pointers.size === 1) { const p = [...pointers.values()][0]; lx = p.x; ly = p.y; pinch = null; }
+    else if (pointers.size === 0) pinch = null;
+  }
+  cv.addEventListener('pointerup', endPointer);
+  cv.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null; });
   cv.addEventListener('dblclick', e => { e.preventDefault(); const [mx, my] = rel(e); zoomAt(mx, my, 2.5); });
   // Right-click copies the current badge's full 1000x1000 PNG to the clipboard.
   cv.addEventListener('contextmenu', async e => {
