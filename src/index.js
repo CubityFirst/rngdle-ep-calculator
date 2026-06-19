@@ -2354,7 +2354,15 @@ function gridClient(WORKER_SRC, LABELS) {
   document.getElementById('zin').onclick = () => zoomAt(cw / 2, ch / 2, 1.5);
   document.getElementById('zout').onclick = () => zoomAt(cw / 2, ch / 2, 1 / 1.5);
   document.getElementById('zreset').onclick = () => { fit(); render(); };
-  document.getElementById('sidehide').onclick = () => document.body.classList.add('nav-collapsed');
+  const sidehideBtn = document.getElementById('sidehide');
+  const TRAY_HINT_KEY = 'rngdle-tray-hint';
+  // Flash the sidebar toggle until the user collapses the tray for the first time.
+  try { if (!localStorage.getItem(TRAY_HINT_KEY)) sidehideBtn.classList.add('hint'); } catch (_) {}
+  sidehideBtn.onclick = () => {
+    document.body.classList.add('nav-collapsed');
+    sidehideBtn.classList.remove('hint');
+    try { localStorage.setItem(TRAY_HINT_KEY, '1'); } catch (_) {}
+  };
   document.getElementById('sideshow').onclick = () => document.body.classList.remove('nav-collapsed');
   cmapSel.addEventListener('change', () => { currentCmap = cmapSel.value; recolor(); });
 
@@ -2410,11 +2418,27 @@ function renderGrid() {
   body.nav-collapsed #side { transform: translateX(calc(-100% - 16px)); }
   .sidehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
   .sidehead h1 { flex: 1; }
-  #sidehide, #sideshow { flex: 0 0 auto; width: 30px; height: 30px; font-size: 15px; color: #e8eaf0;
+  #sidehide, #sideshow { flex: 0 0 auto; width: 32px; height: 32px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center; color: #e8eaf0;
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
+  #sidehide svg, #sideshow svg { width: 19px; height: 19px; }
   #sidehide:hover, #sideshow:hover { background: rgba(255,255,255,.14); }
-  #sideshow { position: fixed; top: 12px; left: 12px; z-index: 7; display: none; padding: 0; }
-  body.nav-collapsed #sideshow { display: block; }
+  #sideshow { position: fixed; top: 12px; left: 12px; z-index: 7; display: none; }
+  body.nav-collapsed #sideshow { display: inline-flex; }
+  #sidehide.hint { color: #ffb295; animation: trayhint 1.15s ease-in-out infinite; }
+  @keyframes trayhint { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,138,92,0); border-color: rgba(255,255,255,.14); }
+    50% { box-shadow: 0 0 0 5px rgba(255,138,92,.32); border-color: #ff8a5c; } }
+  @media (max-width: 640px) {
+    #side { left: 10px; right: 10px; width: auto; max-width: none; top: 10px; bottom: 10px; padding: 14px; gap: 12px; }
+    #search { padding: 11px 12px; font-size: 15px; }
+    .item { padding: 11px 10px; font-size: 14px; }
+    #ctrls { gap: 8px; padding: 7px; }
+    #ctrls button { width: 42px; height: 42px; font-size: 20px; }
+    #sidehide, #sideshow { width: 40px; height: 40px; }
+    #sidehide svg, #sideshow svg { width: 22px; height: 22px; }
+    #cmap { font-size: 13px; padding: 6px 8px; }
+    body:not(.nav-collapsed) #ctrls, body:not(.nav-collapsed) #legend { display: none; }
+  }
   #side h1 { margin: 0; font-size: 14px; font-weight: 650; }
   #side .credit { font-size: 12px; color: #9aa1b2; }
   #side .credit b { color: #ff8a5c; font-weight: 600; }
@@ -2460,9 +2484,9 @@ function renderGrid() {
 </style></head>
 <body>
 <canvas id="grid"></canvas>
-<button id="sideshow" class="panel" title="Show panel">≡</button>
+<button id="sideshow" class="panel" title="Show panel" aria-label="Show panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>
 <div id="side" class="panel">
-  <div class="sidehead"><h1>All 1,000,000 numbers</h1><button id="sidehide" title="Hide panel">⟨</button></div>
+  <div class="sidehead"><h1>All 1,000,000 numbers</h1><button id="sidehide" title="Hide panel" aria-label="Hide panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button></div>
   <div class="credit">Heavily inspired by <b>basiliotornado</b></div>
   <div class="nav"><a href="/">&larr; calculator</a> &middot; <a href="/images">badge images &rarr;</a></div>
   <div id="vtitle">All numbers - badge count</div>
@@ -2607,7 +2631,15 @@ function imagesClient(LABELS) {
   document.getElementById('zin').onclick = () => zoomAt(cw / 2, ch / 2, 1.6);
   document.getElementById('zout').onclick = () => zoomAt(cw / 2, ch / 2, 1 / 1.6);
   document.getElementById('zreset').onclick = () => { fit(); render(); };
-  document.getElementById('sidehide').onclick = () => document.body.classList.add('nav-collapsed');
+  const sidehideBtn = document.getElementById('sidehide');
+  const TRAY_HINT_KEY = 'rngdle-tray-hint';
+  // Flash the sidebar toggle until the user collapses the tray for the first time.
+  try { if (!localStorage.getItem(TRAY_HINT_KEY)) sidehideBtn.classList.add('hint'); } catch (_) {}
+  sidehideBtn.onclick = () => {
+    document.body.classList.add('nav-collapsed');
+    sidehideBtn.classList.remove('hint');
+    try { localStorage.setItem(TRAY_HINT_KEY, '1'); } catch (_) {}
+  };
   document.getElementById('sideshow').onclick = () => document.body.classList.remove('nav-collapsed');
 
   function highlight() { for (const b of listEl.children) b.classList.toggle('on', b.textContent === current); }
@@ -2665,11 +2697,27 @@ function renderImages() {
   body.nav-collapsed #side { transform: translateX(calc(-100% - 16px)); }
   .sidehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
   .sidehead #credit { flex: 1; }
-  #sidehide, #sideshow { flex: 0 0 auto; width: 30px; height: 30px; font-size: 15px; color: #e8eaf0;
+  #sidehide, #sideshow { flex: 0 0 auto; width: 32px; height: 32px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center; color: #e8eaf0;
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
+  #sidehide svg, #sideshow svg { width: 19px; height: 19px; }
   #sidehide:hover, #sideshow:hover { background: rgba(255,255,255,.14); }
-  #sideshow { position: fixed; top: 12px; left: 12px; z-index: 7; display: none; padding: 0; }
-  body.nav-collapsed #sideshow { display: block; }
+  #sideshow { position: fixed; top: 12px; left: 12px; z-index: 7; display: none; }
+  body.nav-collapsed #sideshow { display: inline-flex; }
+  #sidehide.hint { color: #ffb295; animation: trayhint 1.15s ease-in-out infinite; }
+  @keyframes trayhint { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,138,92,0); border-color: rgba(255,255,255,.14); }
+    50% { box-shadow: 0 0 0 5px rgba(255,138,92,.32); border-color: #ff8a5c; } }
+  @media (max-width: 640px) {
+    #side { left: 10px; right: 10px; width: auto; max-width: none; top: 10px; bottom: 10px; padding: 14px; gap: 12px; }
+    #search { padding: 11px 12px; font-size: 15px; }
+    .item { padding: 11px 10px; font-size: 14px; }
+    #ctrls { gap: 8px; padding: 7px; }
+    #ctrls button { width: 42px; height: 42px; font-size: 20px; }
+    #sidehide, #sideshow { width: 40px; height: 40px; }
+    #sidehide svg, #sideshow svg { width: 22px; height: 22px; }
+    #cmap { font-size: 13px; padding: 6px 8px; }
+    body:not(.nav-collapsed) #ctrls, body:not(.nav-collapsed) #legend { display: none; }
+  }
   #credit { font-size: 13px; }
   #credit b { color: #ff8a5c; }
   #credit .sub { display: block; font-size: 12px; color: #9aa1b2; margin-top: 2px; }
@@ -2703,13 +2751,13 @@ function renderImages() {
 <canvas id="view"></canvas>
 <div id="empty"><span>Select a badge to view its number map</span></div>
 <div id="toast"></div>
-<button id="sideshow" class="panel" title="Show panel">≡</button>
+<button id="sideshow" class="panel" title="Show panel" aria-label="Show panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>
 <div id="side" class="panel">
   <div class="sidehead">
     <div id="credit">Badge maps by <b>basiliotornado</b>
       <span class="sub">Each image is 1000×1000 - one pixel per number (0–999,999). <a href="/grid">interactive grid &rarr;</a> &middot; <a href="/">calculator</a></span>
     </div>
-    <button id="sidehide" title="Hide panel">⟨</button>
+    <button id="sidehide" title="Hide panel" aria-label="Hide panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>
   </div>
   <div id="vtitle">203 badges</div>
   <input id="search" type="search" placeholder="Filter 203 badges…" autocomplete="off">
