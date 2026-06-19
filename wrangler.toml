@@ -2,6 +2,13 @@ name = "rngdle-ep-calculator"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
+# Per-badge PNGs (by basiliotornado) bundled as static assets and reached through
+# env.ASSETS from the /img route. The worker still owns /, /api, /grid, /images, /img;
+# only literal /<label>.png paths are served straight from this directory.
+[assets]
+directory = "./src/ByBadge"
+binding = "ASSETS"
+
 # Custom domain (zone cubityfir.st must be on this Cloudflare account).
 # Wrangler provisions the hostname + cert on `wrangler deploy`.
 [[routes]]

@@ -1941,10 +1941,571 @@ const __WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + analysisWorker.toS
 </body></html>`;
 }
 
+// ---------------------------------------------------------------------------
+// /grid - interactive 1,000,000-number map  &  /images - badge image gallery
+//
+// One pixel per number on a 1000x1000 canvas (number n at x = n % 1000,
+// y = floor(n / 1000)). The default /grid view is a monochrome badge-COUNT
+// heatmap; picking a badge from the list switches to its membership map (which
+// numbers earn it), computed from the same engine.js sweep - no images needed.
+// The sweep (per-number count + packed earned-badge bitmask) runs once in a Web
+// Worker and is cached in IndexedDB, so reloads and badge switches are instant.
+// Zoom/pan the canvas, hover for details, click a cell to open it on /.
+//
+// /images is a separate gallery of basiliotornado's per-badge PNGs (served from
+// src/ByBadge via /img?b=<label>) with the same pixel-perfect zoomable viewer.
+// ---------------------------------------------------------------------------
+
+function gridWorker() {
+  let E = null, origin = '';
+  let counts = null, bits = null, ROW = 0, cmin = 0, cmax = 0;
+  const DB = 'rngdle-grid', STORE = 'ds', KEY = 'sweep';
+  function idbStore(mode) {
+    return new Promise((res, rej) => {
+      const o = indexedDB.open(DB, 1);
+      o.onupgradeneeded = () => o.result.createObjectStore(STORE);
+      o.onsuccess = () => res(o.result.transaction(STORE, mode).objectStore(STORE));
+      o.onerror = () => rej(o.error);
+    });
+  }
+  function idbReq(r) { return new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+  async function idbGet(k) { try { return await idbReq((await idbStore('readonly')).get(k)); } catch (e) { return null; } }
+  async function idbPut(k, v) { try { await idbReq((await idbStore('readwrite')).put(v, k)); } catch (e) {} }
+  // Cache key busts whenever engine.js changes (so a scoring edit reshades the grid).
+  async function version() {
+    try { const t = await (await fetch(origin + '/engine.js')).text(); let h = 5381; for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h.toString(36) + '.' + t.length; }
+    catch (e) { return 'na'; }
+  }
+
+  // Membership of a single badge index: which numbers earn it (1) or not (0).
+  function membership(idx) {
+    const N = counts.length, m = new Uint8Array(N), byte = idx >> 3, bit = 1 << (idx & 7);
+    for (let n = 0; n < N; n++) if (bits[n * ROW + byte] & bit) m[n] = 1;
+    return m;
+  }
+
+  self.onmessage = async (ev) => {
+    const msg = ev.data;
+    try {
+      // Per-badge highlight: bits stays resident in the worker, so this is instant.
+      if (msg.cmd === 'membership') {
+        const m = membership(msg.idx);
+        self.postMessage({ type: 'membership', idx: msg.idx, member: m.buffer }, [m.buffer]);
+        return;
+      }
+      if (msg.cmd !== 'compute') return;
+      origin = msg.origin;
+      if (!E) E = await import(origin + '/engine.js');
+      self.postMessage({ type: 'meta', badges: E.BADGE_META });
+
+      const ver = await version();
+      const hit = msg.force ? null : await idbGet(KEY);
+      if (hit && hit.ver === ver && hit.counts && hit.counts.length === 1000000) {
+        counts = hit.counts; bits = hit.bits; ROW = hit.row; cmin = hit.min; cmax = hit.max;
+      } else {
+        // Full 0..999,999 sweep: per-number badge count + a packed earned-badge bitmask.
+        const N = 1000000, B = E.BADGE_META.length;
+        ROW = (B + 7) >> 3;
+        counts = new Uint8Array(N);
+        bits = new Uint8Array(N * ROW);
+        let mn = 255, mx = 0;
+        for (let n = 0; n < N; n++) {
+          const earned = E.computeLean(n).earned, len = earned.length;
+          counts[n] = len;
+          if (len < mn) mn = len;
+          if (len > mx) mx = len;
+          const base = n * ROW;
+          for (let j = 0; j < len; j++) { const bi = earned[j]; bits[base + (bi >> 3)] |= (1 << (bi & 7)); }
+          if ((n & 0x7FFF) === 0) self.postMessage({ type: 'progress', pct: n / N });
+        }
+        cmin = mn; cmax = mx;
+        await idbPut(KEY, { ver, counts, bits, row: ROW, min: mn, max: mx });
+      }
+      // counts + bits stay resident for membership(); ship the page a copy of counts.
+      const c = counts.slice();
+      self.postMessage({ type: 'done', counts: c.buffer, min: cmin, max: cmax, cached: !!hit }, [c.buffer]);
+    } catch (e) {
+      self.postMessage({ type: 'error', message: String(e && e.message || e) });
+    }
+  };
+}
+
+function gridClient(WORKER_SRC, LABELS) {
+  const SIZE = 1000;
+  const cv = document.getElementById('grid');
+  const ctx = cv.getContext('2d');
+  const tip = document.getElementById('tip');
+  const ov = document.getElementById('ov');
+  const bar = document.getElementById('bar');
+  const ovtext = document.getElementById('ovtext');
+  const listEl = document.getElementById('list');
+  const searchEl = document.getElementById('search');
+  const legendEl = document.getElementById('legend');
+  const titleEl = document.getElementById('vtitle');
+
+  let counts = null, cmin = 0, cmax = 1;
+  let countCanvas = null;          // monochrome badge-count heatmap (the default view)
+  let src = null;                  // currently displayed 1000x1000 source canvas
+  let member = null;               // Uint8Array membership for the active badge (or null in count mode)
+  let view = 'count';              // 'count' | a badge label
+  const memCache = new Map();      // label -> Uint8Array, so re-selecting a badge is instant
+  let scale = 1, ox = 0, oy = 0, minScale = 1;
+  const maxScale = 80;
+  let cw = 0, ch = 0, dpr = 1;
+
+  function grayCanvas(paint) {
+    const cnv = document.createElement('canvas');
+    cnv.width = SIZE; cnv.height = SIZE;
+    paint(cnv.getContext('2d'));
+    return cnv;
+  }
+  function buildCount() {
+    countCanvas = grayCanvas(sctx => {
+      const img = sctx.createImageData(SIZE, SIZE), d = img.data;
+      const lut = new Uint8Array(cmax + 1);
+      for (let v = 0; v <= cmax; v++) lut[v] = cmax === cmin ? 0 : Math.round((v - cmin) / (cmax - cmin) * 255);
+      for (let i = 0; i < counts.length; i++) { const g = lut[counts[i]], p = i << 2; d[p] = d[p + 1] = d[p + 2] = g; d[p + 3] = 255; }
+      sctx.putImageData(img, 0, 0);
+    });
+  }
+  function buildMember(m) {
+    return grayCanvas(sctx => {
+      const img = sctx.createImageData(SIZE, SIZE), d = img.data;
+      for (let i = 0; i < m.length; i++) { const g = m[i] ? 255 : 17, p = i << 2; d[p] = d[p + 1] = d[p + 2] = g; d[p + 3] = 255; }
+      sctx.putImageData(img, 0, 0);
+    });
+  }
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    cw = cv.clientWidth; ch = cv.clientHeight;
+    cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr);
+  }
+  function fit() {
+    minScale = Math.min(cw / SIZE, ch / SIZE);
+    scale = minScale;
+    ox = (cw - SIZE * scale) / 2;
+    oy = (ch - SIZE * scale) / 2;
+  }
+  function clampPan() {
+    const w = SIZE * scale, h = SIZE * scale;
+    ox = w <= cw ? (cw - w) / 2 : Math.min(0, Math.max(cw - w, ox));
+    oy = h <= ch ? (ch - h) / 2 : Math.min(0, Math.max(ch - h, oy));
+  }
+  function render() {
+    if (!src) return;
+    clampPan();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = '#05060a';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.drawImage(src, ox, oy, SIZE * scale, SIZE * scale);
+  }
+  function numberAt(mx, my) {
+    const sx = Math.floor((mx - ox) / scale), sy = Math.floor((my - oy) / scale);
+    if (sx < 0 || sy < 0 || sx >= SIZE || sy >= SIZE) return null;
+    return { x: sx, y: sy, n: sy * SIZE + sx };
+  }
+  function zoomAt(mx, my, factor) {
+    const ns = Math.min(maxScale, Math.max(minScale, scale * factor));
+    if (ns === scale) return;
+    ox = mx - (mx - ox) * (ns / scale);
+    oy = my - (my - oy) * (ns / scale);
+    scale = ns; render();
+  }
+  function rel(e) { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+
+  // Test hook: number under canvas-relative (x, y) given the live transform.
+  window.__numAt = (x, y) => { const h = numberAt(x, y); return h ? h.n : null; };
+
+  // --- view selection -------------------------------------------------------
+  function fmtPct(p) { return (p < 1 ? p.toFixed(3) : p.toFixed(2)) + '%'; }
+  function updateLegend() {
+    if (view === 'count') {
+      titleEl.textContent = 'All numbers - badge count';
+      legendEl.innerHTML = '<span class="lab">' + cmin + '</span><span class="scale count"></span><span class="lab">' + cmax + ' badges</span>';
+    } else {
+      let cnt = 0; if (member) for (let i = 0; i < member.length; i++) cnt += member[i];
+      titleEl.textContent = member ? (view + ' - ' + cnt.toLocaleString() + ' / 1,000,000 (' + fmtPct(cnt / 1e6 * 100) + ')') : (view + ' …');
+      legendEl.innerHTML = '<span class="lab">none</span><span class="scale binary"></span><span class="lab">earns ' + view + '</span>';
+    }
+  }
+  function highlight() {
+    for (const b of listEl.children) b.classList.toggle('on', b.dataset.v === view);
+  }
+  function selectCount() {
+    view = 'count'; member = null; src = countCanvas;
+    highlight(); updateLegend(); render();
+  }
+  function applyMember(label) {
+    member = memCache.get(label);
+    src = buildMember(member);
+    highlight(); updateLegend(); render();
+  }
+  function selectBadge(label, idx) {
+    view = label;
+    highlight(); updateLegend();
+    if (memCache.has(label)) applyMember(label);
+    else worker.postMessage({ cmd: 'membership', idx: idx });
+  }
+  function buildList() {
+    listEl.innerHTML = '';
+    const items = [{ label: 'All numbers (badge count)', v: 'count', idx: -1 }];
+    for (let i = 0; i < LABELS.length; i++) items.push({ label: LABELS[i], v: LABELS[i], idx: i });
+    for (const it of items) {
+      const b = document.createElement('button');
+      b.className = 'item'; b.textContent = it.label; b.dataset.v = it.v; b.dataset.idx = it.idx;
+      b.onclick = () => { it.idx < 0 ? selectCount() : selectBadge(it.label, it.idx); };
+      listEl.appendChild(b);
+    }
+    highlight();
+  }
+  searchEl.addEventListener('input', () => {
+    const q = searchEl.value.toLowerCase();
+    for (const b of listEl.children) {
+      if (b.dataset.idx === '-1') continue;
+      b.style.display = b.textContent.toLowerCase().includes(q) ? '' : 'none';
+    }
+  });
+
+  // --- interaction ----------------------------------------------------------
+  let down = false, moved = 0, lx = 0, ly = 0;
+  cv.addEventListener('wheel', e => {
+    e.preventDefault();
+    const [mx, my] = rel(e);
+    zoomAt(mx, my, e.deltaY < 0 ? 1.18 : 1 / 1.18);
+  }, { passive: false });
+  cv.addEventListener('pointerdown', e => { down = true; moved = 0; const [x, y] = rel(e); lx = x; ly = y; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointermove', e => {
+    const [x, y] = rel(e);
+    if (down) {
+      ox += x - lx; oy += y - ly; moved += Math.abs(x - lx) + Math.abs(y - ly); lx = x; ly = y; render();
+    } else {
+      const hit = numberAt(x, y);
+      if (hit) {
+        let detail;
+        if (view === 'count') { const c = counts[hit.n]; detail = c + ' badge' + (c === 1 ? '' : 's'); }
+        else { detail = (member && member[hit.n]) ? 'earns ' + view : 'no ' + view; }
+        tip.style.display = 'block';
+        tip.innerHTML = '<b>' + hit.n.toLocaleString() + '</b><span>' + detail + ' - click to open</span>';
+        tip.style.left = Math.min(cw - 160, x + 16) + 'px';
+        tip.style.top = Math.min(ch - 44, y + 16) + 'px';
+        cv.style.cursor = 'pointer';
+      } else { tip.style.display = 'none'; cv.style.cursor = 'grab'; }
+    }
+  });
+  cv.addEventListener('pointerup', e => {
+    down = false;
+    const [x, y] = rel(e);
+    if (moved < 5) { const hit = numberAt(x, y); if (hit) location.href = '/?n=' + hit.n; }
+  });
+  cv.addEventListener('pointerleave', () => { tip.style.display = 'none'; });
+  cv.addEventListener('dblclick', e => { e.preventDefault(); const [mx, my] = rel(e); zoomAt(mx, my, 2.2); });
+  window.addEventListener('resize', () => { const wasFit = scale <= minScale + 1e-6; resize(); if (wasFit) fit(); render(); });
+  document.getElementById('zin').onclick = () => zoomAt(cw / 2, ch / 2, 1.5);
+  document.getElementById('zout').onclick = () => zoomAt(cw / 2, ch / 2, 1 / 1.5);
+  document.getElementById('zreset').onclick = () => { fit(); render(); };
+
+  // --- worker ---------------------------------------------------------------
+  const worker = new Worker(URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' })), { type: 'module' });
+  worker.onmessage = (ev) => {
+    const m = ev.data;
+    if (m.type === 'progress') {
+      const pct = Math.round(m.pct * 100);
+      bar.style.width = pct + '%';
+      ovtext.textContent = 'Scoring ' + pct + '% of 1,000,000 numbers…';
+    } else if (m.type === 'done') {
+      counts = new Uint8Array(m.counts); cmin = m.min; cmax = m.max;
+      buildCount();
+      ov.style.display = 'none';
+      buildList();
+      selectCount();
+      resize(); fit(); render();
+    } else if (m.type === 'membership') {
+      const label = LABELS[m.idx];
+      memCache.set(label, new Uint8Array(m.member));
+      if (view === label) applyMember(label);
+    } else if (m.type === 'error') {
+      ov.style.display = 'flex';
+      ovtext.textContent = 'Error: ' + m.message;
+    }
+  };
+  worker.onerror = e => { ovtext.textContent = 'Worker error: ' + (e.message || e); };
+  worker.postMessage({ cmd: 'compute', origin: location.origin });
+}
+
+function renderGrid() {
+  const labels = JSON.stringify(BADGES.map(b => b[1]));
+  return `<!doctype html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="robots" content="noindex">
+<title>RNGdle - Number Grid</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #05060a; color: #e8eaf0;
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    overflow: hidden; -webkit-user-select: none; user-select: none; }
+  #grid { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  #grid:active { cursor: grabbing; }
+  .panel { position: fixed; z-index: 5; background: rgba(12,14,22,.86);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 10px; backdrop-filter: blur(6px); }
+  #side { top: 12px; left: 12px; bottom: 12px; width: 250px; max-width: calc(100vw - 24px);
+    display: flex; flex-direction: column; padding: 12px; gap: 10px; }
+  #side h1 { margin: 0; font-size: 14px; font-weight: 650; }
+  #side .nav { font-size: 12px; color: #9aa1b2; }
+  #side .nav a { color: #ff8a5c; text-decoration: none; }
+  #side .nav a:hover { text-decoration: underline; }
+  #vtitle { font-size: 12px; color: #cfd3df; min-height: 16px; }
+  #search { width: 100%; padding: 8px 10px; font-size: 13px; line-height: 1.4; color: #e8eaf0;
+    -webkit-appearance: none; appearance: none; font-family: inherit;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; }
+  #list { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 2px; margin: 0 -4px; padding: 0 4px; }
+  .item { flex: 0 0 auto; display: block; width: 100%; text-align: left; padding: 6px 8px; font-size: 12.5px;
+    line-height: 1.5; font-family: inherit;
+    color: #c8ccd8; background: transparent; border: 0; border-radius: 6px; cursor: pointer; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .item:hover { background: rgba(255,255,255,.07); }
+  .item.on { background: rgba(255,138,92,.18); color: #ffd9c9; }
+  #ctrls { top: 12px; right: 12px; display: flex; gap: 6px; padding: 6px; }
+  #ctrls button { width: 34px; height: 34px; font-size: 17px; color: #e8eaf0;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
+  #ctrls button:hover { background: rgba(255,255,255,.14); }
+  #legend { bottom: 12px; right: 12px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  #legend .scale { width: 130px; height: 10px; border-radius: 5px; }
+  #legend .scale.count { background: linear-gradient(90deg, #000, #fff); }
+  #legend .scale.binary { background: linear-gradient(90deg, #111 0 50%, #fff 50% 100%); }
+  #legend .lab { color: #9aa1b2; }
+  #tip { position: fixed; z-index: 6; display: none; pointer-events: none; padding: 6px 9px;
+    background: rgba(8,10,16,.92); border: 1px solid rgba(255,255,255,.18); border-radius: 8px; font-size: 12px; white-space: nowrap; }
+  #tip b { font-size: 14px; }
+  #tip span { display: block; color: #9aa1b2; font-size: 11px; margin-top: 1px; }
+  #ov { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; background: #05060a; }
+  #ov h2 { margin: 0; font-weight: 600; font-size: 16px; }
+  #ovtext { color: #9aa1b2; font-size: 13px; }
+  #track { width: min(320px, 70vw); height: 8px; border-radius: 4px; background: rgba(255,255,255,.1); overflow: hidden; }
+  #bar { height: 100%; width: 0; background: linear-gradient(90deg, #888, #fff); transition: width .15s; }
+</style></head>
+<body>
+<canvas id="grid"></canvas>
+<div id="side" class="panel">
+  <h1>All 1,000,000 numbers</h1>
+  <div class="nav"><a href="/">&larr; calculator</a> &middot; <a href="/images">badge images &rarr;</a></div>
+  <div id="vtitle">All numbers - badge count</div>
+  <input id="search" type="search" placeholder="Filter 203 badges…" autocomplete="off">
+  <div id="list"></div>
+  <div class="nav">Pick a badge to highlight which numbers earn it. Click any cell to open it.</div>
+</div>
+<div id="ctrls" class="panel">
+  <button id="zout" title="Zoom out">−</button>
+  <button id="zreset" title="Fit">⤢</button>
+  <button id="zin" title="Zoom in">+</button>
+</div>
+<div id="legend" class="panel"></div>
+<div id="tip"></div>
+<div id="ov">
+  <h2>Building the grid…</h2>
+  <div id="track"><div id="bar"></div></div>
+  <div id="ovtext">Scoring 1,000,000 numbers (one-time; cached after)…</div>
+</div>
+<script type="module">
+var __name = (f) => f;
+const __GRID_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + gridWorker.toString() + ')()')};
+(${gridClient.toString()})(__GRID_WORKER_SRC, ${labels});
+</script>
+</body></html>`;
+}
+
+function imagesClient(LABELS) {
+  const SIZE = 1000;
+  const cv = document.getElementById('view');
+  const ctx = cv.getContext('2d');
+  const listEl = document.getElementById('list');
+  const searchEl = document.getElementById('search');
+  const titleEl = document.getElementById('vtitle');
+  const empty = document.getElementById('empty');
+  const toast = document.getElementById('toast');
+
+  let src = null, current = null, toastT = 0;
+  function flash(msg) {
+    toast.textContent = msg; toast.classList.add('show');
+    clearTimeout(toastT); toastT = setTimeout(() => toast.classList.remove('show'), 1800);
+  }
+  let scale = 1, ox = 0, oy = 0, minScale = 1;
+  const maxScale = 160;
+  let cw = 0, ch = 0, dpr = 1;
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    cw = cv.clientWidth; ch = cv.clientHeight;
+    cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr);
+  }
+  function fit() {
+    minScale = Math.min(cw / SIZE, ch / SIZE) * 0.92;
+    scale = minScale;
+    ox = (cw - SIZE * scale) / 2;
+    oy = (ch - SIZE * scale) / 2;
+  }
+  function clampPan() {
+    const w = SIZE * scale, h = SIZE * scale;
+    ox = w <= cw ? (cw - w) / 2 : Math.min(0, Math.max(cw - w, ox));
+    oy = h <= ch ? (ch - h) / 2 : Math.min(0, Math.max(ch - h, oy));
+  }
+  function render() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;     // perfect-pixel (nearest-neighbor) scaling
+    ctx.fillStyle = '#05060a';
+    ctx.fillRect(0, 0, cw, ch);
+    if (!src) return;
+    clampPan();
+    ctx.drawImage(src, ox, oy, SIZE * scale, SIZE * scale);
+  }
+  function zoomAt(mx, my, factor) {
+    const ns = Math.min(maxScale, Math.max(minScale, scale * factor));
+    if (ns === scale) return;
+    ox = mx - (mx - ox) * (ns / scale);
+    oy = my - (my - oy) * (ns / scale);
+    scale = ns; render();
+  }
+  function rel(e) { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+
+  let down = false, lx = 0, ly = 0;
+  cv.addEventListener('wheel', e => { e.preventDefault(); const [mx, my] = rel(e); zoomAt(mx, my, e.deltaY < 0 ? 1.2 : 1 / 1.2); }, { passive: false });
+  cv.addEventListener('pointerdown', e => { down = true; const [x, y] = rel(e); lx = x; ly = y; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointermove', e => { if (!down) return; const [x, y] = rel(e); ox += x - lx; oy += y - ly; lx = x; ly = y; render(); });
+  cv.addEventListener('pointerup', () => { down = false; });
+  cv.addEventListener('dblclick', e => { e.preventDefault(); const [mx, my] = rel(e); zoomAt(mx, my, 2.5); });
+  // Right-click copies the current badge's full 1000x1000 PNG to the clipboard.
+  cv.addEventListener('contextmenu', async e => {
+    e.preventDefault();
+    if (!src) { flash('Pick a badge first'); return; }
+    try {
+      const blob = await new Promise((res, rej) => src.toBlob(b => b ? res(b) : rej(new Error('encode failed')), 'image/png'));
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      flash('Copied ' + current + ' to clipboard');
+    } catch (err) {
+      flash('Copy failed: ' + (err && err.message || err));
+    }
+  });
+  window.addEventListener('resize', () => { const wasFit = scale <= minScale + 1e-6; resize(); if (wasFit) fit(); render(); });
+  document.getElementById('zin').onclick = () => zoomAt(cw / 2, ch / 2, 1.6);
+  document.getElementById('zout').onclick = () => zoomAt(cw / 2, ch / 2, 1 / 1.6);
+  document.getElementById('zreset').onclick = () => { fit(); render(); };
+
+  function highlight() { for (const b of listEl.children) b.classList.toggle('on', b.textContent === current); }
+  function load(label) {
+    current = label; highlight();
+    titleEl.textContent = label + ' - loading…';
+    const im = new Image();
+    im.onload = () => {
+      const cnv = document.createElement('canvas'); cnv.width = SIZE; cnv.height = SIZE;
+      cnv.getContext('2d').drawImage(im, 0, 0, SIZE, SIZE);
+      src = cnv;
+      titleEl.textContent = label;
+      empty.style.display = 'none';
+      resize(); fit(); render();
+    };
+    im.onerror = () => { titleEl.textContent = label + ' - failed to load'; };
+    im.src = '/img?b=' + encodeURIComponent(label);
+  }
+  function buildList() {
+    listEl.innerHTML = '';
+    for (const label of LABELS) {
+      const b = document.createElement('button');
+      b.className = 'item'; b.textContent = label;
+      b.onclick = () => load(label);
+      listEl.appendChild(b);
+    }
+  }
+  searchEl.addEventListener('input', () => {
+    const q = searchEl.value.toLowerCase();
+    for (const b of listEl.children) b.style.display = b.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+
+  resize(); buildList(); render();
+}
+
+function renderImages() {
+  const labels = JSON.stringify(BADGES.map(b => b[1]));
+  return `<!doctype html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="robots" content="noindex">
+<title>RNGdle - Badge Images</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #05060a; color: #e8eaf0;
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    overflow: hidden; -webkit-user-select: none; user-select: none; }
+  #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  #view:active { cursor: grabbing; }
+  .panel { position: fixed; z-index: 5; background: rgba(12,14,22,.86);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 10px; backdrop-filter: blur(6px); }
+  #side { top: 12px; left: 12px; bottom: 12px; width: 250px; max-width: calc(100vw - 24px);
+    display: flex; flex-direction: column; padding: 12px; gap: 10px; }
+  #credit { font-size: 13px; }
+  #credit b { color: #ff8a5c; }
+  #credit .sub { display: block; font-size: 12px; color: #9aa1b2; margin-top: 2px; }
+  #credit a { color: #ff8a5c; text-decoration: none; }
+  #credit a:hover { text-decoration: underline; }
+  #vtitle { font-size: 12px; color: #cfd3df; min-height: 16px; }
+  #search { width: 100%; padding: 8px 10px; font-size: 13px; line-height: 1.4; color: #e8eaf0;
+    -webkit-appearance: none; appearance: none; font-family: inherit;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; }
+  #list { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 2px; margin: 0 -4px; padding: 0 4px; }
+  .item { flex: 0 0 auto; display: block; width: 100%; text-align: left; padding: 6px 8px; font-size: 12.5px;
+    line-height: 1.5; font-family: inherit;
+    color: #c8ccd8; background: transparent; border: 0; border-radius: 6px; cursor: pointer; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .item:hover { background: rgba(255,255,255,.07); }
+  .item.on { background: rgba(255,138,92,.18); color: #ffd9c9; }
+  #ctrls { top: 12px; right: 12px; display: flex; gap: 6px; padding: 6px; }
+  #ctrls button { width: 34px; height: 34px; font-size: 17px; color: #e8eaf0;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
+  #ctrls button:hover { background: rgba(255,255,255,.14); }
+  #empty { position: fixed; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center;
+    pointer-events: none; }
+  #empty span { color: #6b7384; font-size: 14px; }
+  #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 8;
+    padding: 8px 14px; font-size: 13px; color: #e8eaf0; background: rgba(8,10,16,.94);
+    border: 1px solid rgba(255,255,255,.18); border-radius: 8px; opacity: 0; transition: opacity .2s;
+    pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style></head>
+<body>
+<canvas id="view"></canvas>
+<div id="empty"><span>Select a badge to view its number map</span></div>
+<div id="toast"></div>
+<div id="side" class="panel">
+  <div id="credit">Badge maps by <b>basiliotornado</b>
+    <span class="sub">Each image is 1000×1000 - one pixel per number (0–999,999). <a href="/grid">interactive grid &rarr;</a> &middot; <a href="/">calculator</a></span>
+  </div>
+  <div id="vtitle">203 badges</div>
+  <input id="search" type="search" placeholder="Filter 203 badges…" autocomplete="off">
+  <div id="list"></div>
+</div>
+<div id="ctrls" class="panel">
+  <button id="zout" title="Zoom out">−</button>
+  <button id="zreset" title="Fit">⤢</button>
+  <button id="zin" title="Zoom in">+</button>
+</div>
+<script type="module">
+var __name = (f) => f;
+(${imagesClient.toString()})(${labels});
+</script>
+</body></html>`;
+}
+
+// Valid badge labels (== ByBadge PNG basenames), for /img request validation.
+const BADGE_LABEL_SET = new Set(BADGES.map(b => b[1]));
+
 export { compute, BADGES, engineModuleSource };
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     const raw = url.searchParams.get('n');
 
@@ -1981,6 +2542,38 @@ export default {
       }
       return new Response(JSON.stringify(betaData(compute(n), n)), {
         headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
+      });
+    }
+
+    // Hidden interactive 1,000,000-number map; click a cell to open it on /.
+    if (url.pathname === '/grid') {
+      return new Response(renderGrid(), {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    }
+
+    // Badge image gallery (basiliotornado's per-badge PNGs).
+    if (url.pathname === '/images') {
+      return new Response(renderImages(), {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    }
+
+    // Serve a single badge PNG from the ByBadge asset bundle (validated label).
+    if (url.pathname === '/img') {
+      const label = url.searchParams.get('b') || '';
+      if (!BADGE_LABEL_SET.has(label)) {
+        return new Response('Unknown badge', { status: 404 });
+      }
+      if (!env || !env.ASSETS) {
+        return new Response('Image assets unavailable', { status: 503 });
+      }
+      const assetReq = new Request(new URL('/' + encodeURIComponent(label) + '.png', url.origin));
+      const res = await env.ASSETS.fetch(assetReq);
+      if (!res.ok) return new Response('Not found', { status: 404 });
+      return new Response(res.body, {
+        status: 200,
+        headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' },
       });
     }
 
