@@ -2378,6 +2378,8 @@ function renderGrid() {
   #sideshow { position: fixed; top: 12px; left: 12px; z-index: 7; display: none; padding: 0; }
   body.nav-collapsed #sideshow { display: block; }
   #side h1 { margin: 0; font-size: 14px; font-weight: 650; }
+  #side .credit { font-size: 12px; color: #9aa1b2; }
+  #side .credit b { color: #ff8a5c; font-weight: 600; }
   #side .nav { font-size: 12px; color: #9aa1b2; }
   #side .nav a { color: #ff8a5c; text-decoration: none; }
   #side .nav a:hover { text-decoration: underline; }
@@ -2423,6 +2425,7 @@ function renderGrid() {
 <button id="sideshow" class="panel" title="Show panel">≡</button>
 <div id="side" class="panel">
   <div class="sidehead"><h1>All 1,000,000 numbers</h1><button id="sidehide" title="Hide panel">⟨</button></div>
+  <div class="credit">Heavily inspired by <b>basiliotornado</b></div>
   <div class="nav"><a href="/">&larr; calculator</a> &middot; <a href="/images">badge images &rarr;</a></div>
   <div id="vtitle">All numbers - badge count</div>
   <input id="search" type="search" placeholder="Filter 203 badges…" autocomplete="off">
