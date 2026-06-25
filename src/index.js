@@ -1692,6 +1692,11 @@ function renderHTML(result) {
     border:1px solid var(--border-2); background:var(--surface-2); color:var(--text);
     transition:background .12s, border-color .12s, opacity .12s; }
   button:hover { background:#20232c; border-color:#3a3e49; }
+  .grid-btn { display:inline-flex; align-items:center; gap:.45rem; text-decoration:none;
+    font-size:.92rem; font-weight:500; padding:.65rem 1.1rem; border-radius:8px;
+    border:1px solid var(--border-2); background:var(--surface-2); color:var(--text);
+    transition:background .12s, border-color .12s; }
+  .grid-btn:hover { background:#20232c; border-color:#3a3e49; }
   footer { margin-top:2.5rem; color:var(--faint); font-size:.8rem; }
   footer code { color:var(--muted); font-family:var(--mono); }
   a { color:var(--accent); }
@@ -1850,7 +1855,9 @@ function renderHTML(result) {
     </div>
   </section>
 
-  <footer><a href="/grid">all 1,000,000 numbers &rarr;</a> &middot; JSON API: <code>/api?n=696969</code></footer>
+  <div class="an-bar"><a class="grid-btn" href="/grid">🗺️ Explore all 1,000,000 numbers &rarr;</a></div>
+
+  <footer>JSON API: <code>/api?n=696969</code></footer>
 </div>
 <script>
 // The click-to-type number card: digits light up where each badge scores,
