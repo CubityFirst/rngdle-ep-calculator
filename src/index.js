@@ -2210,17 +2210,33 @@ function gridClient(WORKER_SRC, LABELS) {
   function highlight() {
     for (const b of listEl.children) b.classList.toggle('on', b.dataset.v === view);
   }
+  // Each view has a shareable URL via the hash: /grid (count), /grid#ep, or
+  // /grid#<badge label>. The address bar tracks the active view, loading such a
+  // URL opens straight to it, and editing the hash / back-forward re-selects.
+  const labelIdx = new Map();
+  for (let i = 0; i < LABELS.length; i++) labelIdx.set(LABELS[i], i);
+  function curHash() { try { return decodeURIComponent(location.hash.replace(/^#/, '')); } catch (_) { return ''; } }
+  function setHash(v) {
+    const h = v === 'count' ? '' : '#' + encodeURIComponent(v);
+    if (history.replaceState) history.replaceState(null, '', location.pathname + location.search + h);
+    else location.hash = h;
+  }
+  function go(v) {
+    if (v === 'ep') selectEP();
+    else if (v && v !== 'count' && labelIdx.has(v)) selectBadge(v, labelIdx.get(v));
+    else selectCount();
+  }
   function selectCount() {
     view = 'count'; member = null;
     if (!countCanvas) buildCount();
     src = countCanvas;
-    highlight(); updateLegend(); render();
+    highlight(); updateLegend(); render(); setHash('count');
   }
   function selectEP() {
     view = 'ep'; member = null;
     if (!epCanvas) buildEP();
     src = epCanvas;
-    highlight(); updateLegend(); render();
+    highlight(); updateLegend(); render(); setHash('ep');
   }
   // Repaint the active view with the current colormap (invalidates cached canvases).
   function recolor() {
@@ -2237,6 +2253,7 @@ function gridClient(WORKER_SRC, LABELS) {
   }
   function selectBadge(label, idx) {
     view = label;
+    setHash(label);
     highlight(); updateLegend();
     if (memCache.has(label)) applyMember(label);
     else worker.postMessage({ cmd: 'membership', idx: idx });
@@ -2348,9 +2365,14 @@ function gridClient(WORKER_SRC, LABELS) {
     }
   });
   window.addEventListener('resize', () => { const wasFit = scale <= minScale + 1e-6; resize(); if (wasFit) fit(); render(); });
+  window.addEventListener('hashchange', () => { if (counts) go(curHash() || 'count'); });
   document.getElementById('zin').onclick = () => zoomAt(cw / 2, ch / 2, 1.5);
   document.getElementById('zout').onclick = () => zoomAt(cw / 2, ch / 2, 1 / 1.5);
   document.getElementById('zreset').onclick = () => { fit(); render(); };
+  document.getElementById('zlink').onclick = async () => {
+    try { await navigator.clipboard.writeText(location.href); flash('Link copied'); }
+    catch (_) { flash('Copy failed'); }
+  };
   const sidehideBtn = document.getElementById('sidehide');
   const TRAY_HINT_KEY = 'rngdle-tray-hint';
   // Flash the sidebar toggle until the user collapses the tray for the first time.
@@ -2378,7 +2400,7 @@ function gridClient(WORKER_SRC, LABELS) {
       buildCount();
       ov.style.display = 'none';
       buildList();
-      selectCount();
+      go(curHash() || 'count');
       resize(); fit(); render();
     } else if (m.type === 'membership') {
       const label = LABELS[m.idx];
@@ -2495,6 +2517,7 @@ function renderGrid() {
   <button id="zout" title="Zoom out">−</button>
   <button id="zreset" title="Fit">⤢</button>
   <button id="zin" title="Zoom in">+</button>
+  <button id="zlink" title="Copy link to this view">🔗</button>
 </div>
 <div id="legend" class="panel">
   <select id="cmap" title="Colour scale (perceptually uniform)">
