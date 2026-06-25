@@ -1942,7 +1942,7 @@ const __WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + analysisWorker.toS
 }
 
 // ---------------------------------------------------------------------------
-// /grid - interactive 1,000,000-number map  &  /images - badge image gallery
+// /grid - interactive 1,000,000-number map
 //
 // One pixel per number on a 1000x1000 canvas (number n at x = n % 1000,
 // y = floor(n / 1000)). The default /grid view is a monochrome badge-COUNT
@@ -1951,9 +1951,6 @@ const __WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + analysisWorker.toS
 // The sweep (per-number count + packed earned-badge bitmask) runs once in a Web
 // Worker and is cached in IndexedDB, so reloads and badge switches are instant.
 // Zoom/pan the canvas, hover for details, click a cell to open it on /.
-//
-// /images is a separate gallery of basiliotornado's per-badge PNGs (served from
-// src/ByBadge via /img?b=<label>) with the same pixel-perfect zoomable viewer.
 // ---------------------------------------------------------------------------
 
 function gridWorker() {
@@ -2488,7 +2485,7 @@ function renderGrid() {
 <div id="side" class="panel">
   <div class="sidehead"><h1>All 1,000,000 numbers</h1><button id="sidehide" title="Hide panel" aria-label="Hide panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button></div>
   <div class="credit">Heavily inspired by <b>basiliotornado</b></div>
-  <div class="nav"><a href="/">&larr; calculator</a> &middot; <a href="/images">badge images &rarr;</a></div>
+  <div class="nav"><a href="/">&larr; calculator</a></div>
   <div id="vtitle">All numbers - badge count</div>
   <input id="search" type="search" placeholder="Filter 203 badges…" autocomplete="off">
   <div id="list"></div>
@@ -2520,268 +2517,10 @@ const __GRID_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + gridWorker.to
 </body></html>`;
 }
 
-function imagesClient(LABELS) {
-  const SIZE = 1000;
-  const cv = document.getElementById('view');
-  const ctx = cv.getContext('2d');
-  const listEl = document.getElementById('list');
-  const searchEl = document.getElementById('search');
-  const titleEl = document.getElementById('vtitle');
-  const empty = document.getElementById('empty');
-  const toast = document.getElementById('toast');
-
-  let src = null, current = null, toastT = 0;
-  function flash(msg) {
-    toast.textContent = msg; toast.classList.add('show');
-    clearTimeout(toastT); toastT = setTimeout(() => toast.classList.remove('show'), 1800);
-  }
-  let scale = 1, ox = 0, oy = 0, minScale = 1;
-  const maxScale = 160;
-  let cw = 0, ch = 0, dpr = 1;
-
-  function resize() {
-    dpr = window.devicePixelRatio || 1;
-    cw = cv.clientWidth; ch = cv.clientHeight;
-    cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr);
-  }
-  function fit() {
-    minScale = Math.min(cw / SIZE, ch / SIZE) * 0.92;
-    scale = minScale;
-    ox = (cw - SIZE * scale) / 2;
-    oy = (ch - SIZE * scale) / 2;
-  }
-  function clampPan() {
-    const w = SIZE * scale, h = SIZE * scale;
-    // Let the grid be dragged until an edge reaches the window centre (not just the
-    // viewport edge), so corners are easy to reach when zoomed in.
-    ox = w <= cw ? (cw - w) / 2 : Math.min(cw / 2, Math.max(cw / 2 - w, ox));
-    oy = h <= ch ? (ch - h) / 2 : Math.min(ch / 2, Math.max(ch / 2 - h, oy));
-  }
-  function render() {
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.imageSmoothingEnabled = false;     // perfect-pixel (nearest-neighbor) scaling
-    ctx.fillStyle = '#05060a';
-    ctx.fillRect(0, 0, cw, ch);
-    if (!src) return;
-    clampPan();
-    ctx.drawImage(src, ox, oy, SIZE * scale, SIZE * scale);
-  }
-  function zoomAt(mx, my, factor) {
-    const ns = Math.min(maxScale, Math.max(minScale, scale * factor));
-    if (ns === scale) return;
-    ox = mx - (mx - ox) * (ns / scale);
-    oy = my - (my - oy) * (ns / scale);
-    scale = ns; render();
-  }
-  function rel(e) { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
-
-  // 1 pointer pans; 2 pointers pinch-zoom toward their midpoint (and pan together).
-  const pointers = new Map();
-  let lx = 0, ly = 0, pinch = null;
-  function startPinch() {
-    const pts = [...pointers.values()];
-    const dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
-    pinch = { dist: Math.hypot(dx, dy) || 1, mx: (pts[0].x + pts[1].x) / 2, my: (pts[0].y + pts[1].y) / 2, scale, ox, oy };
-  }
-  cv.addEventListener('wheel', e => { e.preventDefault(); const [mx, my] = rel(e); zoomAt(mx, my, e.deltaY < 0 ? 1.2 : 1 / 1.2); }, { passive: false });
-  cv.addEventListener('pointerdown', e => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    const [x, y] = rel(e);
-    pointers.set(e.pointerId, { x, y });
-    try { cv.setPointerCapture(e.pointerId); } catch (_) {}
-    if (pointers.size === 1) { lx = x; ly = y; }
-    else if (pointers.size === 2) startPinch();
-  });
-  cv.addEventListener('pointermove', e => {
-    const [x, y] = rel(e);
-    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x, y });
-    if (pinch && pointers.size >= 2) {
-      const pts = [...pointers.values()];
-      const dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
-      const dist = Math.hypot(dx, dy) || 1, mx = (pts[0].x + pts[1].x) / 2, my = (pts[0].y + pts[1].y) / 2;
-      const ns = Math.min(maxScale, Math.max(minScale, pinch.scale * dist / pinch.dist));
-      const sx = (pinch.mx - pinch.ox) / pinch.scale, sy = (pinch.my - pinch.oy) / pinch.scale;
-      scale = ns; ox = mx - sx * ns; oy = my - sy * ns; render();
-      return;
-    }
-    if (pointers.size === 1 && pointers.has(e.pointerId)) { ox += x - lx; oy += y - ly; lx = x; ly = y; render(); }
-  });
-  function endPointer(e) {
-    pointers.delete(e.pointerId);
-    try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
-    if (pointers.size === 1) { const p = [...pointers.values()][0]; lx = p.x; ly = p.y; pinch = null; }
-    else if (pointers.size === 0) pinch = null;
-  }
-  cv.addEventListener('pointerup', endPointer);
-  cv.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null; });
-  cv.addEventListener('dblclick', e => { e.preventDefault(); const [mx, my] = rel(e); zoomAt(mx, my, 2.5); });
-  // Right-click copies the current badge's full 1000x1000 PNG to the clipboard.
-  cv.addEventListener('contextmenu', async e => {
-    e.preventDefault();
-    if (!src) { flash('Pick a badge first'); return; }
-    try {
-      const blob = await new Promise((res, rej) => src.toBlob(b => b ? res(b) : rej(new Error('encode failed')), 'image/png'));
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      flash('Copied ' + current + ' to clipboard');
-    } catch (err) {
-      flash('Copy failed: ' + (err && err.message || err));
-    }
-  });
-  window.addEventListener('resize', () => { const wasFit = scale <= minScale + 1e-6; resize(); if (wasFit) fit(); render(); });
-  document.getElementById('zin').onclick = () => zoomAt(cw / 2, ch / 2, 1.6);
-  document.getElementById('zout').onclick = () => zoomAt(cw / 2, ch / 2, 1 / 1.6);
-  document.getElementById('zreset').onclick = () => { fit(); render(); };
-  const sidehideBtn = document.getElementById('sidehide');
-  const TRAY_HINT_KEY = 'rngdle-tray-hint';
-  // Flash the sidebar toggle until the user collapses the tray for the first time.
-  try { if (!localStorage.getItem(TRAY_HINT_KEY)) sidehideBtn.classList.add('hint'); } catch (_) {}
-  sidehideBtn.onclick = () => {
-    document.body.classList.add('nav-collapsed');
-    sidehideBtn.classList.remove('hint');
-    try { localStorage.setItem(TRAY_HINT_KEY, '1'); } catch (_) {}
-  };
-  document.getElementById('sideshow').onclick = () => document.body.classList.remove('nav-collapsed');
-
-  function highlight() { for (const b of listEl.children) b.classList.toggle('on', b.textContent === current); }
-  function load(label) {
-    current = label; highlight();
-    titleEl.textContent = label + ' - loading…';
-    const im = new Image();
-    im.onload = () => {
-      const cnv = document.createElement('canvas'); cnv.width = SIZE; cnv.height = SIZE;
-      cnv.getContext('2d').drawImage(im, 0, 0, SIZE, SIZE);
-      src = cnv;
-      titleEl.textContent = label;
-      empty.style.display = 'none';
-      resize(); fit(); render();
-    };
-    im.onerror = () => { titleEl.textContent = label + ' - failed to load'; };
-    im.src = '/img?b=' + encodeURIComponent(label);
-  }
-  function buildList() {
-    listEl.innerHTML = '';
-    for (const label of LABELS) {
-      const b = document.createElement('button');
-      b.className = 'item'; b.textContent = label;
-      b.onclick = () => load(label);
-      listEl.appendChild(b);
-    }
-  }
-  searchEl.addEventListener('input', () => {
-    const q = searchEl.value.toLowerCase();
-    for (const b of listEl.children) b.style.display = b.textContent.toLowerCase().includes(q) ? '' : 'none';
-  });
-
-  resize(); buildList(); render();
-}
-
-function renderImages() {
-  const labels = JSON.stringify(BADGES.map(b => b[1]));
-  return `<!doctype html><html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="robots" content="noindex">
-<title>RNGdle - Badge Images</title>
-<style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: #05060a; color: #e8eaf0;
-    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    overflow: hidden; -webkit-user-select: none; user-select: none; }
-  #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
-  #view:active { cursor: grabbing; }
-  .panel { position: fixed; z-index: 5; background: rgba(12,14,22,.86);
-    border: 1px solid rgba(255,255,255,.12); border-radius: 10px; backdrop-filter: blur(6px); }
-  #side { top: 12px; left: 12px; bottom: 12px; width: 250px; max-width: calc(100vw - 24px);
-    display: flex; flex-direction: column; padding: 12px; gap: 10px; transition: transform .25s ease; }
-  body.nav-collapsed #side { transform: translateX(calc(-100% - 16px)); }
-  .sidehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-  .sidehead #credit { flex: 1; }
-  #sidehide, #sideshow { flex: 0 0 auto; width: 32px; height: 32px; padding: 0;
-    display: inline-flex; align-items: center; justify-content: center; color: #e8eaf0;
-    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
-  #sidehide svg, #sideshow svg { width: 19px; height: 19px; }
-  #sidehide:hover, #sideshow:hover { background: rgba(255,255,255,.14); }
-  #sideshow { position: fixed; top: 12px; left: 12px; z-index: 7; display: none; }
-  body.nav-collapsed #sideshow { display: inline-flex; }
-  #sidehide.hint { color: #ffb295; animation: trayhint 1.15s ease-in-out infinite; }
-  @keyframes trayhint { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,138,92,0); border-color: rgba(255,255,255,.14); }
-    50% { box-shadow: 0 0 0 5px rgba(255,138,92,.32); border-color: #ff8a5c; } }
-  @media (max-width: 640px) {
-    #side { left: 10px; right: 10px; width: auto; max-width: none; top: 10px; bottom: 10px; padding: 14px; gap: 12px; }
-    #search { padding: 11px 12px; font-size: 15px; }
-    .item { padding: 11px 10px; font-size: 14px; }
-    #ctrls { gap: 8px; padding: 7px; }
-    #ctrls button { width: 42px; height: 42px; font-size: 20px; }
-    #sidehide, #sideshow { width: 40px; height: 40px; }
-    #sidehide svg, #sideshow svg { width: 22px; height: 22px; }
-    #cmap { font-size: 13px; padding: 6px 8px; }
-    body:not(.nav-collapsed) #ctrls, body:not(.nav-collapsed) #legend { display: none; }
-  }
-  #credit { font-size: 13px; }
-  #credit b { color: #ff8a5c; }
-  #credit .sub { display: block; font-size: 12px; color: #9aa1b2; margin-top: 2px; }
-  #credit a { color: #ff8a5c; text-decoration: none; }
-  #credit a:hover { text-decoration: underline; }
-  #vtitle { font-size: 12px; color: #cfd3df; min-height: 16px; }
-  #search { width: 100%; padding: 8px 10px; font-size: 13px; line-height: 1.4; color: #e8eaf0;
-    -webkit-appearance: none; appearance: none; font-family: inherit;
-    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; }
-  #list { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 2px; margin: 0 -4px; padding: 0 4px; }
-  .item { flex: 0 0 auto; display: block; width: 100%; text-align: left; padding: 6px 8px; font-size: 12.5px;
-    line-height: 1.5; font-family: inherit;
-    color: #c8ccd8; background: transparent; border: 0; border-radius: 6px; cursor: pointer; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; }
-  .item:hover { background: rgba(255,255,255,.07); }
-  .item.on { background: rgba(255,138,92,.18); color: #ffd9c9; }
-  #ctrls { top: 12px; right: 12px; display: flex; gap: 6px; padding: 6px; }
-  #ctrls button { width: 34px; height: 34px; font-size: 17px; color: #e8eaf0;
-    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
-  #ctrls button:hover { background: rgba(255,255,255,.14); }
-  #empty { position: fixed; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center;
-    pointer-events: none; }
-  #empty span { color: #6b7384; font-size: 14px; }
-  #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 8;
-    padding: 8px 14px; font-size: 13px; color: #e8eaf0; background: rgba(8,10,16,.94);
-    border: 1px solid rgba(255,255,255,.18); border-radius: 8px; opacity: 0; transition: opacity .2s;
-    pointer-events: none; }
-  #toast.show { opacity: 1; }
-</style></head>
-<body>
-<canvas id="view"></canvas>
-<div id="empty"><span>Select a badge to view its number map</span></div>
-<div id="toast"></div>
-<button id="sideshow" class="panel" title="Show panel" aria-label="Show panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>
-<div id="side" class="panel">
-  <div class="sidehead">
-    <div id="credit">Badge maps by <b>basiliotornado</b>
-      <span class="sub">Each image is 1000×1000 - one pixel per number (0–999,999). <a href="/grid">interactive grid &rarr;</a> &middot; <a href="/">calculator</a></span>
-    </div>
-    <button id="sidehide" title="Hide panel" aria-label="Hide panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>
-  </div>
-  <div id="vtitle">203 badges</div>
-  <input id="search" type="search" placeholder="Filter 203 badges…" autocomplete="off">
-  <div id="list"></div>
-</div>
-<div id="ctrls" class="panel">
-  <button id="zout" title="Zoom out">−</button>
-  <button id="zreset" title="Fit">⤢</button>
-  <button id="zin" title="Zoom in">+</button>
-</div>
-<script type="module">
-var __name = (f) => f;
-(${imagesClient.toString()})(${labels});
-</script>
-</body></html>`;
-}
-
-// Valid badge labels (== ByBadge PNG basenames), for /img request validation.
-const BADGE_LABEL_SET = new Set(BADGES.map(b => b[1]));
-
 export { compute, BADGES, engineModuleSource };
 
 export default {
-  async fetch(request, env) {
+  async fetch(request) {
     const url = new URL(request.url);
     const raw = url.searchParams.get('n');
 
@@ -2825,31 +2564,6 @@ export default {
     if (url.pathname === '/grid') {
       return new Response(renderGrid(), {
         headers: { 'content-type': 'text/html; charset=utf-8' },
-      });
-    }
-
-    // Badge image gallery (basiliotornado's per-badge PNGs).
-    if (url.pathname === '/images') {
-      return new Response(renderImages(), {
-        headers: { 'content-type': 'text/html; charset=utf-8' },
-      });
-    }
-
-    // Serve a single badge PNG from the ByBadge asset bundle (validated label).
-    if (url.pathname === '/img') {
-      const label = url.searchParams.get('b') || '';
-      if (!BADGE_LABEL_SET.has(label)) {
-        return new Response('Unknown badge', { status: 404 });
-      }
-      if (!env || !env.ASSETS) {
-        return new Response('Image assets unavailable', { status: 503 });
-      }
-      const assetReq = new Request(new URL('/' + encodeURIComponent(label) + '.png', url.origin));
-      const res = await env.ASSETS.fetch(assetReq);
-      if (!res.ok) return new Response('Not found', { status: 404 });
-      return new Response(res.body, {
-        status: 200,
-        headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' },
       });
     }
 

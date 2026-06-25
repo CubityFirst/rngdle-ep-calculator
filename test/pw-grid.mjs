@@ -1,5 +1,4 @@
-// Headless smoke test for /grid (monochrome count heatmap + computed badge filter)
-// and /images (pixel-perfect badge PNG viewer).
+// Headless smoke test for /grid (monochrome count heatmap + computed badge filter).
 import pw from 'file:///C:/Users/Admin/AppData/Local/npm-cache/_npx/e41f203b7505f1fb/node_modules/playwright-core/index.js';
 const { chromium } = pw;
 
@@ -38,23 +37,5 @@ page.on('framenavigated', f => { if (f === page.mainFrame()) navTo = f.url(); })
 await page.mouse.move(cx, cy); await page.mouse.down(); await page.mouse.up();
 await page.waitForTimeout(400);
 console.log('grid: expected n', expected, '-> navigated', navTo, '-> match:', !!navTo && navTo.endsWith('/?n=' + expected));
-
-// ---- /images --------------------------------------------------------------
-const p2 = await browser.newPage({ viewport: { width: 1200, height: 850 } });
-p2.on('pageerror', e => console.log('IMAGES EXCEPTION:', e.message));
-await p2.goto(`${base}/images`, { waitUntil: 'domcontentloaded' });
-const icount = await p2.evaluate(() => document.querySelectorAll('#list .item').length);
-const credit = await p2.evaluate(() => document.getElementById('credit').textContent.includes('basiliotornado'));
-console.log('images: list items (expect 203):', icount, '| credit basiliotornado:', credit);
-await p2.fill('#search', 'Flush');
-await p2.click('#list .item:has-text("Flush")');
-await p2.waitForFunction(() => document.getElementById('empty').style.display === 'none', null, { timeout: 15000 });
-await p2.waitForTimeout(200);
-// Verify nearest-neighbor: zoom in hard and check imageSmoothingEnabled is false.
-for (let i = 0; i < 20; i++) await p2.mouse.wheel(0, -120);
-await p2.waitForTimeout(150);
-const smoothing = await p2.evaluate(() => document.getElementById('view').getContext('2d').imageSmoothingEnabled);
-console.log('images: Flush loaded, imageSmoothingEnabled (expect false):', smoothing);
-await p2.screenshot({ path: 'test/pw-images.png' });
 
 await browser.close();
