@@ -1855,7 +1855,7 @@ function renderHTML(result) {
     </div>
   </section>
 
-  <div class="an-bar"><a class="grid-btn" href="/grid">🗺️ Explore all 1,000,000 numbers &rarr;</a></div>
+  <div class="an-bar"><a class="grid-btn" href="/grid">Explore all 1,000,000 numbers &rarr;</a></div>
 
   <footer>JSON API: <code>/api?n=696969</code></footer>
 </div>
