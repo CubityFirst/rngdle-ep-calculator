@@ -1702,8 +1702,8 @@ function renderHTML(result) {
   a { color:var(--accent); }
 
   /* --- Analysis panel --- */
-  .an-bar { margin:2rem 0 1.5rem; }
-  #an-btn { width:100%; padding:.7rem; font-weight:500; }
+  .an-bar { margin:2rem 0 1.5rem; display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; }
+  #an-btn { padding:.65rem 1.1rem; font-weight:500; }
   #analysis { border:1px solid var(--border); border-radius:10px; padding:1.1rem 1.15rem 1.3rem; margin-bottom:1.5rem; }
   #analysis h2 { font-size:1.05rem; font-weight:600; letter-spacing:-.01em; margin:0 0 1rem; }
   .an-controls { display:flex; flex-wrap:wrap; align-items:flex-start; gap:1rem; margin-bottom:1rem; }
@@ -1820,7 +1820,7 @@ function renderHTML(result) {
   <p class="tag">Click the box and type a number from 0 to 1,000,000 to see its EP and badges.</p>
   ${body}
 
-  <div class="an-bar"><button type="button" id="an-btn">Analyze all scores</button></div>
+  <div class="an-bar"><button type="button" id="an-btn">Analyze all scores</button><a class="grid-btn" href="/grid">Explore all 1,000,000 numbers &rarr;</a></div>
 
   <section id="analysis" hidden>
     <h2>EP distribution across 0-1,000,000</h2>
@@ -1854,8 +1854,6 @@ function renderHTML(result) {
       <button type="button" id="an-purge" class="an-purge-btn">Purge cache</button>
     </div>
   </section>
-
-  <div class="an-bar"><a class="grid-btn" href="/grid">Explore all 1,000,000 numbers &rarr;</a></div>
 
   <footer>JSON API: <code>/api?n=696969</code></footer>
 </div>
