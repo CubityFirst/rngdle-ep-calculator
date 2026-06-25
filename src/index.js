@@ -1850,7 +1850,7 @@ function renderHTML(result) {
     </div>
   </section>
 
-  <footer>JSON API: <code>/api?n=696969</code></footer>
+  <footer><a href="/grid">all 1,000,000 numbers &rarr;</a> &middot; JSON API: <code>/api?n=696969</code></footer>
 </div>
 <script>
 // The click-to-type number card: digits light up where each badge scores,
