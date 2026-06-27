@@ -327,196 +327,220 @@ function pContigPairStarts(s) {
 }
 
 // ---------------------------------------------------------------------------
-// Badge definitions: [id, label, emoji, ep, rarity, test(c)]
+// Badge definitions: [id, label, emoji, ep, test(c)]
 // c = { n, s, len, d, counts, distinct, sum, prod, maxCount, has(sub), cnt(digit), withCount(k) }
+//
+// Rarity is NOT stored per-badge. Like rngdle.com, it is derived from the badge's
+// EP score via the BADGE_RARITY_THRESHOLDS cutoffs (reverse-engineered from the
+// shipped chunk_6d375db2482ce7e8.js: getBadgeRarityTier). Any future EP change
+// therefore keeps rarity self-correcting — no second value to forget.
 // ---------------------------------------------------------------------------
+
+const BADGE_RARITY_THRESHOLDS = { common: 1e3, uncommon: 1e4, rare: 1e5, epic: 1e6, anomaly: 1e7 };
+
+// Returns rarity tier (lowercase) for a given EP score, matching rngdle.com.
+function tierFromScore(ep) {
+  const t = BADGE_RARITY_THRESHOLDS;
+  return ep < t.common ? 'common'
+       : ep < t.uncommon ? 'uncommon'
+       : ep < t.rare ? 'rare'
+       : ep < t.epic ? 'epic'
+       : ep < t.anomaly ? 'anomaly'
+       : 'mythic';
+}
+
+// Capitalized rarity label (used in tooltips / exports / pill rendering).
+function rarityFromScore(ep) {
+  const t = tierFromScore(ep);
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
 
 const BADGES = [
   // --- Mythic exacts ---
-  ['NICE_EXACT', 'Exact Nice', '😏', 100000100, 'Mythic', c => c.n === 69],
-  ['JACKPOT_EXACT', 'Exact Jackpot', '💰', 100000100, 'Mythic', c => c.n === 777],
-  ['JACKPOT_SIX', 'Jackpot Six', '🏦', 100000100, 'Mythic', c => c.has('777777')],
-  ['BOTANIST_EXACT', 'Exact Botanist', '🌿', 100000100, 'Mythic', c => c.n === 420],
-  ['DEVIL_EXACT', 'Exact Devil', '😈', 100000100, 'Mythic', c => c.n === 666],
-  ['LEET_EXACT', 'Exact Leet', '💻', 100000100, 'Mythic', c => c.n === 1337],
-  ['EXACT_HELL', 'Exact Hell', '👹', 100000100, 'Mythic', c => c.n === 7734],
-  ['EXACT_BOOB_80085', 'Exact 80085', '💎', 100000100, 'Mythic', c => c.n === 80085],
-  ['MEANING_EXACT', 'Exact Meaning', '🌌', 100000100, 'Mythic', c => c.n === 42],
-  ['EMERGENCY_EXACT', 'Exact Emergency', '🚑', 100000100, 'Mythic', c => c.n === 911],
-  ['VERY_VERY_NICE', 'Very Very Nice', '😏', 100000100, 'Mythic', c => c.n === 696969],
-  ['HOTBOX', 'Hotbox', '🌿', 100000100, 'Mythic', c => c.n === 420420],
-  ['MAYDAY', 'Mayday', '🚑', 100000100, 'Mythic', c => c.n === 911911],
-  ['UNIVERSAL_ANSWER', 'Universal Answer', '🌌', 100000100, 'Mythic', c => c.n === 424242],
-  ['BIG_BROTHER_EXACT', 'Orwellian', '👁️', 100000100, 'Mythic', c => c.n === 1984],
-  ['DIGIT_ZERO', 'Zero', '0️⃣', 100000100, 'Mythic', c => c.n === 0],
-  ['DIGIT_ONE', 'One', '1️⃣', 100000100, 'Mythic', c => c.n === 1],
-  ['DIGIT_TWO', 'Two', '2️⃣', 100000100, 'Mythic', c => c.n === 2],
-  ['DIGIT_THREE', 'Three', '3️⃣', 100000100, 'Mythic', c => c.n === 3],
-  ['DIGIT_FOUR', 'Four', '4️⃣', 100000100, 'Mythic', c => c.n === 4],
-  ['DIGIT_FIVE', 'Five', '5️⃣', 100000100, 'Mythic', c => c.n === 5],
-  ['DIGIT_SIX', 'Six', '6️⃣', 100000100, 'Mythic', c => c.n === 6],
-  ['DIGIT_SEVEN', 'Seven', '7️⃣', 100000100, 'Mythic', c => c.n === 7],
-  ['DIGIT_EIGHT', 'Eight', '8️⃣', 100000100, 'Mythic', c => c.n === 8],
-  ['DIGIT_NINE', 'Nine', '9️⃣', 100000100, 'Mythic', c => c.n === 9],
-  ['TREE_FIDDY_EXACT', 'Exact Tree Fiddy', '🦕', 100000100, 'Mythic', c => c.n === 350],
-  ['SIXTY_SEVEN_EXACT', 'Exact Six-Seven', '🫠', 100000100, 'Mythic', c => c.n === 67],
-  ['EIGHTY_SIX_EXACT', 'Exact Eighty-Six', '🍽️', 100000100, 'Mythic', c => c.n === 86],
-  ['ORIENTATION_EXACT', 'Exact Orientation', '🧭', 100000100, 'Mythic', c => c.n === 101],
-  ['CALENDAR_EXACT', 'Exact Calendar', '📅', 100000100, 'Mythic', c => c.n === 365],
-  ['BRAINROT', 'Brainrot', '🫠', 100000100, 'Mythic', c => c.n === 676767],
-  ['GROUNDHOG_DAY', 'Groundhog Day', '📅', 100000100, 'Mythic', c => c.n === 365365],
-  ['EXACT_BOOB', 'Exact Boob', '🍈', 50000050, 'Mythic', c => c.n === 8008 || c.n === 58008],
+  ['NICE_EXACT', 'Exact Nice', '😏', 100000100, c => c.n === 69],
+  ['JACKPOT_EXACT', 'Exact Jackpot', '💰', 100000100, c => c.n === 777],
+  ['JACKPOT_SIX', 'Jackpot Six', '🏦', 100000100, c => c.has('777777')],
+  ['BOTANIST_EXACT', 'Exact Botanist', '🌿', 100000100, c => c.n === 420],
+  ['DEVIL_EXACT', 'Exact Devil', '😈', 100000100, c => c.n === 666],
+  ['LEET_EXACT', 'Exact Leet', '💻', 100000100, c => c.n === 1337],
+  ['EXACT_HELL', 'Exact Hell', '👹', 100000100, c => c.n === 7734],
+  ['EXACT_BOOB_80085', 'Exact 80085', '💎', 100000100, c => c.n === 80085],
+  ['MEANING_EXACT', 'Exact Meaning', '🌌', 100000100, c => c.n === 42],
+  ['EMERGENCY_EXACT', 'Exact Emergency', '🚑', 100000100, c => c.n === 911],
+  ['VERY_VERY_NICE', 'Very Very Nice', '😏', 100000100, c => c.n === 696969],
+  ['HOTBOX', 'Hotbox', '🌿', 100000100, c => c.n === 420420],
+  ['MAYDAY', 'Mayday', '🚑', 100000100, c => c.n === 911911],
+  ['UNIVERSAL_ANSWER', 'Universal Answer', '🌌', 100000100, c => c.n === 424242],
+  ['BIG_BROTHER_EXACT', 'Orwellian', '👁️', 100000100, c => c.n === 1984],
+  ['DIGIT_ZERO', 'Zero', '0️⃣', 100000100, c => c.n === 0],
+  ['DIGIT_ONE', 'One', '1️⃣', 100000100, c => c.n === 1],
+  ['DIGIT_TWO', 'Two', '2️⃣', 100000100, c => c.n === 2],
+  ['DIGIT_THREE', 'Three', '3️⃣', 100000100, c => c.n === 3],
+  ['DIGIT_FOUR', 'Four', '4️⃣', 100000100, c => c.n === 4],
+  ['DIGIT_FIVE', 'Five', '5️⃣', 100000100, c => c.n === 5],
+  ['DIGIT_SIX', 'Six', '6️⃣', 100000100, c => c.n === 6],
+  ['DIGIT_SEVEN', 'Seven', '7️⃣', 100000100, c => c.n === 7],
+  ['DIGIT_EIGHT', 'Eight', '8️⃣', 100000100, c => c.n === 8],
+  ['DIGIT_NINE', 'Nine', '9️⃣', 100000100, c => c.n === 9],
+  ['TREE_FIDDY_EXACT', 'Exact Tree Fiddy', '🦕', 100000100, c => c.n === 350],
+  ['SIXTY_SEVEN_EXACT', 'Exact Six-Seven', '🫠', 100000100, c => c.n === 67],
+  ['EIGHTY_SIX_EXACT', 'Exact Eighty-Six', '🍽️', 100000100, c => c.n === 86],
+  ['ORIENTATION_EXACT', 'Exact Orientation', '🧭', 100000100, c => c.n === 101],
+  ['CALENDAR_EXACT', 'Exact Calendar', '📅', 100000100, c => c.n === 365],
+  ['BRAINROT', 'Brainrot', '🫠', 100000100, c => c.n === 676767],
+  ['GROUNDHOG_DAY', 'Groundhog Day', '📅', 100000100, c => c.n === 365365],
+  ['EXACT_BOOB', 'Exact Boob', '🍈', 50000050, c => c.n === 8008 || c.n === 58008],
 
   // --- Powers / math (Mythic/Anomaly) ---
-  ['THIRTEENTH_POWER', '13th Power', '💀', 33333367, 'Mythic', c => isPerfectPower(c.n, 13)],
-  ['SEVENTEENTH_POWER', '17th Power', '🧙', 33333367, 'Mythic', c => isPerfectPower(c.n, 17)],
-  ['NINETEENTH_POWER', '19th Power', '🌑', 33333367, 'Mythic', c => isPerfectPower(c.n, 19)],
-  ['TENTH_POWER', '10th Power', '🔟', 25000025, 'Mythic', c => isPerfectPower(c.n, 10)],
-  ['ELEVENTH_POWER', '11th Power', '🕚', 25000025, 'Mythic', c => isPerfectPower(c.n, 11)],
-  ['PI', 'Pi', '🥧', 25000025, 'Mythic', c => [314, 3141, 31415, 314159].includes(c.n)],
-  ['E', "Euler's Number", '📈', 25000025, 'Mythic', c => [271, 2718, 27182, 271828].includes(c.n)],
-  ['CONSEC_QUAD_EXACT', '4 Consecutive Numbers', '⛓️', 25000025, 'Mythic', c => { const r = pQuadExact(c.s); return !!r && pOrdered(r.numbers); }],
-  ['NINTH_POWER', '9th Power', '☁️', 20000020, 'Mythic', c => isPerfectPower(c.n, 9)],
-  ['EIGHTH_POWER', '8th Power', '🎱', 16666683, 'Mythic', c => isPerfectPower(c.n, 8)],
-  ['SEVENTH_POWER', '7th Power', '🌈', 12500013, 'Mythic', c => isPerfectPower(c.n, 7)],
-  ['FACTORIAL', 'Factorial', '❗', 11111122, 'Mythic', c => FACTORIALS.has(c.n)],
-  ['HELLO', 'Hello', '👋', 11111122, 'Mythic', c => c.has('07734')],
-  ['SEQUENCE_6', 'Sequence (6)', '🔢', 11111122, 'Mythic', c => pHasSequence(c.s, 6, false)],
-  ['CONTIGUOUS_SIXES', 'Contiguous Sixes', '➖➖➖➖', 10000010, 'Mythic', c => /(\d)\1{5}/.test(c.s)],
-  ['DEEP_VOID_FIVE', 'Deep Void (5)', '⚫', 10000010, 'Mythic', c => c.has('00000')],
-  ['ONE_DIGIT', 'Single Digit', '☝️', 10000010, 'Mythic', c => c.len === 1],
-  ['QUINT_NINE', 'Quint Nine', '🥳', 10000010, 'Mythic', c => c.s.endsWith('99999')],
-  ['SIXTH_POWER', '6th Power', '🎲', 9090918, 'Anomaly', c => isPerfectPower(c.n, 6)],
-  ['POWER_OF_THREE', 'Power of Three', '🔺', 7692315, 'Anomaly', c => { if (c.n <= 0) return false; let v = 1; while (v < c.n) v *= 3; return v === c.n; }], // prod: 1 (=3^0) counts
-  ['FIFTH_POWER', '5th Power', '🖐️', 6250006, 'Anomaly', c => isPerfectPower(c.n, 5)],
-  ['JACKPOT_FIVE', 'Jackpot Five', '💰💰💰', 5263163, 'Anomaly', c => c.has('77777')],
-  ['POWER_OF_TWO', 'Power of Two', '💾', 5000005, 'Anomaly', c => c.n > 0 && (c.n & (c.n - 1)) === 0], // prod: 1 (=2^0) counts
-  ['ROYAL_FLUSH', 'Royal Flush', '👑', 5000005, 'Anomaly', c => c.has('56789')],
-  ['BOOB_58008', '58008', '🔠', 5000005, 'Anomaly', c => c.has('58008')],
-  ['BOOB_80085', '80085', '🅱️', 5000005, 'Anomaly', c => c.has('80085')],
-  ['PI_CONTAINS_5', 'Pi Slice (5)', '🥧', 5000005, 'Anomaly', c => c.has('31415')],
-  ['E_CONTAINS_5', 'E Slice (5)', '📈', 5000005, 'Anomaly', c => c.has('27182')],
-  ['CASCADE', 'Cascade', '🌊', 3333337, 'Anomaly', c => consecInc(c.d)],
-  ['FIBONACCI', 'Fibonacci Number', '🐚', 3333337, 'Anomaly', c => FIBS.has(c.n)],
-  ['FOURTH_POWER', '4th Power', '📦', 3125003, 'Anomaly', c => isPerfectPower(c.n, 4)],
-  ['WATERFALL', 'Waterfall', '🚿', 2857146, 'Anomaly', c => consecDec(c.d)],
-  ['CONSEC_QUAD_CONTAINS', '4 Consecutive Numbers (Contains)', '🔗', 2631582, 'Anomaly', c => pNAdjacent(c.s, 4) !== null],
-  ['CONSEC_QUAD_SCRAMBLED', '4 Consecutive Numbers (Scrambled)', '🔀', 2272730, 'Anomaly', c => { const r = pQuadExact(c.s); return !!r && !pOrdered(r.numbers); }],
-  ['HOMOGENEOUS', 'Homogeneous', '🥛', 2222224, 'Anomaly', c => c.len >= 2 && c.distinct === 1],
-  ['BINARY_SOUL', 'Binary Soul', '🤖', 1538463, 'Anomaly', c => /^[01]+$/.test(c.s)],
-  ['STRAIGHT_FLUSH', 'Straight Flush', '🃏', 1449277, 'Anomaly', c => c.has('02468') || c.has('13579') || c.has('86420') || c.has('97531')],
-  ['TWO_DIGITS', 'Two Digits', '✌️', 1111112, 'Anomaly', c => c.len === 2],
+  ['THIRTEENTH_POWER', '13th Power', '💀', 33333367, c => isPerfectPower(c.n, 13)],
+  ['SEVENTEENTH_POWER', '17th Power', '🧙', 33333367, c => isPerfectPower(c.n, 17)],
+  ['NINETEENTH_POWER', '19th Power', '🌑', 33333367, c => isPerfectPower(c.n, 19)],
+  ['TENTH_POWER', '10th Power', '🔟', 25000025, c => isPerfectPower(c.n, 10)],
+  ['ELEVENTH_POWER', '11th Power', '🕚', 25000025, c => isPerfectPower(c.n, 11)],
+  ['PI', 'Pi', '🥧', 25000025, c => [314, 3141, 31415, 314159].includes(c.n)],
+  ['E', "Euler's Number", '📈', 25000025, c => [271, 2718, 27182, 271828].includes(c.n)],
+  ['CONSEC_QUAD_EXACT', '4 Consecutive Numbers', '⛓️', 25000025, c => { const r = pQuadExact(c.s); return !!r && pOrdered(r.numbers); }],
+  ['NINTH_POWER', '9th Power', '☁️', 20000020, c => isPerfectPower(c.n, 9)],
+  ['EIGHTH_POWER', '8th Power', '🎱', 16666683, c => isPerfectPower(c.n, 8)],
+  ['SEVENTH_POWER', '7th Power', '🌈', 12500013, c => isPerfectPower(c.n, 7)],
+  ['FACTORIAL', 'Factorial', '❗', 11111122, c => FACTORIALS.has(c.n)],
+  ['HELLO', 'Hello', '👋', 11111122, c => c.has('07734')],
+  ['SEQUENCE_6', 'Sequence (6)', '🔢', 11111122, c => pHasSequence(c.s, 6, false)],
+  ['CONTIGUOUS_SIXES', 'Contiguous Sixes', '➖➖➖➖', 10000010, c => /(\d)\1{5}/.test(c.s)],
+  ['DEEP_VOID_FIVE', 'Deep Void (5)', '⚫', 10000010, c => c.has('00000')],
+  ['ONE_DIGIT', 'Single Digit', '☝️', 10000010, c => c.len === 1],
+  ['QUINT_NINE', 'Quint Nine', '🥳', 10000010, c => c.s.endsWith('99999')],
+  ['SIXTH_POWER', '6th Power', '🎲', 9090918, c => isPerfectPower(c.n, 6)],
+  ['POWER_OF_THREE', 'Power of Three', '🔺', 7692315, c => { if (c.n <= 0) return false; let v = 1; while (v < c.n) v *= 3; return v === c.n; }], // prod: 1 (=3^0) counts
+  ['FIFTH_POWER', '5th Power', '🖐️', 6250006, c => isPerfectPower(c.n, 5)],
+  ['JACKPOT_FIVE', 'Jackpot Five', '💰💰💰', 5263163, c => c.has('77777')],
+  ['POWER_OF_TWO', 'Power of Two', '💾', 5000005, c => c.n > 0 && (c.n & (c.n - 1)) === 0], // prod: 1 (=2^0) counts
+  ['ROYAL_FLUSH', 'Royal Flush', '👑', 5000005, c => c.has('56789')],
+  ['BOOB_58008', '58008', '🔠', 5000005, c => c.has('58008')],
+  ['BOOB_80085', '80085', '🅱️', 5000005, c => c.has('80085')],
+  ['PI_CONTAINS_5', 'Pi Slice (5)', '🥧', 5000005, c => c.has('31415')],
+  ['E_CONTAINS_5', 'E Slice (5)', '📈', 5000005, c => c.has('27182')],
+  ['CASCADE', 'Cascade', '🌊', 3333337, c => consecInc(c.d)],
+  ['FIBONACCI', 'Fibonacci Number', '🐚', 3333337, c => FIBS.has(c.n)],
+  ['FOURTH_POWER', '4th Power', '📦', 3125003, c => isPerfectPower(c.n, 4)],
+  ['WATERFALL', 'Waterfall', '🚿', 2857146, c => consecDec(c.d)],
+  ['CONSEC_QUAD_CONTAINS', '4 Consecutive Numbers (Contains)', '🔗', 2631582, c => pNAdjacent(c.s, 4) !== null],
+  ['CONSEC_QUAD_SCRAMBLED', '4 Consecutive Numbers (Scrambled)', '🔀', 2272730, c => { const r = pQuadExact(c.s); return !!r && !pOrdered(r.numbers); }],
+  ['HOMOGENEOUS', 'Homogeneous', '🥛', 2222224, c => c.len >= 2 && c.distinct === 1],
+  ['BINARY_SOUL', 'Binary Soul', '🤖', 1538463, c => /^[01]+$/.test(c.s)],
+  ['STRAIGHT_FLUSH', 'Straight Flush', '🃏', 1449277, c => c.has('02468') || c.has('13579') || c.has('86420') || c.has('97531')],
+  ['TWO_DIGITS', 'Two Digits', '✌️', 1111112, c => c.len === 2],
   // sum === product. Excludes single digits (1..9 are trivially true) but prod DOES
   // award it to 0 (sum 0 = product 0), so 0 is allowed through. Confirmed via 0 vs 2.
-  ['SPY', 'Spy Number', '🕵️', 1030929, 'Anomaly', c => c.n !== 1 && c.n !== 2 && c.sum === c.prod], // prod excludes only 1 and 2
-  ['QUAD_NINE', 'Quad Nine', '🎊', 1000001, 'Anomaly', c => c.s.endsWith('9999')],
-  ['SEMI_EPOCH', 'Semi-Epoch', '🗿', 1000001, 'Anomaly', c => c.s.endsWith('5000')],
-  ['CUBE', '3rd Power', '🧊', 990100, 'Anomaly', c => isPerfectPower(c.n, 3)],
-  ['EVEN_SPACING', 'Even Spacing', '📏', 862070, 'Anomaly', c => arithmetic(c.d)],
+  ['SPY', 'Spy Number', '🕵️', 1030929, c => c.n !== 1 && c.n !== 2 && c.sum === c.prod], // prod excludes only 1 and 2
+  ['QUAD_NINE', 'Quad Nine', '🎊', 1000001, c => c.s.endsWith('9999')],
+  ['SEMI_EPOCH', 'Semi-Epoch', '🗿', 1000001, c => c.s.endsWith('5000')],
+  ['CUBE', '3rd Power', '🧊', 990100, c => isPerfectPower(c.n, 3)],
+  ['EVEN_SPACING', 'Even Spacing', '📏', 862070, c => arithmetic(c.d)],
 
   // --- Epic ---
-  ['CONSEC_TRIPLE_EXACT', '3 Consecutive Numbers', '⛓️', 555556, 'Epic', c => { const r = pTripleExact(c.s); return !!r && pOrdered(r.numbers); }],
-  ['CONTIGUOUS_FIVES', 'Contiguous Fives', '➖➖➖', 552487, 'Epic', c => /(\d)\1{4}/.test(c.s)],
-  ['DEEP_VOID_FOUR', 'Deep Void (4)', '🌌', 552487, 'Epic', c => c.has('0000')],
-  ['STROBOGRAMMATIC', 'Strobogrammatic', '🙃', 502513, 'Epic', c => strobogrammatic(c.s)],
-  ['STRAIGHT', 'Straight', '📏', 454546, 'Epic', c => straightRun(c.d, 5)],
-  ['JACKPOT_FOUR', 'Jackpot Four', '💰💰', 357143, 'Epic', c => c.has('7777')],
-  ['VERY_NICE', 'Very Nice', '🥵', 334448, 'Epic', c => c.has('6969')],
-  ['DEEPER_MEANING', 'Deeper Meaning', '🌌', 334448, 'Epic', c => c.has('4242')],
-  ['SIXTY_SEVEN_DOUBLE', '6767', '🫠', 334448, 'Epic', c => c.has('6767')],
-  ['LEET', 'Leet', '💻', 333334, 'Epic', c => c.has('1337')],
-  ['HELL', 'Hell', '🔥', 333334, 'Epic', c => c.has('7734')],
-  ['BOOB_8008', '8008', '🔢', 333334, 'Epic', c => c.has('8008')],
-  ['BIG_BROTHER', 'Big Brother', '👁️', 333334, 'Epic', c => c.has('1984')],
-  ['PI_CONTAINS_4', 'Pi Slice (4)', '🥧', 333334, 'Epic', c => c.has('3141')],
-  ['E_CONTAINS_4', 'E Slice (4)', '📈', 333334, 'Epic', c => c.has('2718')],
-  ['CONSEC_TRIPLE_SCRAMBLED', '3 Consecutive Numbers (Scrambled)', '🔀', 277778, 'Epic', c => { const r = pTripleExact(c.s); return !!r && !pOrdered(r.numbers); }],
-  ['ZIPPER', 'Zipper', '🤐', 246914, 'Epic', c => c.len >= 2 && c.distinct === 2 && c.d.every((x, i) => i === 0 || x !== c.d[i - 1])],
-  ['ASCENSION', 'Ascension', '📈', 219298, 'Epic', c => strictInc(c.d)],
-  ['CONSEC_TRIPLE_CONTAINS', '3 Consecutive Numbers (Contains)', '🔗', 157978, 'Epic', c => pNAdjacent(c.s, 3) !== null],
-  ['CONTIGUOUS_THREE_PAIR', 'Contiguous Three Pair', '👨‍👩‍👧‍👦👯', 154321, 'Epic', c => { const a = pContigPairStarts(c.s); for (let i = 0; i < a.length - 2; i++) if (a[i] + 2 === a[i + 1] && a[i + 1] + 2 === a[i + 2]) return true; return false; }],
-  ['FRAMED_PAIR', 'Framed Pair', '🖼️', 137174, 'Epic', c => c.len === 4 && c.d[1] === c.d[2] && c.d[0] !== c.d[1] && c.d[3] !== c.d[1]],
-  ['FRAMED_TRIPLE', 'Framed Triple', '🖼️🖼️', 137174, 'Epic', c => c.len === 5 && c.d[1] === c.d[2] && c.d[2] === c.d[3] && c.d[0] !== c.d[1] && c.d[4] !== c.d[1]],
-  ['DECAY', 'Decay', '📉', 119474, 'Epic', c => strictDec(c.d)],
-  ['THREE_DIGITS', 'Three Digits', '🤟', 111111, 'Epic', c => c.len === 3],
-  ['ECHO', 'Echo', '📣', 100100, 'Epic', c => c.len >= 2 && c.len % 2 === 0 && c.s.slice(0, c.len / 2) === c.s.slice(c.len / 2)],
-  ['MILLENNIUM', 'Millennium', '🗓️', 100000, 'Epic', c => c.s.endsWith('000')],
-  ['PRONIC', 'Pronic Number', '🧮', 100000, 'Epic', c => PRONICS.has(c.n)],
-  ['TRIPLE_NINE', 'Triple Nine', '🎉', 100000, 'Epic', c => c.s.endsWith('999')],
-  ['SEMI_MILLENNIUM', 'Semi-Millennium', '📜', 100000, 'Epic', c => c.s.endsWith('500')],
-  ['COLOSSAL', 'Colossal', '🪨', 100000, 'Epic', c => c.n > 999000],
-  ['SQUARE', '2nd Power', '🟦', 99900, 'Epic', c => isPerfectPower(c.n, 2)],
-  ['EVEN_SPACING_ABS', 'Even Spacing (Absolute)', '📐', 90992, 'Epic', c => absArith(c.d)],
-  ['FIREFLY', 'Firefly', '🪲', 82237, 'Epic', c => {
+  ['CONSEC_TRIPLE_EXACT', '3 Consecutive Numbers', '⛓️', 555556, c => { const r = pTripleExact(c.s); return !!r && pOrdered(r.numbers); }],
+  ['CONTIGUOUS_FIVES', 'Contiguous Fives', '➖➖➖', 552487, c => /(\d)\1{4}/.test(c.s)],
+  ['DEEP_VOID_FOUR', 'Deep Void (4)', '🌌', 552487, c => c.has('0000')],
+  ['STROBOGRAMMATIC', 'Strobogrammatic', '🙃', 502513, c => strobogrammatic(c.s)],
+  ['STRAIGHT', 'Straight', '📏', 454546, c => straightRun(c.d, 5)],
+  ['JACKPOT_FOUR', 'Jackpot Four', '💰💰', 357143, c => c.has('7777')],
+  ['VERY_NICE', 'Very Nice', '🥵', 334448, c => c.has('6969')],
+  ['DEEPER_MEANING', 'Deeper Meaning', '🌌', 334448, c => c.has('4242')],
+  ['SIXTY_SEVEN_DOUBLE', '6767', '🫠', 334448, c => c.has('6767')],
+  ['LEET', 'Leet', '💻', 333334, c => c.has('1337')],
+  ['HELL', 'Hell', '🔥', 333334, c => c.has('7734')],
+  ['BOOB_8008', '8008', '🔢', 333334, c => c.has('8008')],
+  ['BIG_BROTHER', 'Big Brother', '👁️', 333334, c => c.has('1984')],
+  ['PI_CONTAINS_4', 'Pi Slice (4)', '🥧', 333334, c => c.has('3141')],
+  ['E_CONTAINS_4', 'E Slice (4)', '📈', 333334, c => c.has('2718')],
+  ['CONSEC_TRIPLE_SCRAMBLED', '3 Consecutive Numbers (Scrambled)', '🔀', 277778, c => { const r = pTripleExact(c.s); return !!r && !pOrdered(r.numbers); }],
+  ['ZIPPER', 'Zipper', '🤐', 246914, c => c.len >= 2 && c.distinct === 2 && c.d.every((x, i) => i === 0 || x !== c.d[i - 1])],
+  ['ASCENSION', 'Ascension', '📈', 219298, c => strictInc(c.d)],
+  ['CONSEC_TRIPLE_CONTAINS', '3 Consecutive Numbers (Contains)', '🔗', 157978, c => pNAdjacent(c.s, 3) !== null],
+  ['CONTIGUOUS_THREE_PAIR', 'Contiguous Three Pair', '👨‍👩‍👧‍👦👯', 154321, c => { const a = pContigPairStarts(c.s); for (let i = 0; i < a.length - 2; i++) if (a[i] + 2 === a[i + 1] && a[i + 1] + 2 === a[i + 2]) return true; return false; }],
+  ['FRAMED_PAIR', 'Framed Pair', '🖼️', 137174, c => c.len === 4 && c.d[1] === c.d[2] && c.d[0] !== c.d[1] && c.d[3] !== c.d[1]],
+  ['FRAMED_TRIPLE', 'Framed Triple', '🖼️🖼️', 137174, c => c.len === 5 && c.d[1] === c.d[2] && c.d[2] === c.d[3] && c.d[0] !== c.d[1] && c.d[4] !== c.d[1]],
+  ['DECAY', 'Decay', '📉', 119474, c => strictDec(c.d)],
+  ['THREE_DIGITS', 'Three Digits', '🤟', 111111, c => c.len === 3],
+  ['ECHO', 'Echo', '📣', 100100, c => c.len >= 2 && c.len % 2 === 0 && c.s.slice(0, c.len / 2) === c.s.slice(c.len / 2)],
+  ['MILLENNIUM', 'Millennium', '🗓️', 100000, c => c.s.endsWith('000')],
+  ['PRONIC', 'Pronic Number', '🧮', 100000, c => PRONICS.has(c.n)],
+  ['TRIPLE_NINE', 'Triple Nine', '🎉', 100000, c => c.s.endsWith('999')],
+  ['SEMI_MILLENNIUM', 'Semi-Millennium', '📜', 100000, c => c.s.endsWith('500')],
+  ['COLOSSAL', 'Colossal', '🪨', 100000, c => c.n > 999000],
+  ['SQUARE', '2nd Power', '🟦', 99900, c => isPerfectPower(c.n, 2)],
+  ['EVEN_SPACING_ABS', 'Even Spacing (Absolute)', '📐', 90992, c => absArith(c.d)],
+  ['FIREFLY', 'Firefly', '🪲', 82237, c => {
     if (c.len < 4 || c.distinct !== 2) return false; // prod requires length >= 4
     return Object.values(c.counts).some(v => v === 1); // one digit appears exactly once
   }],
-  ['CONSEC_PAIR_EXACT', '2 Consecutive Numbers', '🔗', 50505, 'Epic', c => pPairExact(c.s) !== null],
-  ['PALINDROME', 'Palindrome', '🪞', 50025, 'Epic', c => c.s === [...c.s].reverse().join('')],
+  ['CONSEC_PAIR_EXACT', '2 Consecutive Numbers', '🔗', 50505, c => pPairExact(c.s) !== null],
+  ['PALINDROME', 'Palindrome', '🪞', 50025, c => c.s === [...c.s].reverse().join('')],
 
   // --- Rare ---
-  ['CONTIGUOUS_QUADS', 'Contiguous Quads', '➖➖', 37023, 'Rare', c => /(\d)\1{3}/.test(c.s)],
-  ['DEEP_VOID_THREE', 'Deep Void (3)', '🌑', 37023, 'Rare', c => c.has('000')],
-  ['TURTLE', 'Turtle', '🐢', 36049, 'Rare', c => turtle(c.d)],
-  ['SECRET_AGENT', 'Secret Agent', '🕶️', 34614, 'Rare', c => c.has('007')],
-  ['HEAVY', 'Heavy', '🧱', 33300, 'Rare', c => c.sum > 45],
-  ['CONTIGUOUS_BOAT', 'Contiguous Full House', '🏰', 30111, 'Rare', c => {
+  ['CONTIGUOUS_QUADS', 'Contiguous Quads', '➖➖', 37023, c => /(\d)\1{3}/.test(c.s)],
+  ['DEEP_VOID_THREE', 'Deep Void (3)', '🌑', 37023, c => c.has('000')],
+  ['TURTLE', 'Turtle', '🐢', 36049, c => turtle(c.d)],
+  ['SECRET_AGENT', 'Secret Agent', '🕶️', 34614, c => c.has('007')],
+  ['HEAVY', 'Heavy', '🧱', 33300, c => c.sum > 45],
+  ['CONTIGUOUS_BOAT', 'Contiguous Full House', '🏰', 30111, c => {
     const m = c.s.match(/(\d)\1\1(\d)\2/); if (m && m[1] !== m[2]) return true;
     const m2 = c.s.match(/(\d)\1(\d)\2\2/); return !!(m2 && m2[1] !== m2[2]);
   }],
-  ['JACKPOT', 'Jackpot', '💰', 27027, 'Rare', c => c.has('777')],
-  ['DEVIL', 'Devil', '😈', 27027, 'Rare', c => c.has('666')],
-  ['SEQUENCE_4', 'Sequence (4)', '🔢', 25907, 'Rare', c => pHasSequence(c.s, 4, false)],
-  ['ERROR', 'Error 404', '🚫', 25132, 'Rare', c => c.has('404')],
-  ['ORIENTATION', 'Orientation', '🧭', 25132, 'Rare', c => c.has('101')],
-  ['BOTANIST', 'Botanist', '🌿', 25006, 'Rare', c => c.has('420')],
-  ['EMERGENCY', 'Emergency', '🚑', 25006, 'Rare', c => c.has('911')],
-  ['PI_CONTAINS_3', 'Pi Slice (3)', '🥧', 25006, 'Rare', c => c.has('314')],
-  ['E_CONTAINS_3', 'E Slice (3)', '📈', 25006, 'Rare', c => c.has('271')],
-  ['TREE_FIDDY', 'Tree Fiddy', '🦕', 25006, 'Rare', c => c.has('350')],
-  ['CALENDAR', 'Calendar', '📅', 25006, 'Rare', c => c.has('365')],
-  ['DIVISIBLE_BY_THREE', 'Divisible by Three', '🔺', 24414, 'Rare', c => c.d.every(x => x % 3 === 0)],
-  ['SCRAMBLE', 'Scramble', '🔀', 22722, 'Rare', c => c.len >= 2 && c.distinct === c.len && (Math.max(...c.d) - Math.min(...c.d)) === c.len - 1],
-  ['DUALITY', 'Duality', '☯️', 21654, 'Rare', c => c.distinct === 2],
-  ['FRAMED_DOUBLE', 'Framed Double', '🖼️🖼️🖼️', 15242, 'Rare', c => c.len === 6 && c.d[1] === c.d[2] && c.d[3] === c.d[4] && c.d[1] !== c.d[3] && c.d[0] !== c.d[1] && c.d[5] !== c.d[4]],
-  ['PAIRED_BOOKENDS', 'Paired Bookends', '👐', 11122, 'Rare', c => c.len >= 4 && c.d[0] === c.d[1] && c.d[c.len - 1] === c.d[c.len - 2] && c.d[0] !== c.d[c.len - 1]],
-  ['FOUR_DIGITS', 'Four Digits', '🍀', 11111, 'Rare', c => c.len === 4],
-  ['THREE_PAIR', 'Three Pair', '👯‍♀️👯', 10288, 'Rare', c => c.countExact(2) >= 3],
-  ['BOOKENDS', 'Bookends', '📚', 10010, 'Rare', c => c.len >= 4 && c.s.slice(0, 2) === c.s.slice(-2)],
-  ['MIRROR_BOOKENDS', 'Mirror Bookends', '📖', 10010, 'Rare', c => c.len >= 4 && c.d[0] === c.d[c.len - 1] && c.d[1] === c.d[c.len - 2]],
-  ['CENTURY', 'Century', '💯', 10000, 'Rare', c => c.s.endsWith('00')],
-  ['DOUBLE_NINE', 'Double Nine', '🎈', 10000, 'Rare', c => c.s.endsWith('99')],
-  ['SEMI_CENTURY', 'Semi-Century', '🗓️', 10000, 'Rare', c => c.s.endsWith('50')],
+  ['JACKPOT', 'Jackpot', '💰', 27027, c => c.has('777')],
+  ['DEVIL', 'Devil', '😈', 27027, c => c.has('666')],
+  ['SEQUENCE_4', 'Sequence (4)', '🔢', 25907, c => pHasSequence(c.s, 4, false)],
+  ['ERROR', 'Error 404', '🚫', 25132, c => c.has('404')],
+  ['ORIENTATION', 'Orientation', '🧭', 25132, c => c.has('101')],
+  ['BOTANIST', 'Botanist', '🌿', 25006, c => c.has('420')],
+  ['EMERGENCY', 'Emergency', '🚑', 25006, c => c.has('911')],
+  ['PI_CONTAINS_3', 'Pi Slice (3)', '🥧', 25006, c => c.has('314')],
+  ['E_CONTAINS_3', 'E Slice (3)', '📈', 25006, c => c.has('271')],
+  ['TREE_FIDDY', 'Tree Fiddy', '🦕', 25006, c => c.has('350')],
+  ['CALENDAR', 'Calendar', '📅', 25006, c => c.has('365')],
+  ['DIVISIBLE_BY_THREE', 'Divisible by Three', '🔺', 24414, c => c.d.every(x => x % 3 === 0)],
+  ['SCRAMBLE', 'Scramble', '🔀', 22722, c => c.len >= 2 && c.distinct === c.len && (Math.max(...c.d) - Math.min(...c.d)) === c.len - 1],
+  ['DUALITY', 'Duality', '☯️', 21654, c => c.distinct === 2],
+  ['FRAMED_DOUBLE', 'Framed Double', '🖼️🖼️🖼️', 15242, c => c.len === 6 && c.d[1] === c.d[2] && c.d[3] === c.d[4] && c.d[1] !== c.d[3] && c.d[0] !== c.d[1] && c.d[5] !== c.d[4]],
+  ['PAIRED_BOOKENDS', 'Paired Bookends', '👐', 11122, c => c.len >= 4 && c.d[0] === c.d[1] && c.d[c.len - 1] === c.d[c.len - 2] && c.d[0] !== c.d[c.len - 1]],
+  ['FOUR_DIGITS', 'Four Digits', '🍀', 11111, c => c.len === 4],
+  ['THREE_PAIR', 'Three Pair', '👯‍♀️👯', 10288, c => c.countExact(2) >= 3],
+  ['BOOKENDS', 'Bookends', '📚', 10010, c => c.len >= 4 && c.s.slice(0, 2) === c.s.slice(-2)],
+  ['MIRROR_BOOKENDS', 'Mirror Bookends', '📖', 10010, c => c.len >= 4 && c.d[0] === c.d[c.len - 1] && c.d[1] === c.d[c.len - 2]],
+  ['CENTURY', 'Century', '💯', 10000, c => c.s.endsWith('00')],
+  ['DOUBLE_NINE', 'Double Nine', '🎈', 10000, c => c.s.endsWith('99')],
+  ['SEMI_CENTURY', 'Semi-Century', '🗓️', 10000, c => c.s.endsWith('50')],
 
   // --- Uncommon ---
-  ['QUADS', 'Four of a Kind', '🍀', 8436, 'Uncommon', c => c.maxCount >= 4],
-  ['LOW_BALL', 'Low Ball', '📉', 6400, 'Uncommon', c => /^[0-4]+$/.test(c.s)],
-  ['CONTIGUOUS_TWO_PAIR', 'Contiguous Two Pair', '👨‍👩‍👧‍👦', 6142, 'Uncommon', c => { const a = pContigPairStarts(c.s); for (let i = 0; i < a.length - 1; i++) if (a[i] + 2 === a[i + 1]) return true; return false; }],
-  ['MOUNTAIN', 'Mountain', '🏔️', 5885, 'Uncommon', c => mountain(c.d)],
-  ['DOUBLE_HOP', 'Double Hop', '🦘🦘', 5321, 'Uncommon', c => { if (c.len < 5 || c.distinct < 2) return false; for (let e = 0; e <= c.len - 5; e++) if (c.s[e + 2] === c.s[e] && c.s[e + 4] === c.s[e]) return true; return false; }],
-  ['HIGH_ROLLER', 'High Roller', '🤑', 5120, 'Uncommon', c => /^[5-9]+$/.test(c.s)],
-  ['VALLEY', 'Valley', '🏜️', 4199, 'Uncommon', c => valley(c.d)],
-  ['MINI_ECHO', 'Mini Echo', '🔂', 3704, 'Uncommon', c => /(\d\d)\1/.test(c.s)],
-  ['ALTERNATOR', 'Alternator', '⚡', 2845, 'Uncommon', c => alternator(c.d)],
-  ['FLUSH', 'Flush', '🎨', 2845, 'Uncommon', c => allSameParity(c.d)],
-  ['CONTIGUOUS_TRIPS', 'Contiguous Trips', '➖', 2784, 'Uncommon', c => /(\d)\1\1/.test(c.s)],
-  ['DEEP_VOID', 'Deep Void', '🕳️', 2784, 'Uncommon', c => c.has('00')],
-  ['FEATHER', 'Feather', '🪶', 2667, 'Uncommon', c => c.sum < 15],
-  ['BLACKJACK', 'Blackjack', '♠️', 2521, 'Uncommon', c => c.sum === 21],
-  ['BOAT', 'Full House', '🏠', 2397, 'Uncommon', c => { const v = Object.values(c.counts).sort((a, b) => b - a); return v[0] >= 3 && (v[1] || 0) >= 2; }],
-  ['SNAKE_EYES', 'Snake Eyes', '🎲', 2121, 'Uncommon', c => { if ((c.counts[1] || 0) !== 2) return false; for (const k in c.counts) if (k !== '1' && c.counts[k] >= 2) return false; return true; }],
-  ['NICE', 'Nice', '😏', 2024, 'Uncommon', c => c.has('69')],
-  ['MEANING', 'Meaning of Life', '🌌', 2024, 'Uncommon', c => c.has('42')],
-  ['SIXTY_SEVEN', 'Six-Seven', '🫠', 2024, 'Uncommon', c => c.has('67')],
-  ['EIGHTY_SIX', 'Eighty-Six', '🍽️', 2024, 'Uncommon', c => c.has('86')],
-  ['BALANCED', 'Balanced', '⚖️', 1959, 'Uncommon', c => {
+  ['QUADS', 'Four of a Kind', '🍀', 8436, c => c.maxCount >= 4],
+  ['LOW_BALL', 'Low Ball', '📉', 6400, c => /^[0-4]+$/.test(c.s)],
+  ['CONTIGUOUS_TWO_PAIR', 'Contiguous Two Pair', '👨‍👩‍👧‍👦', 6142, c => { const a = pContigPairStarts(c.s); for (let i = 0; i < a.length - 1; i++) if (a[i] + 2 === a[i + 1]) return true; return false; }],
+  ['MOUNTAIN', 'Mountain', '🏔️', 5885, c => mountain(c.d)],
+  ['DOUBLE_HOP', 'Double Hop', '🦘🦘', 5321, c => { if (c.len < 5 || c.distinct < 2) return false; for (let e = 0; e <= c.len - 5; e++) if (c.s[e + 2] === c.s[e] && c.s[e + 4] === c.s[e]) return true; return false; }],
+  ['HIGH_ROLLER', 'High Roller', '🤑', 5120, c => /^[5-9]+$/.test(c.s)],
+  ['VALLEY', 'Valley', '🏜️', 4199, c => valley(c.d)],
+  ['MINI_ECHO', 'Mini Echo', '🔂', 3704, c => /(\d\d)\1/.test(c.s)],
+  ['ALTERNATOR', 'Alternator', '⚡', 2845, c => alternator(c.d)],
+  ['FLUSH', 'Flush', '🎨', 2845, c => allSameParity(c.d)],
+  ['CONTIGUOUS_TRIPS', 'Contiguous Trips', '➖', 2784, c => /(\d)\1\1/.test(c.s)],
+  ['DEEP_VOID', 'Deep Void', '🕳️', 2784, c => c.has('00')],
+  ['FEATHER', 'Feather', '🪶', 2667, c => c.sum < 15],
+  ['BLACKJACK', 'Blackjack', '♠️', 2521, c => c.sum === 21],
+  ['BOAT', 'Full House', '🏠', 2397, c => { const v = Object.values(c.counts).sort((a, b) => b - a); return v[0] >= 3 && (v[1] || 0) >= 2; }],
+  ['SNAKE_EYES', 'Snake Eyes', '🎲', 2121, c => { if ((c.counts[1] || 0) !== 2) return false; for (const k in c.counts) if (k !== '1' && c.counts[k] >= 2) return false; return true; }],
+  ['NICE', 'Nice', '😏', 2024, c => c.has('69')],
+  ['MEANING', 'Meaning of Life', '🌌', 2024, c => c.has('42')],
+  ['SIXTY_SEVEN', 'Six-Seven', '🫠', 2024, c => c.has('67')],
+  ['EIGHTY_SIX', 'Eighty-Six', '🍽️', 2024, c => c.has('86')],
+  ['BALANCED', 'Balanced', '⚖️', 1959, c => {
     if (c.len < 2 || c.len % 2 !== 0) return false; // prod: even length only
     const h = c.len / 2;
     let a = 0, b = 0;
     for (let i = 0; i < h; i++) { a += c.d[i]; b += c.d[h + i]; }
     return a === b;
   }],
-  ['RHYME', 'Rhyme', '🎶', 1872, 'Uncommon', c => {
+  ['RHYME', 'Rhyme', '🎶', 1872, c => {
     // Same 2+ digit substring appears twice WITHOUT overlapping (so "00" inside "000"
     // does not count - that's why 455000 gets no Rhyme).
     for (let L = 2; L <= c.len - 1; L++)
@@ -524,28 +548,28 @@ const BADGES = [
         if (c.s.indexOf(c.s.slice(i, i + L), i + L) !== -1) return true;
     return false;
   }],
-  ['SEQUENCE_3', 'Sequence (3)', '🔢', 1716, 'Uncommon', c => pHasSequence(c.s, 3, false)],
-  ['CONSEC_PAIR_ADJACENT', '2 Consecutive Numbers (Contains)', '🔗', 1659, 'Uncommon', c => pPairAdjacent(c.s) !== null],
-  ['CONSEC_PAIR_NEARBY', '2 Consecutive Numbers (Nearby)', '🔗', 1575, 'Uncommon', c => pPairNearby(c.s) !== null],
-  ['PRIME', 'Prime Number', '💎', 1274, 'Uncommon', c => isPrime(c.n)],
-  ['TRINITY', 'Trinity', '⚜️', 1265, 'Uncommon', c => c.distinct === 3],
-  ['DOZEN', 'Dozen', '🍩', 1200, 'Uncommon', c => c.n > 0 && c.n % 12 === 0],
-  ['FIVE_DIGITS', 'Five Digits', '🖐️', 1111, 'Uncommon', c => c.len === 5],
-  ['ELEVEN', 'Eleven', '🕚', 1100, 'Uncommon', c => c.n > 0 && c.n % 11 === 0],
-  ['HARSHAD', 'Harshad Number', '🤝', 1048, 'Uncommon', c => c.sum > 0 && c.n % c.sum === 0],
-  ['CLEAN', 'Clean', '🧼', 1000, 'Uncommon', c => c.s.endsWith('0')],
-  ['SEMI_CLEAN', 'Semi-Clean', '🧹', 1000, 'Uncommon', c => c.s.endsWith('5')],
-  ['EQUILIBRIUM', 'Equilibrium', '🧘', 1000, 'Uncommon', c => c.len >= 2 && c.d[0] === c.d[c.len - 1]],
-  ['SANDWICH', 'Sandwich', '🥪', 1000, 'Uncommon', c => c.len >= 3 && c.d[0] === c.d[c.len - 1] && c.d.slice(1, -1).some(x => x !== c.d[0])],
+  ['SEQUENCE_3', 'Sequence (3)', '🔢', 1716, c => pHasSequence(c.s, 3, false)],
+  ['CONSEC_PAIR_ADJACENT', '2 Consecutive Numbers (Contains)', '🔗', 1659, c => pPairAdjacent(c.s) !== null],
+  ['CONSEC_PAIR_NEARBY', '2 Consecutive Numbers (Nearby)', '🔗', 1575, c => pPairNearby(c.s) !== null],
+  ['PRIME', 'Prime Number', '💎', 1274, c => isPrime(c.n)],
+  ['TRINITY', 'Trinity', '⚜️', 1265, c => c.distinct === 3],
+  ['DOZEN', 'Dozen', '🍩', 1200, c => c.n > 0 && c.n % 12 === 0],
+  ['FIVE_DIGITS', 'Five Digits', '🖐️', 1111, c => c.len === 5],
+  ['ELEVEN', 'Eleven', '🕚', 1100, c => c.n > 0 && c.n % 11 === 0],
+  ['HARSHAD', 'Harshad Number', '🤝', 1048, c => c.sum > 0 && c.n % c.sum === 0],
+  ['CLEAN', 'Clean', '🧼', 1000, c => c.s.endsWith('0')],
+  ['SEMI_CLEAN', 'Semi-Clean', '🧹', 1000, c => c.s.endsWith('5')],
+  ['EQUILIBRIUM', 'Equilibrium', '🧘', 1000, c => c.len >= 2 && c.d[0] === c.d[c.len - 1]],
+  ['SANDWICH', 'Sandwich', '🥪', 1000, c => c.len >= 3 && c.d[0] === c.d[c.len - 1] && c.d.slice(1, -1).some(x => x !== c.d[0])],
 
   // --- Common ---
-  ['HILLS', 'Hills', '🏞️', 733, 'Common', c => c.len >= 4 && hills(c.d)], // prod requires length >= 4
-  ['TRIPS', 'Three of a Kind', '🎰', 724, 'Common', c => c.countExact(3) > 0], // exactly 3 (a quad is not trips)
-  ['LUCKY_SEVEN_DIV', 'Lucky Seven (Divisible)', '🎰', 700, 'Common', c => c.n > 0 && c.n % 7 === 0],
-  ['HETEROGENEOUS', 'Heterogeneous', '🥗', 593, 'Common', c => c.distinct === c.len],
-  ['GAP_ONE', 'Gap One', '↕️', 529, 'Common', c => c.len >= 2 && Math.abs(c.d[0] - c.d[c.len - 1]) === 1],
-  ['TWO_PAIR', 'Two Pair', '👯‍♀️', 447, 'Common', c => c.countExact(2) >= 2],
-  ['HOPSCOTCH', 'Hopscotch', '🦘', 312, 'Common', c => {
+  ['HILLS', 'Hills', '🏞️', 733, c => c.len >= 4 && hills(c.d)], // prod requires length >= 4
+  ['TRIPS', 'Three of a Kind', '🎰', 724, c => c.countExact(3) > 0], // exactly 3 (a quad is not trips)
+  ['LUCKY_SEVEN_DIV', 'Lucky Seven (Divisible)', '🎰', 700, c => c.n > 0 && c.n % 7 === 0],
+  ['HETEROGENEOUS', 'Heterogeneous', '🥗', 593, c => c.distinct === c.len],
+  ['GAP_ONE', 'Gap One', '↕️', 529, c => c.len >= 2 && Math.abs(c.d[0] - c.d[c.len - 1]) === 1],
+  ['TWO_PAIR', 'Two Pair', '👯‍♀️', 447, c => c.countExact(2) >= 2],
+  ['HOPSCOTCH', 'Hopscotch', '🦘', 312, c => {
     if (c.len < 3 || c.distinct < 2) return false;
     for (let e = 0; e <= c.len - 3; e++) {
       if (c.s[e + 2] === c.s[e]) {
@@ -556,32 +580,32 @@ const BADGES = [
     }
     return false;
   }],
-  ['GHOST', 'Ghost', '👻', 309, 'Common', c => (c.counts[0] || 0) === 1],
-  ['QUARTET', 'Quartet', '🎻', 290, 'Common', c => c.distinct === 4],
-  ['HYDROGEN', 'Hydrogen (1)', '💧', 282, 'Common', c => (c.counts[1] || 0) === 1],
-  ['HELIUM', 'Helium (2)', '🎈', 282, 'Common', c => (c.counts[2] || 0) === 1],
-  ['CARBON', 'Carbon (6)', '✏️', 282, 'Common', c => (c.counts[6] || 0) === 1],
-  ['OXYGEN', 'Oxygen (8)', '💨', 282, 'Common', c => (c.counts[8] || 0) === 1],
-  ['LITHIUM', 'Lithium (3)', '🔋', 282, 'Common', c => (c.counts[3] || 0) === 1],
-  ['BERYLLIUM', 'Beryllium (4)', '💎', 282, 'Common', c => (c.counts[4] || 0) === 1],
-  ['BORON', 'Boron (5)', '🧼', 282, 'Common', c => (c.counts[5] || 0) === 1],
-  ['NITROGEN', 'Nitrogen (7)', '❄️', 282, 'Common', c => (c.counts[7] || 0) === 1],
-  ['FLUORINE', 'Fluorine (9)', '🦷', 282, 'Common', c => (c.counts[9] || 0) === 1],
-  ['GROUNDED', 'Grounded', '⚓', 250, 'Common', c => c.len >= 2 && c.d[0] < c.d[c.len - 1]],
-  ['CONTIGUOUS_PAIR', 'Contiguous Pair', '🫂', 249, 'Common', c => /(\d)\1/.test(c.s)],
-  ['LUCKY_7', 'Lucky Seven', '7️⃣', 213, 'Common', c => c.has('7')],
-  ['EVEN', 'Even', '⚖️', 200, 'Common', c => c.n % 2 === 0],
-  ['ODD', 'Odd', '🦄', 200, 'Common', c => c.n % 2 === 1],
-  ['LIFTOFF', 'Liftoff', '🚀', 200, 'Common', c => c.len >= 2 && c.d[0] > c.d[c.len - 1]],
-  ['VOID', 'Void', '🕳️', 167, 'Common', c => !c.has('0')],
-  ['NEIGHBORS', 'Neighbors', '🏘️', 161, 'Common', c => {
+  ['GHOST', 'Ghost', '👻', 309, c => (c.counts[0] || 0) === 1],
+  ['QUARTET', 'Quartet', '🎻', 290, c => c.distinct === 4],
+  ['HYDROGEN', 'Hydrogen (1)', '💧', 282, c => (c.counts[1] || 0) === 1],
+  ['HELIUM', 'Helium (2)', '🎈', 282, c => (c.counts[2] || 0) === 1],
+  ['CARBON', 'Carbon (6)', '✏️', 282, c => (c.counts[6] || 0) === 1],
+  ['OXYGEN', 'Oxygen (8)', '💨', 282, c => (c.counts[8] || 0) === 1],
+  ['LITHIUM', 'Lithium (3)', '🔋', 282, c => (c.counts[3] || 0) === 1],
+  ['BERYLLIUM', 'Beryllium (4)', '💎', 282, c => (c.counts[4] || 0) === 1],
+  ['BORON', 'Boron (5)', '🧼', 282, c => (c.counts[5] || 0) === 1],
+  ['NITROGEN', 'Nitrogen (7)', '❄️', 282, c => (c.counts[7] || 0) === 1],
+  ['FLUORINE', 'Fluorine (9)', '🦷', 282, c => (c.counts[9] || 0) === 1],
+  ['GROUNDED', 'Grounded', '⚓', 250, c => c.len >= 2 && c.d[0] < c.d[c.len - 1]],
+  ['CONTIGUOUS_PAIR', 'Contiguous Pair', '🫂', 249, c => /(\d)\1/.test(c.s)],
+  ['LUCKY_7', 'Lucky Seven', '7️⃣', 213, c => c.has('7')],
+  ['EVEN', 'Even', '⚖️', 200, c => c.n % 2 === 0],
+  ['ODD', 'Odd', '🦄', 200, c => c.n % 2 === 1],
+  ['LIFTOFF', 'Liftoff', '🚀', 200, c => c.len >= 2 && c.d[0] > c.d[c.len - 1]],
+  ['VOID', 'Void', '🕳️', 167, c => !c.has('0')],
+  ['NEIGHBORS', 'Neighbors', '🏘️', 161, c => {
     for (let i = 0; i + 1 < c.len; i++) if (Math.abs(c.d[i] - c.d[i + 1]) === 1) return true; // adjacent positions only
     return false;
   }],
   // CSV lists Pair at 120, but the live game scores it 0 (see the "Pair Fix" toggle /
   // the pairFix option in compute()). Inferred from prod: 634700 = 18,194.
-  ['PAIR', 'Pair', '👯', 120, 'Common', c => c.maxCount >= 2],
-  ['SIX_DIGITS', 'Six Digits', '🐝', 111, 'Common', c => c.len === 6],
+  ['PAIR', 'Pair', '👯', 120, c => c.maxCount >= 2],
+  ['SIX_DIGITS', 'Six Digits', '🐝', 111, c => c.len === 6],
 ];
 
 // ---------------------------------------------------------------------------
@@ -926,10 +950,10 @@ function compute(n) {
     runs: runLengths(s),
   };
   const earned = [];
-  for (const [id, label, emoji, ep, rarity, test] of BADGES) {
+  for (const [id, label, emoji, ep, test] of BADGES) {
     let ok = false;
     try { ok = test(c); } catch (e) { ok = false; }
-    if (ok) earned.push({ id, label, emoji, ep, rarity, desc: DESCRIPTIONS[id], prob: PROBABILITIES[id] });
+    if (ok) earned.push({ id, label, emoji, ep, rarity: rarityFromScore(ep), desc: DESCRIPTIONS[id], prob: PROBABILITIES[id] });
   }
   // Apply family supersession: within each family, only the highest-EP earned badge scores;
   // the rest stay in the earned list (displayed) but score 0. Matches prod's max-score-wins.
@@ -986,14 +1010,17 @@ function engineModuleSource() {
   // The badge table, with each test re-emitted from its source.
   const badgesSrc = 'const BADGES = [\n' + BADGES.map(b =>
     `  [${JSON.stringify(b[0])},${JSON.stringify(b[1])},${JSON.stringify(b[2])},` +
-    `${b[3]},${JSON.stringify(b[4])},${b[5].toString()}]`
+    `${b[3]},${b[4].toString()}]`
   ).join(',\n') + '\n];';
 
   const supSrc = `const FAMILIES = ${JSON.stringify(FAMILIES)};`;
 
   // Lean compute: post-supersession total EP + earned badge indices, no UI metadata.
   const rest = `
-const BADGE_META = BADGES.map(b => ({ id: b[0], label: b[1], emoji: b[2], rarity: b[4] }));
+const BADGE_RARITY_THRESHOLDS = { common: 1e3, uncommon: 1e4, rare: 1e5, epic: 1e6, anomaly: 1e7 };
+function tierFromScore(ep){const t=BADGE_RARITY_THRESHOLDS;return ep<t.common?'common':ep<t.uncommon?'uncommon':ep<t.rare?'rare':ep<t.epic?'epic':ep<t.anomaly?'anomaly':'mythic';}
+function rarityFromScore(ep){const t=tierFromScore(ep);return t.charAt(0).toUpperCase()+t.slice(1);}
+const BADGE_META = BADGES.map(b => ({ id: b[0], label: b[1], emoji: b[2], rarity: rarityFromScore(b[3]) }));
 const SUP_INDEX = (() => {
   const idToIdx = new Map(BADGES.map((b, i) => [b[0], i]));
   return FAMILIES.map(g => g.map(id => idToIdx.get(id)).filter(i => i !== undefined));
@@ -1020,7 +1047,7 @@ function computeLean(n) {
   const epOf = new Map();
   for (let i = 0; i < BADGES.length; i++) {
     let ok = false;
-    try { ok = BADGES[i][5](c); } catch (e) { ok = false; }
+    try { ok = BADGES[i][4](c); } catch (e) { ok = false; }
     if (ok) { earned.push(i); epOf.set(i, BADGES[i][3]); }
   }
   const earnedSet = new Set(earned);
@@ -1674,10 +1701,13 @@ function renderHTML(result) {
     color-scheme: dark;
     --bg:#08090c; --surface:#131419; --surface-2:#181a20; --border:#24262d; --border-2:#30333c;
     --text:#e7e8ea; --muted:#8b8e97; --faint:#595c65; --accent:#5b93d6; --accent-soft:#142a3e;
+    --hl:#e8924e; --hl-lt:#f4b27a;
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --r-card:14px;
   }
   * { box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg);
+  body { font-family:var(--font); background:var(--bg);
     color:var(--text); margin:0; padding:3.5rem 1.25rem 4rem; line-height:1.5; -webkit-font-smoothing:antialiased; }
   .wrap { max-width:660px; margin:0 auto; }
 
@@ -1767,20 +1797,20 @@ function renderHTML(result) {
 
   /* --- Top bar: "not affiliated" disclaimer + beta toggle (top-right) --- */
   .topbar { position:fixed; top:0; left:0; right:0; z-index:50; display:flex; align-items:center; justify-content:center;
-    padding:.4rem .8rem; background:#120d05; border-bottom:1px solid #3a2e10; }
-  .disclaimer { text-align:center; color:#e9c46a; font-size:.76rem; letter-spacing:.01em; }
-  .disclaimer strong { color:#f4d58d; }
+    padding:.4rem .8rem; background:var(--surface); border-bottom:1px solid var(--border); }
+  .disclaimer { text-align:center; color:var(--hl-lt); font-size:.76rem; letter-spacing:.01em; }
+  .disclaimer strong { color:var(--text); }
 
   /* --- Number card (rngdle.com-style, click-to-type) --- */
   .bn { margin-bottom:1.5rem; }
   .bn-card { position:relative; display:flex; justify-content:center; align-items:center; min-height:6.4rem;
-    padding:1.6rem 1rem; border-radius:16px; border:2px solid var(--accent); cursor:text;
-    background:radial-gradient(120% 140% at 50% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%), var(--surface);
-    box-shadow:0 0 26px var(--glow), inset 0 0 30px color-mix(in srgb, var(--accent) 10%, transparent);
+    padding:1.6rem 1rem; border-radius:var(--r-card); border:1.5px solid color-mix(in srgb, var(--accent) 55%, var(--border)); cursor:text;
+    background:radial-gradient(120% 140% at 50% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 62%), var(--surface);
+    box-shadow:0 14px 34px -18px var(--glow);
     transition:border-color .25s, box-shadow .25s; }
-  .bn-card:focus-within { box-shadow:0 0 30px var(--glow), 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent), inset 0 0 30px color-mix(in srgb, var(--accent) 12%, transparent); }
+  .bn-card:focus-within { border-color:var(--accent); box-shadow:0 14px 34px -16px var(--glow), 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
   /* Transparent input overlays the card: clicking anywhere focuses it, typing drives the digits. */
-  .bn-input { position:absolute; inset:0; width:100%; height:100%; margin:0; padding:0; border:0; border-radius:16px;
+  .bn-input { position:absolute; inset:0; width:100%; height:100%; margin:0; padding:0; border:0; border-radius:var(--r-card);
     background:transparent; color:transparent; caret-color:var(--accent); text-align:center; cursor:text;
     font-family:var(--mono); font-weight:700; letter-spacing:.08em; font-size:clamp(2.4rem, 11vw, 4rem); }
   .bn-input:focus { outline:none; }
@@ -2428,10 +2458,14 @@ function renderGrid() {
 <meta name="robots" content="noindex">
 <title>RNGdle - Number Grid</title>
 <style>
-  :root { color-scheme: dark; --bg:#08090c; --accent:#e8924e; --accent-lt:#f4b27a; }
+  :root { color-scheme: dark;
+    --bg:#08090c; --surface:#131419; --surface-2:#181a20; --border:#24262d; --border-2:#30333c;
+    --text:#e7e8ea; --muted:#8b8e97;
+    --accent:#5b93d6; --hl:#e8924e; --hl-lt:#f4b27a;
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: #e8eaf0;
-    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 var(--font);
     overflow: hidden; -webkit-user-select: none; user-select: none; }
   #grid { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   #grid:active { cursor: grabbing; }
@@ -2443,15 +2477,15 @@ function renderGrid() {
   .sidehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
   .sidehead h1 { flex: 1; }
   #sidehide, #sideshow { flex: 0 0 auto; width: 32px; height: 32px; padding: 0;
-    display: inline-flex; align-items: center; justify-content: center; color: #e8eaf0;
+    display: inline-flex; align-items: center; justify-content: center; color: var(--text);
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
   #sidehide svg, #sideshow svg { width: 19px; height: 19px; }
   #sidehide:hover, #sideshow:hover { background: rgba(255,255,255,.14); }
   #sideshow { position: fixed; top: 12px; left: 12px; z-index: 7; display: none; }
   body.nav-collapsed #sideshow { display: inline-flex; }
-  #sidehide.hint { color: var(--accent-lt); animation: trayhint 1.15s ease-in-out infinite; }
+  #sidehide.hint { color: var(--hl-lt); animation: trayhint 1.15s ease-in-out infinite; }
   @keyframes trayhint { 0%, 100% { box-shadow: 0 0 0 0 transparent; border-color: rgba(255,255,255,.14); }
-    50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 32%, transparent); border-color: var(--accent); } }
+    50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--hl) 32%, transparent); border-color: var(--hl); } }
   @media (max-width: 640px) {
     #side { left: 10px; right: 10px; width: auto; max-width: none; top: 10px; bottom: 10px; padding: 14px; gap: 12px; }
     #search { padding: 11px 12px; font-size: 15px; }
@@ -2464,13 +2498,13 @@ function renderGrid() {
     body:not(.nav-collapsed) #ctrls, body:not(.nav-collapsed) #legend { display: none; }
   }
   #side h1 { margin: 0; font-size: 14px; font-weight: 650; }
-  #side .credit { font-size: 12px; color: #9aa1b2; }
+  #side .credit { font-size: 12px; color: var(--muted); }
   #side .credit b { color: var(--accent); font-weight: 600; }
-  #side .nav { font-size: 12px; color: #9aa1b2; }
+  #side .nav { font-size: 12px; color: var(--muted); }
   #side .nav a { color: var(--accent); text-decoration: none; }
   #side .nav a:hover { text-decoration: underline; }
   #vtitle { font-size: 12px; color: #cfd3df; min-height: 16px; }
-  #search { width: 100%; padding: 8px 10px; font-size: 13px; line-height: 1.4; color: #e8eaf0;
+  #search { width: 100%; padding: 8px 10px; font-size: 13px; line-height: 1.4; color: var(--text);
     -webkit-appearance: none; appearance: none; font-family: inherit;
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; }
   #list { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 2px; margin: 0 -4px; padding: 0 4px; }
@@ -2479,32 +2513,32 @@ function renderGrid() {
     color: #c8ccd8; background: transparent; border: 0; border-radius: 6px; cursor: pointer; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
   .item:hover { background: rgba(255,255,255,.07); }
-  .item.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: #f6dcc0; }
+  .item.on { background: color-mix(in srgb, var(--hl) 18%, transparent); color: #f6dcc0; }
   #ctrls { top: 12px; right: 12px; display: flex; gap: 6px; padding: 6px; }
-  #ctrls button { width: 34px; height: 34px; font-size: 17px; color: #e8eaf0;
+  #ctrls button { width: 34px; height: 34px; font-size: 17px; color: var(--text);
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
   #ctrls button:hover { background: rgba(255,255,255,.14); }
   #legend { bottom: 12px; right: 12px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
   #legbar { display: flex; align-items: center; gap: 8px; }
   #legend .scale { width: 150px; height: 10px; border-radius: 5px; }
-  #legend .lab { color: #9aa1b2; }
-  #cmap { font-family: inherit; font-size: 12px; color: #e8eaf0; background: rgba(255,255,255,.06);
+  #legend .lab { color: var(--muted); }
+  #cmap { font-family: inherit; font-size: 12px; color: var(--text); background: rgba(255,255,255,.06);
     -webkit-appearance: none; appearance: none; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 3px 6px; cursor: pointer; }
   #cmap option { color: #000; }
   #tip { position: fixed; z-index: 6; display: none; pointer-events: none; padding: 6px 9px;
     background: rgba(8,10,16,.92); border: 1px solid rgba(255,255,255,.18); border-radius: 8px; font-size: 12px; white-space: nowrap; }
   #tip b { font-size: 14px; }
-  #tip span { display: block; color: #9aa1b2; font-size: 11px; margin-top: 1px; }
+  #tip span { display: block; color: var(--muted); font-size: 11px; margin-top: 1px; }
   #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 8;
-    padding: 8px 14px; font-size: 13px; color: #e8eaf0; background: rgba(8,10,16,.94);
+    padding: 8px 14px; font-size: 13px; color: var(--text); background: rgba(8,10,16,.94);
     border: 1px solid rgba(255,255,255,.18); border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   #toast.show { opacity: 1; }
   #ov { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 14px; background: var(--bg); }
   #ov h2 { margin: 0; font-weight: 600; font-size: 16px; }
-  #ovtext { color: #9aa1b2; font-size: 13px; }
+  #ovtext { color: var(--muted); font-size: 13px; }
   #track { width: min(320px, 70vw); height: 8px; border-radius: 4px; background: rgba(255,255,255,.1); overflow: hidden; }
-  #bar { height: 100%; width: 0; background: linear-gradient(90deg, #888, #fff); transition: width .15s; }
+  #bar { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
 </style></head>
 <body>
 <canvas id="grid"></canvas>
