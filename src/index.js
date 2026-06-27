@@ -1492,7 +1492,7 @@ function analysisClient(WORKER_SRC) {
       const x = padL + i * bw, y = yOf(b.count), h = padT + plotH - y;
       const label = b.i === 0 ? '0 EP' : fmt(b.lo) + '-' + fmt(b.hi) + ' EP';
       const pct = (b.count / stats.total * 100);
-      const fill = b.i === 0 ? '#4a4d55' : '#7aa2ff';
+      const fill = b.i === 0 ? '#4a4d55' : '#5b93d6';
       svg += '<rect x="' + (x + 1).toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + Math.max(0, bw - 2).toFixed(1) +
         '" height="' + Math.max(0, h).toFixed(1) + '" fill="' + fill + '" rx="1">' +
         '<title>' + esc(label) + ': ' + Math.round(b.count).toLocaleString() + ' numbers (' + pct.toFixed(pct < 1 ? 2 : 1) + '%)</title></rect>';
@@ -1672,8 +1672,8 @@ function renderHTML(result) {
 <style>
   :root {
     color-scheme: dark;
-    --bg:#0b0c0e; --surface:#131419; --surface-2:#181a20; --border:#24262d; --border-2:#30333c;
-    --text:#e7e8ea; --muted:#8b8e97; --faint:#595c65; --accent:#7aa2ff; --accent-soft:#1a2336;
+    --bg:#08090c; --surface:#131419; --surface-2:#181a20; --border:#24262d; --border-2:#30333c;
+    --text:#e7e8ea; --muted:#8b8e97; --faint:#595c65; --accent:#5b93d6; --accent-soft:#142a3e;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; }
@@ -1725,7 +1725,7 @@ function renderHTML(result) {
     transition:opacity .15s, color .15s, text-shadow .15s; }
   .an-len:not(.on) { opacity:.28; }
   .an-len:hover { opacity:1; }
-  .an-len.on { color:#cdd9ff; text-shadow:0 0 16px rgba(122,162,255,.95), 0 0 6px rgba(122,162,255,.85); }
+  .an-len.on { color:#c9dbf2; text-shadow:0 0 16px rgba(91,147,214,.95), 0 0 6px rgba(91,147,214,.85); }
   .an-badge { display:flex; align-items:center; gap:.4rem; font-size:.85rem; cursor:pointer; }
   #an-badge-search { width:100%; font-size:.85rem; padding:.4rem .55rem; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); margin-bottom:.45rem; }
   #an-badge-search:focus { outline:none; border-color:var(--accent); }
@@ -1789,7 +1789,7 @@ function renderHTML(result) {
   .bn-number[data-len="1"], .bn-number[data-len="2"], .bn-number[data-len="3"] { font-size:4rem; }
   .bn-ph { color:var(--faint); letter-spacing:.18em; }
   .bn-d { display:inline-block; padding:0 .05em; border-radius:8px; transition:background .12s, color .12s, box-shadow .12s, transform .12s; }
-  .bn-d.hl { background:var(--hc,#fff); color:#0b0c0e; box-shadow:0 0 14px var(--hc,#fff); transform:translateY(-2px); }
+  .bn-d.hl { background:var(--hc,#fff); color:#08090c; box-shadow:0 0 14px var(--hc,#fff); transform:translateY(-2px); }
   .bn[data-tier="empty"] .bn-card { border-style:dashed; }
   .bn[data-tier="empty"] .bn-pill { display:none; }
   .bn-meta { display:flex; align-items:center; justify-content:center; gap:.55rem; margin-top:1rem; flex-wrap:wrap; }
@@ -2171,7 +2171,7 @@ function gridClient(WORKER_SRC, LABELS) {
     clampPan();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = '#05060a';
+    ctx.fillStyle = '#08090c';
     ctx.fillRect(0, 0, cw, ch);
     ctx.drawImage(src, ox, oy, SIZE * scale, SIZE * scale);
   }
@@ -2428,9 +2428,9 @@ function renderGrid() {
 <meta name="robots" content="noindex">
 <title>RNGdle - Number Grid</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: dark; --bg:#08090c; --accent:#e8924e; --accent-lt:#f4b27a; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: #05060a; color: #e8eaf0;
+  html, body { margin: 0; height: 100%; background: var(--bg); color: #e8eaf0;
     font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     overflow: hidden; -webkit-user-select: none; user-select: none; }
   #grid { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
@@ -2449,9 +2449,9 @@ function renderGrid() {
   #sidehide:hover, #sideshow:hover { background: rgba(255,255,255,.14); }
   #sideshow { position: fixed; top: 12px; left: 12px; z-index: 7; display: none; }
   body.nav-collapsed #sideshow { display: inline-flex; }
-  #sidehide.hint { color: #ffb295; animation: trayhint 1.15s ease-in-out infinite; }
-  @keyframes trayhint { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,138,92,0); border-color: rgba(255,255,255,.14); }
-    50% { box-shadow: 0 0 0 5px rgba(255,138,92,.32); border-color: #ff8a5c; } }
+  #sidehide.hint { color: var(--accent-lt); animation: trayhint 1.15s ease-in-out infinite; }
+  @keyframes trayhint { 0%, 100% { box-shadow: 0 0 0 0 transparent; border-color: rgba(255,255,255,.14); }
+    50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 32%, transparent); border-color: var(--accent); } }
   @media (max-width: 640px) {
     #side { left: 10px; right: 10px; width: auto; max-width: none; top: 10px; bottom: 10px; padding: 14px; gap: 12px; }
     #search { padding: 11px 12px; font-size: 15px; }
@@ -2465,9 +2465,9 @@ function renderGrid() {
   }
   #side h1 { margin: 0; font-size: 14px; font-weight: 650; }
   #side .credit { font-size: 12px; color: #9aa1b2; }
-  #side .credit b { color: #ff8a5c; font-weight: 600; }
+  #side .credit b { color: var(--accent); font-weight: 600; }
   #side .nav { font-size: 12px; color: #9aa1b2; }
-  #side .nav a { color: #ff8a5c; text-decoration: none; }
+  #side .nav a { color: var(--accent); text-decoration: none; }
   #side .nav a:hover { text-decoration: underline; }
   #vtitle { font-size: 12px; color: #cfd3df; min-height: 16px; }
   #search { width: 100%; padding: 8px 10px; font-size: 13px; line-height: 1.4; color: #e8eaf0;
@@ -2479,7 +2479,7 @@ function renderGrid() {
     color: #c8ccd8; background: transparent; border: 0; border-radius: 6px; cursor: pointer; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
   .item:hover { background: rgba(255,255,255,.07); }
-  .item.on { background: rgba(255,138,92,.18); color: #ffd9c9; }
+  .item.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: #f6dcc0; }
   #ctrls { top: 12px; right: 12px; display: flex; gap: 6px; padding: 6px; }
   #ctrls button { width: 34px; height: 34px; font-size: 17px; color: #e8eaf0;
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
@@ -2500,7 +2500,7 @@ function renderGrid() {
     border: 1px solid rgba(255,255,255,.18); border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   #toast.show { opacity: 1; }
   #ov { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 14px; background: #05060a; }
+    align-items: center; justify-content: center; gap: 14px; background: var(--bg); }
   #ov h2 { margin: 0; font-weight: 600; font-size: 16px; }
   #ovtext { color: #9aa1b2; font-size: 13px; }
   #track { width: min(320px, 70vw); height: 8px; border-radius: 4px; background: rgba(255,255,255,.1); overflow: hidden; }
