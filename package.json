@@ -6,6 +6,8 @@
   "scripts": {
     "serve": "node serve.mjs",
     "dev": "wrangler dev",
+    "gen": "node research/gen-snapshot.mjs",
+    "predeploy": "node research/gen-snapshot.mjs",
     "deploy": "wrangler deploy",
     "test": "node test/test.mjs"
   },

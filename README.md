@@ -14,6 +14,11 @@ npm test             # run the badge-logic test harness
 ```
 
 - **Web UI:** `GET /` (or `/?n=696969`)
+- **Badge index:** `GET /badges` - browse all 204 badges: obtainment rule, EP score,
+  rarity tier, exact share of numbers that earn it, family/supersession relations,
+  and example numbers (each linking into the calculator, plus a link to that badge's
+  `/grid` highlight view). Searchable, filterable by rarity, sortable by EP /
+  rarity / name.
 - **JSON API:** `GET /api?n=696969` →
   `{ number, totalEP, count, badges: [{ id, label, emoji, ep, rarity }] }`
 - **Browser engine:** `GET /engine.js` - an ES module (`computeLean`, `BADGE_META`)
@@ -39,9 +44,28 @@ Web Worker (the work is far past a single Worker request's CPU budget) and plots
   *Examples per badge (.txt)* lists example numbers for every badge. Use **Full** resolution
   for complete examples (6-digit-only badges are missed by sampling).
 
+## Generated snapshot files (`npm run gen`)
+
+`research/gen-snapshot.mjs` scans **all 1,000,001 inputs** through the badge engine
+once (~25 s) and writes three committed artifacts:
+
+- `src/examples.gen.js` - the first 3 numbers that earn each badge (the `/badges`
+  page's clickable examples).
+- `src/probabilities.gen.js` - each badge's exact share of all inputs (the
+  "X% of numbers earn this" figure in tooltips and on `/badges`).
+- `research/badge-tally.json` - a **limited, diffable snapshot** of the whole range:
+  per badge, how many numbers *earn* it and how many it *scores* on (>0 EP after
+  family supersession). No per-number data - a rule/EP change shows up as a small,
+  reviewable tally diff.
+
+**Before any commit or deploy that touches a badge `test`, EP value, or `FAMILIES`:
+run `npm run gen` and commit the updated files with the change.** `npm run deploy`
+runs it automatically (via `predeploy`) so prod can't ship stale snapshot data, but
+the regenerated files still need to be committed.
+
 ## How it works
 
-`src/index.js` contains all 203 badges as `[id, label, emoji, ep, rarity, test(c)]`.
+`src/index.js` contains all 204 badges as `[id, label, emoji, ep, rarity, test(c)]`.
 For an input `n`, every `test` runs against a precomputed context (digit array,
 counts, sum, product, substring helper, etc.); matches are summed into `totalEP`.
 

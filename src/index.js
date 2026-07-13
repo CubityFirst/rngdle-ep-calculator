@@ -14,6 +14,11 @@ import { prodContributors } from './contributors.gen.js';
 // rngdle.com's exact EP -> percentile table (test/gen-percentiles.mjs), for the
 // beta card's "TOP X%". Replaces the borrowed neocities curve fit with real data.
 import { exactPercentile } from './percentiles.gen.js';
+// Full-scan snapshot data (research/gen-snapshot.mjs, `npm run gen`): example
+// numbers per badge for the /badges index, and each badge's exact share of all
+// 1,000,001 inputs. Regenerate + commit whenever a badge test / EP / family changes.
+import { EXAMPLES } from './examples.gen.js';
+import { PROBABILITIES } from './probabilities.gen.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -389,6 +394,7 @@ const BADGES = [
   ['CALENDAR_EXACT', 'Exact Calendar', '📅', 100000100, c => c.n === 365],
   ['BRAINROT', 'Brainrot', '🫠', 100000100, c => c.n === 676767],
   ['GROUNDHOG_DAY', 'Groundhog Day', '📅', 100000100, c => c.n === 365365],
+  ['ONE_MILLION', 'One Million', '🐐', 100000100, c => c.n === 1000000],
   ['EXACT_BOOB', 'Exact Boob', '🍈', 50000050, c => c.n === 8008 || c.n === 58008],
 
   // --- Powers / math (Mythic/Anomaly) ---
@@ -646,6 +652,7 @@ const DESCRIPTIONS = {
   CALENDAR_EXACT: 'Exactly "365".',
   BRAINROT: 'Exactly "676767".',
   GROUNDHOG_DAY: 'Exactly "365365".',
+  ONE_MILLION: 'The number one million.',
   EXACT_BOOB: 'Exactly "8008" or "58008".',
   THIRTEENTH_POWER: 'A perfect thirteenth power (n¹³).',
   SEVENTEENTH_POWER: 'A perfect seventeenth power (n¹⁷).',
@@ -819,61 +826,10 @@ const DESCRIPTIONS = {
   SIX_DIGITS: 'Has exactly six digits.',
 };
 
-// Exact share of all numbers 0..999999 that earn each badge (as a percent).
-// Computed by running every test across the full 0..999999 range.
-const PROBABILITIES = {
-  NICE_EXACT: 0.0001, JACKPOT_EXACT: 0.0001, JACKPOT_SIX: 0.0001, BOTANIST_EXACT: 0.0001,
-  DEVIL_EXACT: 0.0001, LEET_EXACT: 0.0001, EXACT_HELL: 0.0001, EXACT_BOOB_80085: 0.0001,
-  MEANING_EXACT: 0.0001, EMERGENCY_EXACT: 0.0001, VERY_VERY_NICE: 0.0001, HOTBOX: 0.0001,
-  MAYDAY: 0.0001, UNIVERSAL_ANSWER: 0.0001, BIG_BROTHER_EXACT: 0.0001, DIGIT_ZERO: 0.0001,
-  DIGIT_ONE: 0.0001, DIGIT_TWO: 0.0001, DIGIT_THREE: 0.0001, DIGIT_FOUR: 0.0001,
-  DIGIT_FIVE: 0.0001, DIGIT_SIX: 0.0001, DIGIT_SEVEN: 0.0001, DIGIT_EIGHT: 0.0001,
-  DIGIT_NINE: 0.0001, TREE_FIDDY_EXACT: 0.0001, SIXTY_SEVEN_EXACT: 0.0001, EIGHTY_SIX_EXACT: 0.0001,
-  ORIENTATION_EXACT: 0.0001, CALENDAR_EXACT: 0.0001, BRAINROT: 0.0001, GROUNDHOG_DAY: 0.0001,
-  EXACT_BOOB: 0.0002, THIRTEENTH_POWER: 0.0001, SEVENTEENTH_POWER: 0.0001, NINETEENTH_POWER: 0.0001,
-  TENTH_POWER: 0.0002, ELEVENTH_POWER: 0.0002, PI: 0.0004, E: 0.0004,
-  CONSEC_QUAD_EXACT: 0.0008, NINTH_POWER: 0.0003, EIGHTH_POWER: 0.0004, SEVENTH_POWER: 0.0006,
-  FACTORIAL: 0.0009, HELLO: 0.0009, SEQUENCE_6: 0.0004, CONTIGUOUS_SIXES: 0.0009,
-  DEEP_VOID_FIVE: 0.0009, ONE_DIGIT: 0.001, QUINT_NINE: 0.001, SIXTH_POWER: 0.0008,
-  POWER_OF_THREE: 0.0012, FIFTH_POWER: 0.0014, JACKPOT_FIVE: 0.0019, POWER_OF_TWO: 0.0019,
-  ROYAL_FLUSH: 0.002, BOOB_58008: 0.002, BOOB_80085: 0.002, PI_CONTAINS_5: 0.002,
-  E_CONTAINS_5: 0.002, CASCADE: 0.003, FIBONACCI: 0.003, FOURTH_POWER: 0.003,
-  WATERFALL: 0.0035, CONSEC_QUAD_CONTAINS: 0.19, CONSEC_QUAD_SCRAMBLED: 0.0202, HOMOGENEOUS: 0.0045,
-  BINARY_SOUL: 0.0064, STRAIGHT_FLUSH: 0.0069, TWO_DIGITS: 0.009, SPY: 0.0089,
-  QUAD_NINE: 0.01, SEMI_EPOCH: 0.01, CUBE: 0.0098, EVEN_SPACING: 0.0116,
-  CONSEC_TRIPLE_EXACT: 0.0097, CONTIGUOUS_FIVES: 0.018, DEEP_VOID_FOUR: 0.018, STROBOGRAMMATIC: 0.0199,
-  STRAIGHT: 0.022, JACKPOT_FOUR: 0.028, VERY_NICE: 0.0299, DEEPER_MEANING: 0.0299,
-  SIXTY_SEVEN_DOUBLE: 0.0299, LEET: 0.03, HELL: 0.03, BOOB_8008: 0.03,
-  BIG_BROTHER: 0.03, PI_CONTAINS_4: 0.03, E_CONTAINS_4: 0.03, CONSEC_TRIPLE_SCRAMBLED: 0.0489,
-  ZIPPER: 0.0324, ASCENSION: 0.0456, CONSEC_TRIPLE_CONTAINS: 2.9234, CONTIGUOUS_THREE_PAIR: 0.09,
-  FRAMED_PAIR: 0.0729, FRAMED_TRIPLE: 0.0729, DECAY: 0.0837, THREE_DIGITS: 0.09,
-  ECHO: 0.099, MILLENNIUM: 0.0999, PRONIC: 0.1, TRIPLE_NINE: 0.1,
-  SEMI_MILLENNIUM: 0.1, COLOSSAL: 0.0999, SQUARE: 0.0998, EVEN_SPACING_ABS: 0.1099,
-  FIREFLY: 0.1458, CONSEC_PAIR_EXACT: 0.099, PALINDROME: 0.1989, CONTIGUOUS_QUADS: 0.27,
-  DEEP_VOID_THREE: 0.27, TURTLE: 0.2773, SECRET_AGENT: 0.2889, HEAVY: 0.3003,
-  CONTIGUOUS_BOAT: 0.3321, JACKPOT: 0.37, DEVIL: 0.37, SEQUENCE_4: 0.188,
-  ERROR: 0.3979, ORIENTATION: 0.3979, BOTANIST: 0.3999, EMERGENCY: 0.3999,
-  PI_CONTAINS_3: 0.3999, E_CONTAINS_3: 0.3999, TREE_FIDDY: 0.3999, CALENDAR: 0.3999,
-  DIVISIBLE_BY_THREE: 0.4096, SCRAMBLE: 0.4401, DUALITY: 0.4617, FRAMED_DOUBLE: 0.6561,
-  PAIRED_BOOKENDS: 0.8991, FOUR_DIGITS: 0.9, THREE_PAIR: 0.972, BOOKENDS: 0.999,
-  MIRROR_BOOKENDS: 0.999, CENTURY: 0.9999, DOUBLE_NINE: 1, SEMI_CENTURY: 1,
-  QUADS: 1.1853, LOW_BALL: 1.5625, CONTIGUOUS_TWO_PAIR: 2.781, MOUNTAIN: 1.6992,
-  DOUBLE_HOP: 1.881, HIGH_ROLLER: 1.953, VALLEY: 2.3817, MINI_ECHO: 2.7,
-  ALTERNATOR: 3.5145, FLUSH: 3.5145, CONTIGUOUS_TRIPS: 3.5919, DEEP_VOID: 3.5919,
-  FEATHER: 3.75, BLACKJACK: 3.9662, BOAT: 4.1715, SNAKE_EYES: 4.7139,
-  NICE: 4.9401, MEANING: 4.9401, SIXTY_SEVEN: 4.9401, EIGHTY_SIX: 4.9401,
-  BALANCED: 5.7276, RHYME: 8.6139, SEQUENCE_3: 2.8848, CONSEC_PAIR_ADJACENT: 3.1273,
-  CONSEC_PAIR_NEARBY: 3.2022, PRIME: 7.8498, TRINITY: 7.9056, DOZEN: 8.3334,
-  FIVE_DIGITS: 9, ELEVEN: 9.091, HARSHAD: 9.5427, CLEAN: 10,
-  SEMI_CLEAN: 10, EQUILIBRIUM: 9.9999, SANDWICH: 9.9954, HILLS: 13.695,
-  TRIPS: 14.9886, LUCKY_SEVEN_DIV: 14.2858, HETEROGENEOUS: 16.8561, GAP_ONE: 18.8887,
-  TWO_PAIR: 26.5518, HOPSCOTCH: 33.57, GHOST: 32.3848, QUARTET: 34.4736,
-  HYDROGEN: 35.4294, HELIUM: 35.4294, CARBON: 35.4294, OXYGEN: 35.4294,
-  LITHIUM: 35.4294, BERYLLIUM: 35.4294, BORON: 35.4294, NITROGEN: 35.4294,
-  FLUORINE: 35.4294, GROUNDED: 39.9996, CONTIGUOUS_PAIR: 40.2129, LUCKY_7: 46.8559,
-  EVEN: 50, ODD: 50, LIFTOFF: 49.9995, VOID: 59.787,
-  NEIGHBORS: 89.6109, PAIR: 83.1429, SIX_DIGITS: 90,
-};
+// PROBABILITIES (exact share of all 1,000,001 inputs 0..1,000,000 that earn each
+// badge, as a percent) is generated by research/gen-snapshot.mjs (`npm run gen`)
+// from a full-range scan - it self-corrects whenever a badge test changes.
+// (The previous hand-embedded copy had drifted badly from the prod-parity rules.)
 
 // Format a percentage for display, keeping small values legible.
 function fmtProb(p) {
@@ -932,6 +888,17 @@ const FAMILIES = [
   ['TREE_FIDDY_EXACT', 'TREE_FIDDY'], // TREE_FIDDY
 ];
 
+// Display names for FAMILIES, index-aligned with the array above (same order as
+// prod's family tags). Only used by the /badges index page.
+const FAMILY_NAMES = [
+  'Power', 'Single Digit', 'Consecutive', 'Progression', 'Pairs', 'Boob', 'Botanist',
+  'Jackpot', 'Contiguous Run', 'E', 'Nice', 'Nine Ending', 'Pi', 'Sixty-Seven',
+  'Void Depth', 'Bookends', 'Calendar', 'Emergency', 'Of a Kind', 'Straight',
+  'Big Brother', 'Boat', 'Devil', 'Duality', 'Eighty-Six', 'Equilibrium', 'Hell',
+  'Hopscotch', 'Leet', 'Meaning', 'Monotonic', 'Orientation', 'Peak', 'Repeat',
+  'Tree Fiddy',
+];
+
 function compute(n) {
   const s = String(n);
   const d = [...s].map(ch => ch.charCodeAt(0) - 48);
@@ -972,7 +939,7 @@ function compute(n) {
 // ---------------------------------------------------------------------------
 // Browser engine (for the "Analyze all scores" feature)
 //
-// Computing all 1,000,000 numbers x 203 badge tests is far beyond a single
+// Computing all 1,000,000 numbers x 204 badge tests is far beyond a single
 // Worker request's CPU budget, so the analysis runs client-side in a Web Worker.
 // Rather than duplicate the 200+ badge rules, we GENERATE a self-contained ES
 // module from the live definitions via Function.prototype.toString(). Any edit to
@@ -1850,7 +1817,7 @@ function renderHTML(result) {
   <p class="tag">Click the box and type a number from 0 to 1,000,000 to see its EP and badges.</p>
   ${body}
 
-  <div class="an-bar"><button type="button" id="an-btn">Analyze all scores</button><a class="grid-btn" href="/grid">Explore all 1,000,000 numbers &rarr;</a></div>
+  <div class="an-bar"><button type="button" id="an-btn">Analyze all scores</button><a class="grid-btn" href="/grid">Explore all 1,000,000 numbers &rarr;</a><a class="grid-btn" href="/badges">Browse all ${BADGES.length} badges &rarr;</a></div>
 
   <section id="analysis" hidden>
     <h2>EP distribution across 0-1,000,000</h2>
@@ -2546,9 +2513,9 @@ function renderGrid() {
 <div id="side" class="panel">
   <div class="sidehead"><h1>All 1,000,000 numbers</h1><button id="sidehide" title="Hide panel" aria-label="Hide panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button></div>
   <div class="credit">Heavily inspired by <b>basiliotornado</b></div>
-  <div class="nav"><a href="/">&larr; calculator</a></div>
+  <div class="nav"><a href="/">&larr; calculator</a> &nbsp;·&nbsp; <a href="/badges">badge index</a></div>
   <div id="vtitle">All numbers - badge count</div>
-  <input id="search" type="search" placeholder="Filter 203 badges…" autocomplete="off">
+  <input id="search" type="search" placeholder="Filter 204 badges…" autocomplete="off">
   <div id="list"></div>
   <div class="nav">Pick a badge to highlight which numbers earn it. Click any cell to open it.</div>
 </div>
@@ -2579,7 +2546,224 @@ const __GRID_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + gridWorker.to
 </body></html>`;
 }
 
-export { compute, BADGES, engineModuleSource };
+// ---------------------------------------------------------------------------
+// /badges - browsable index of every badge: obtainment method, EP, rarity tier,
+// share of numbers that earn it, family/supersession relations, and example
+// numbers (clickable into the calculator) + a link to its /grid highlight view.
+// All 204 cards are server-rendered; a small inline script does search / rarity
+// filtering / sorting on the DOM.
+// ---------------------------------------------------------------------------
+
+function renderBadgeIndex() {
+  const idToFam = new Map();
+  FAMILIES.forEach((fam, fi) => { for (const id of fam) idToFam.set(id, fi); });
+  const byId = new Map(BADGES.map(b => [b[0], b]));
+
+  const tierCounts = { mythic: 0, anomaly: 0, epic: 0, rare: 0, uncommon: 0, common: 0 };
+  const cards = BADGES.map(([id, label, emoji, ep]) => {
+    const tier = tierFromScore(ep);
+    tierCounts[tier]++;
+    const pal = TIER_PALETTE[tier];
+    const desc = DESCRIPTIONS[id] || 'No description.';
+    const prob = PROBABILITIES[id];
+    const ex = (EXAMPLES[id] || []).map(n => `<a href="/?n=${n}">${n.toLocaleString()}</a>`).join(' · ');
+
+    // Family relations: within a family only the highest-EP earned badge scores,
+    // so show who outranks whom (ties happen - the POWER top three share one EP).
+    let famHTML = '';
+    const fi = idToFam.get(id);
+    if (fi !== undefined) {
+      const others = FAMILIES[fi].filter(x => x !== id);
+      const list = arr => arr.map(x => `<a href="#${x}">${byId.get(x)[2]} ${esc(byId.get(x)[1])}</a>`).join(', ');
+      const above = others.filter(x => byId.get(x)[3] > ep);
+      const ties = others.filter(x => byId.get(x)[3] === ep);
+      const below = others.filter(x => byId.get(x)[3] < ep);
+      const parts = [];
+      if (above.length) parts.push(`outranked by ${list(above)}`);
+      if (ties.length) parts.push(`ties with ${list(ties)}`);
+      if (below.length) parts.push(`outranks ${list(below)}`);
+      famHTML = `<div class="bd-fam"><b>${esc(FAMILY_NAMES[fi])} family</b> · ${parts.join('; ')}</div>`;
+    }
+
+    const search = `${label} ${id} ${desc} ${tier}`.toLowerCase();
+    return `<article class="bd" id="${id}" data-search="${esc(search)}" data-ep="${ep}" data-prob="${prob ?? -1}" data-tier="${tier}" style="--tc:${pal.accent}">
+  <header><span class="bd-emoji">${emoji}</span><h2>${esc(label)}</h2><span class="bd-pill">${pal.label}</span></header>
+  <p class="bd-desc">${esc(desc)}</p>
+  <div class="bd-stats"><span class="bd-ep">+${ep.toLocaleString()} EP</span><span class="bd-prob" title="Exact share of all inputs 0-1,000,000 that earn this badge">${fmtProb(prob)} of numbers</span></div>
+  ${famHTML}
+  <div class="bd-ex">e.g. ${ex}<a class="bd-map" href="/grid#${encodeURIComponent(label)}" title="Highlight every number that earns this badge on the 1,000,000-number grid">map &rarr;</a></div>
+</article>`;
+  }).join('\n');
+
+  const chip = (t, label, count) =>
+    `<button type="button" class="chip${t ? '' : ' on'}" data-tier="${t}"${t ? ` style="--tc:${TIER_PALETTE[t].accent}"` : ''}>${label} <em>${count}</em></button>`;
+  const chips = [
+    chip('', 'All', BADGES.length),
+    ...['mythic', 'anomaly', 'epic', 'rare', 'uncommon', 'common'].map(t => chip(t, TIER_PALETTE[t].label, tierCounts[t])),
+  ].join('');
+
+  return `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>RNGdle - Badge Index</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg:#08090c; --surface:#131419; --surface-2:#181a20; --border:#24262d; --border-2:#30333c;
+    --text:#e7e8ea; --muted:#8b8e97; --faint:#595c65; --accent:#5b93d6;
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { font-family:var(--font); background:var(--bg); color:var(--text); margin:0;
+    padding:2.2rem 1.25rem 4rem; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1100px; margin:0 auto; }
+  h1 { font-size:1.45rem; font-weight:600; letter-spacing:-.02em; margin:0 0 .3rem; }
+  p.tag { color:var(--muted); margin:0 0 1.4rem; font-size:.92rem; }
+  a { color:var(--accent); }
+  .nav { font-size:.85rem; color:var(--muted); margin-bottom:.6rem; }
+  .nav a { text-decoration:none; }
+  .nav a:hover { text-decoration:underline; }
+
+  /* --- toolbar --- */
+  .bar { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; align-items:center; gap:.5rem;
+    padding:.7rem 0 .6rem; margin-bottom:1rem; background:linear-gradient(var(--bg) 88%, transparent);
+    border-bottom:1px solid var(--border); }
+  #q { flex:1 1 200px; min-width:160px; font-size:.92rem; padding:.5rem .7rem; border-radius:8px;
+    border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:inherit; }
+  #q:focus { outline:none; border-color:var(--accent); }
+  .chip { font-family:inherit; font-size:.78rem; font-weight:600; padding:.3rem .65rem; border-radius:999px;
+    cursor:pointer; color:var(--muted); border:1px solid var(--border-2); background:var(--surface-2);
+    transition:color .12s, border-color .12s, background .12s; --tc:var(--accent); }
+  .chip em { font-style:normal; font-weight:500; color:var(--faint); }
+  .chip:hover { border-color:var(--tc); color:var(--text); }
+  .chip.on { color:var(--text); border-color:var(--tc); background:color-mix(in srgb, var(--tc) 16%, var(--surface-2)); }
+  .chip.on em { color:inherit; opacity:.75; }
+  #sort { font-family:inherit; font-size:.85rem; padding:.45rem .55rem; border-radius:8px; cursor:pointer;
+    color:var(--text); border:1px solid var(--border-2); background:var(--surface-2); }
+  #count { flex-basis:100%; color:var(--faint); font-size:.78rem; }
+
+  /* --- cards --- */
+  #cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:.7rem; }
+  .bd { border:1px solid var(--border); border-left:3px solid var(--tc); border-radius:10px;
+    background:var(--surface); padding:.75rem .9rem .8rem; display:flex; flex-direction:column; gap:.4rem;
+    scroll-margin-top:5rem; }
+  .bd:target { border-color:var(--tc); box-shadow:0 0 0 3px color-mix(in srgb, var(--tc) 25%, transparent); }
+  .bd header { display:flex; align-items:center; gap:.5rem; }
+  .bd-emoji { font-size:1.25rem; flex:0 0 auto; }
+  .bd h2 { flex:1; font-size:1rem; font-weight:600; margin:0; letter-spacing:-.01em; min-width:0; }
+  .bd-pill { flex:0 0 auto; font-size:.64rem; font-weight:700; letter-spacing:.09em; padding:.14rem .5rem;
+    border-radius:999px; color:var(--tc); border:1px solid var(--tc);
+    background:color-mix(in srgb, var(--tc) 14%, transparent); }
+  .bd-desc { margin:0; font-size:.86rem; color:#c8ccd8; }
+  .bd-stats { display:flex; align-items:baseline; gap:.8rem; font-size:.82rem; }
+  .bd-ep { font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; }
+  .bd-prob { color:var(--muted); }
+  .bd-fam { font-size:.76rem; color:var(--muted); line-height:1.6; }
+  .bd-fam b { color:#c8ccd8; font-weight:600; }
+  .bd-fam a { color:var(--muted); text-decoration:none; border-bottom:1px dotted var(--faint); }
+  .bd-fam a:hover { color:var(--text); }
+  .bd-ex { margin-top:auto; padding-top:.15rem; display:flex; align-items:baseline; gap:.45rem; flex-wrap:wrap;
+    font-size:.78rem; color:var(--faint); font-variant-numeric:tabular-nums; }
+  .bd-ex a { text-decoration:none; }
+  .bd-ex a:hover { text-decoration:underline; }
+  .bd-map { margin-left:auto; white-space:nowrap; }
+
+  footer { margin-top:2.2rem; color:var(--faint); font-size:.8rem; max-width:760px; line-height:1.7; }
+  footer b { color:var(--muted); font-weight:600; }
+</style></head>
+<body>
+<div class="wrap">
+  <div class="nav"><a href="/">&larr; calculator</a> &nbsp;·&nbsp; <a href="/grid">number grid</a></div>
+  <h1>Badge Index</h1>
+  <p class="tag">All ${BADGES.length} badges — how to earn each one, its rarity, EP score, and how many numbers hit it.
+    Example numbers open the calculator; <b>map</b> highlights every earning number on the grid.</p>
+  <div class="bar">
+    <input id="q" type="search" placeholder="Search ${BADGES.length} badges (name, rule, rarity)…" autocomplete="off">
+    ${chips}
+    <select id="sort" title="Sort badges">
+      <option value="ep-desc">Highest EP</option>
+      <option value="ep-asc">Lowest EP</option>
+      <option value="prob-asc">Rarest first</option>
+      <option value="prob-desc">Most common first</option>
+      <option value="name">A&ndash;Z</option>
+    </select>
+    <div id="count"></div>
+  </div>
+  <div id="cards">
+${cards}
+  </div>
+  <footer>
+    <b>Rarity</b> is derived from a badge's EP score exactly like rngdle.com:
+    Common &lt; 1,000 &le; Uncommon &lt; 10,000 &le; Rare &lt; 100,000 &le; Epic &lt; 1,000,000 &le; Anomaly &lt; 10,000,000 &le; Mythic.
+    <b>Families:</b> when a number earns several badges from one family, only the highest-EP one scores -
+    the rest are displayed but add 0 EP. <b>&ldquo;% of numbers&rdquo;</b> is the exact share of all
+    1,000,001 inputs (0&ndash;1,000,000) that earn the badge.
+  </footer>
+</div>
+<script>
+(function () {
+  var grid = document.getElementById('cards');
+  var cards = [].slice.call(grid.children);
+  var q = document.getElementById('q');
+  var sortEl = document.getElementById('sort');
+  var countEl = document.getElementById('count');
+  var chips = [].slice.call(document.querySelectorAll('.chip'));
+  var tier = '';
+
+  function cmp(a, b) {
+    switch (sortEl.value) {
+      case 'ep-asc': return a.dataset.ep - b.dataset.ep;
+      case 'prob-asc': return a.dataset.prob - b.dataset.prob;
+      case 'prob-desc': return b.dataset.prob - a.dataset.prob;
+      case 'name': return a.querySelector('h2').textContent.localeCompare(b.querySelector('h2').textContent);
+      default: return b.dataset.ep - a.dataset.ep;
+    }
+  }
+  function apply() {
+    var f = q.value.trim().toLowerCase();
+    cards.slice().sort(cmp).forEach(function (c) { grid.appendChild(c); });
+    var shown = 0;
+    cards.forEach(function (c) {
+      var ok = (!tier || c.dataset.tier === tier) && (!f || c.dataset.search.indexOf(f) !== -1);
+      c.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    countEl.textContent = shown === cards.length ? cards.length + ' badges' : shown + ' of ' + cards.length + ' badges';
+  }
+  q.addEventListener('input', apply);
+  sortEl.addEventListener('change', apply);
+  chips.forEach(function (ch) {
+    ch.addEventListener('click', function () {
+      tier = ch.dataset.tier;
+      chips.forEach(function (c) { c.classList.toggle('on', c === ch); });
+      apply();
+    });
+  });
+  // Cross-family links (#BADGE_ID): if the target card is filtered out, clear the
+  // filters so the jump actually lands somewhere visible.
+  function reveal() {
+    var id = location.hash.slice(1);
+    if (!id) return;
+    var el = document.getElementById(id);
+    if (!el || !el.classList.contains('bd')) return;
+    if (el.style.display === 'none') {
+      q.value = ''; tier = '';
+      chips.forEach(function (c) { c.classList.toggle('on', !c.dataset.tier); });
+      apply();
+    }
+    el.scrollIntoView({ block: 'center' });
+  }
+  window.addEventListener('hashchange', reveal);
+  apply();
+  reveal();
+})();
+</script>
+</body></html>`;
+}
+
+export { compute, BADGES, FAMILIES, engineModuleSource };
 
 export default {
   async fetch(request) {
@@ -2625,6 +2809,13 @@ export default {
     // Hidden interactive 1,000,000-number map; click a cell to open it on /.
     if (url.pathname === '/grid') {
       return new Response(renderGrid(), {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    }
+
+    // Browsable index of every badge: rule, EP, rarity, families, examples.
+    if (url.pathname === '/badges') {
+      return new Response(renderBadgeIndex(), {
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
     }

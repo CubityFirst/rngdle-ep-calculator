@@ -13,7 +13,11 @@ node_modules/
 Thumbs.db
 
 # Local reverse-engineering research (neocities/prod blobs, comparison harnesses).
-research/
+# The snapshot generator + its committed tally are re-included: predeploy runs the
+# generator, and the tally is the diffable record of badge membership counts.
+research/*
+!research/gen-snapshot.mjs
+!research/badge-tally.json
 
 # Exported conversation transcripts
 /20??-??-??-*.txt
