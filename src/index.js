@@ -1732,6 +1732,21 @@ function fallbackCells(label, s) {
   return [];
 }
 
+// Digit-group boundaries for the "split into N numbers" badges (Metronome / Crescendo
+// / Equation). The split-finding helpers already return part start-indices, so we turn
+// them into [start,end) ranges; the beta card slides these parts apart on hover to
+// reveal the constant-difference / constant-ratio / equation split. Returns null for
+// badges that aren't group-based.
+function badgeGroups(id, s) {
+  let r = null;
+  if (id === 'ARITHMETIC') r = findArithmeticSplit(s);
+  else if (id === 'GEOMETRIC') r = findGeometricSplit(s);
+  else if (id === 'EQUATION') r = findEquation(s);
+  if (!r) return null;
+  const sp = r.splits;
+  return sp.map((start, i) => [start, i + 1 < sp.length ? sp[i + 1] : s.length]);
+}
+
 // Beta renderer: rngdle.com-style card. The number lives in an editable card you
 // click into and type; the digits are spans so a badge can light up the exact
 // positions it scores on. The pieces below are split so the live /beta endpoint
@@ -1761,13 +1776,21 @@ function betaOutHTML(result) {
   const pills = scoring.map(b => {
     let cells = contrib[b.label.toLowerCase()] || [];
     if (!cells.length) cells = fallbackCells(b.label, s);
+    // Group badges (Metronome / Crescendo / Equation) light up every digit in the split
+    // and carry their part boundaries so the card can slide the parts apart on hover.
+    const groups = badgeGroups(b.id, s);
+    let groupsAttr = '';
+    if (groups) {
+      cells = groups.flatMap(([a, z]) => { const r = []; for (let i = a; i < z; i++) r.push(i); return r; });
+      groupsAttr = ` data-groups="${groups.map(g => `${g[0]}-${g[1]}`).join('|')}"`;
+    }
     // Pill border + digit-highlight colours come from rngdle.com's RARITY_PALETTE,
     // keyed by this badge's own rarity tier (so anomaly reads orange, epic purple, etc.).
     const pal2 = TIER_PALETTE[b.rarity.toLowerCase()] || TIER_PALETTE.common;
     const req = b.desc || 'No description.';
     const tip = esc(`${req}\n${b.rarity} · ${fmtProb(b.prob)} earn this · +${b.ep.toLocaleString()} EP`);
     return `<button type="button" class="bn-b" style="--bc:${pal2.accent}"
-       data-cells="${cells.join(',')}" data-hl="${pal2.hl}" data-tip="${tip}"
+       data-cells="${cells.join(',')}" data-hl="${pal2.hl}" data-tip="${tip}"${groupsAttr}
        aria-label="${esc(b.label)}. ${tip}">${b.emoji} <span>${esc(b.label)}</span> <em>+${b.ep.toLocaleString()}</em></button>`;
   }).join('');
 
@@ -1941,8 +1964,10 @@ function renderHTML(result) {
     font-size:clamp(2.4rem, 11vw, 4rem); line-height:1; pointer-events:none; }
   .bn-number[data-len="1"], .bn-number[data-len="2"], .bn-number[data-len="3"] { font-size:4rem; }
   .bn-ph { color:var(--faint); letter-spacing:.18em; }
-  .bn-d { display:inline-block; padding:0 .05em; border-radius:8px; transition:background .12s, color .12s, box-shadow .12s, transform .12s; }
+  .bn-d { display:inline-block; padding:0 .05em; border-radius:8px; transition:background .12s, color .12s, box-shadow .12s, transform .12s, margin-left .22s cubic-bezier(.34,1.4,.5,1); }
   .bn-d.hl { background:var(--hc,#fff); color:#08090c; box-shadow:0 0 14px var(--hc,#fff); transform:translateY(-2px); }
+  /* Group badges slide their split-parts apart: a gap opens before each part after the first. */
+  .bn-d.grp-gap { margin-left:.85em; }
   .bn[data-tier="empty"] .bn-card { border-style:dashed; }
   .bn[data-tier="empty"] .bn-pill { display:none; }
   .bn-meta { display:flex; align-items:center; justify-content:center; gap:.55rem; margin-top:1rem; flex-wrap:wrap; }
@@ -2031,14 +2056,25 @@ function renderHTML(result) {
     });
   }
   function clearHl() { digits.forEach(function (d) { d.classList.remove('hl'); d.style.removeProperty('--hc'); }); }
+  // Group badges (Metronome / Crescendo / Equation): slide the split's parts apart so
+  // the constant-difference / -ratio / equation numbers read as separate chunks.
+  function slideGroups(spec) {
+    if (!spec) return;
+    spec.split('|').forEach(function (g, gi) {
+      var p = g.split('-'), a = Number(p[0]);
+      if (gi > 0 && digits[a]) digits[a].classList.add('grp-gap'); // gap before every part after the first
+    });
+  }
+  function clearSlide() { digits.forEach(function (d) { d.classList.remove('grp-gap'); }); }
   function wireBadges() {
     [].slice.call(outEl.querySelectorAll('.bn-b')).forEach(function (b) {
       var cells = (b.dataset.cells || '').split(',').filter(Boolean).map(Number);
       var color = (b.dataset.hl || '').trim() || '#fff';
-      b.addEventListener('mouseenter', function () { highlight(cells, color); });
-      b.addEventListener('mouseleave', clearHl);
-      b.addEventListener('focus', function () { highlight(cells, color); });
-      b.addEventListener('blur', clearHl);
+      var groups = b.dataset.groups || '';
+      b.addEventListener('mouseenter', function () { highlight(cells, color); slideGroups(groups); });
+      b.addEventListener('mouseleave', function () { clearHl(); clearSlide(); });
+      b.addEventListener('focus', function () { highlight(cells, color); slideGroups(groups); });
+      b.addEventListener('blur', function () { clearHl(); clearSlide(); });
     });
   }
   refreshDigits(); wireBadges();
