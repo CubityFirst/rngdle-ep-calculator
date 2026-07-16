@@ -1672,14 +1672,18 @@ const RARITY_COLORS = {
 };
 
 // --- Beta renderer: overall-number rarity tier ----------------------------
-// Card tier is percentile-driven on rngdle.com; the EP cutoffs below are the
-// exact boundaries derived from its shipped percentile table (test/rngdle-dump/
-// SCORE_PERCENTILES.json -> percentiles 1/50/75/90/95/99). Palette colours are
-// the rngdle.com RARITY_PALETTE highlight accents.
+// Card tier is percentile-driven on rngdle.com (CARD_PERCENTILE_THRESHOLDS =
+// trash<1, common<50, uncommon<75, rare<90, epic<95, anomaly<99, else mythic).
+// The EP cutoffs below are the exact boundaries derived from its shipped
+// SCORE_PERCENTILES table (each cutoff = smallest EP whose percentile >= the
+// threshold). Because the total-EP distribution shifts whenever the badge set
+// changes, these MUST be re-derived alongside src/percentiles.gen.js — these
+// values are from the 2026-07-16 bundle (230 badges). Palette colours are the
+// rngdle.com RARITY_PALETTE highlight accents.
 const CARD_TIERS = [
-  [2050, 'trash'], [5349, 'common'], [8642, 'uncommon'],
-  [20245, 'rare'], [33971, 'epic'], [150679, 'anomaly'],
-]; // >= 150679 -> mythic
+  [2098, 'trash'], [5761, 'common'], [9644, 'uncommon'],
+  [23077, 'rare'], [35744, 'epic'], [164953, 'anomaly'],
+]; // >= 164953 -> mythic
 function cardTier(ep) { for (const [t, name] of CARD_TIERS) if (ep < t) return name; return 'mythic'; }
 // accent = RARITY_PALETTE.highlight.border (saturated); hl = highlight.primary
 // (lighter fill used to light up digits). Both lifted verbatim from rngdle.com.
