@@ -14,7 +14,7 @@ npm test             # run the badge-logic test harness
 ```
 
 - **Web UI:** `GET /` (or `/?n=696969`)
-- **Badge index:** `GET /badges` - browse all 204 badges: obtainment rule, EP score,
+- **Badge index:** `GET /badges` - browse all 230 badges: obtainment rule, EP score,
   rarity tier, exact share of numbers that earn it, family/supersession relations,
   and example numbers (each linking into the calculator, plus a link to that badge's
   `/grid` highlight view). Searchable, filterable by rarity, sortable by EP /
@@ -65,7 +65,7 @@ the regenerated files still need to be committed.
 
 ## How it works
 
-`src/index.js` contains all 204 badges as `[id, label, emoji, ep, rarity, test(c)]`.
+`src/index.js` contains all 230 badges as `[id, label, emoji, ep, rarity, test(c)]`.
 For an input `n`, every `test` runs against a precomputed context (digit array,
 counts, sum, product, substring helper, etc.); matches are summed into `totalEP`.
 

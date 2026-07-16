@@ -52,7 +52,11 @@ must(666, 'DEVIL'); must(420, 'BOTANIST'); must(911, 'EMERGENCY');
 
 // "Consecutive Numbers" badges need a multi-digit part; single-digit runs are Neighbors.
 mustNot(3125, 'CONSEC_PAIR_ADJACENT'); must(3125, 'NEIGHBORS');
-if (compute(3125).totalEP !== 6271772) throw new Error('3125 EP regression: ' + compute(3125).totalEP);
+// 3125 = 5^5: since the 2026-07-16 batch it also earns Ouroboros (nⁿ, in the POWER family,
+// so it supersedes 5th Power) and the standalone Power of Five, plus Mini Scramble ("312").
+if (compute(3125).totalEP !== 25419196) throw new Error('3125 EP regression: ' + compute(3125).totalEP);
+must(3125, 'OUROBOROS'); must(3125, 'POWER_OF_FIVE'); must(3125, 'MINI_SCRAMBLE');
+if (epOf(3125, 'FIFTH_POWER') !== 0) throw new Error('3125: 5th Power should be superseded by Ouroboros');
 // EXACT = the whole number splits into two consecutive integers; ADJACENT ("Contains") is
 // two adjacent consecutive substrings that do NOT span the whole number - so they're disjoint.
 must(1213, 'CONSEC_PAIR_EXACT'); mustNot(1213, 'CONSEC_PAIR_ADJACENT');
@@ -66,10 +70,10 @@ must(0, 'SQUARE'); must(0, 'NINETEENTH_POWER'); must(0, 'SPY');
 if (epOf(0, 'SQUARE') !== 0) throw new Error('0: lower powers should be superseded');
 if (epOf(0, 'THIRTEENTH_POWER') !== 33333367) throw new Error('0: max-EP power tier should score');
 mustNot(2, 'SPY'); // single non-zero digits do NOT get Spy
-epEq(3125, 6271772);   // 5th power is its only power badge, so it still scores in full
+epEq(3125, 25419196);  // 5^5: Ouroboros (supersedes 5th Power) + Power of Five + Mini Scramble
 epEq(634700, 18194); // Pair scores 0 because Contiguous Pair (the "00") is present
-epEq(455000, 1188838); // full reconciliation: false-positive + supersession fixes
-epEq(407777, 409497);   // tier supersession: Jackpot, Contiguous Trips, 3-of-a-kind, Rhyme
+epEq(455000, 1190406); // reconciliation + Mesa (rise-then-fall, flats allowed) from the 2026-07-16 batch
+epEq(407777, 412805);   // tier supersession + Pocket Mirror ("7777") + Canyon from the 2026-07-16 batch
 
 // 407777: lower tiers superseded, but Contiguous Pair (base badge) still scores.
 if (epOf(407777, 'JACKPOT') !== 0) throw new Error('Jackpot superseded by Jackpot Four');
@@ -101,5 +105,26 @@ if (epOf(314159, 'PI_CONTAINS_3') !== 0) throw new Error('Pi Slice (3) should be
 if (epOf(93141, 'PI_CONTAINS_4') !== 333334) throw new Error('Pi Slice (4) should score when it is the top tier');
 if (epOf(93141, 'PI_CONTAINS_3') !== 0) throw new Error('Pi Slice (3) should be superseded by Slice (4)');
 if (epOf(231459, 'PI_CONTAINS_3') !== 25006) throw new Error('lone Pi Slice (3) should score');
+
+// --- 2026-07-16 batch: earn + supersession parity ---
+must(823543, 'OUROBOROS'); must(823543, 'POWER_OF_SEVEN'); // 7^7 = 7-to-itself
+if (epOf(823543, 'SEVENTH_POWER') !== 0) throw new Error('823543: 7th Power superseded by Ouroboros');
+must(69420, 'ULTIMEME_EXACT'); must(69420, 'ULTIMEME');
+if (epOf(69420, 'ULTIMEME') !== 0) throw new Error('69420: Funny Numbers superseded by exact');
+must(694203, 'ULTIMEME'); mustNot(694203, 'ULTIMEME_EXACT'); // contains 69 and 420, not exact
+must(404, 'ERROR_EXACT'); must(404, 'ERROR');
+if (epOf(404, 'ERROR') !== 0) throw new Error('404: Error 404 superseded by Not Found');
+must(666666, 'INFERNAL'); must(666666, 'DEVIL');
+if (epOf(666666, 'DEVIL') !== 0) throw new Error('666666: Devil superseded by Infernal');
+must(6283, 'TAU'); must(62831, 'TAU'); must(62835, 'TAU_SLICE_4');
+if (epOf(62831, 'TAU_SLICE_5') !== 0) throw new Error('62831: Tau Slice (5) superseded by exact Tau');
+must(1618, 'GOLDEN_RATIO'); must(86400, 'FULL_DAY'); must(17776, 'FOOTBALL_17776');
+must(247365, 'ALWAYS');
+if (epOf(247365, 'CALENDAR') !== 0) throw new Error('247365: Calendar superseded by Always');
+must(112233, 'ARITHMETIC'); must(112233, 'STEPS'); // 11,22,33 (diff 11) and non-decreasing
+must(1248, 'GEOMETRIC'); must(312, 'EQUATION'); // 1,2,4,8 (ratio 2); 3*1... 3=1*... actually 3,1,2? →test
+must(155551, 'FRAMED_QUAD'); must(555555, 'FIVE_OF_A_KIND');
+must(12321, 'POCKET_MIRROR'); must(9800, 'SLOPES');
+mustNot(111111, 'STEPS'); mustNot(111111, 'SLOPES'); // homogeneous is neither
 
 console.log('\nAll assertions passed.');

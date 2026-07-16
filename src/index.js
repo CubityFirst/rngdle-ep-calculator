@@ -332,6 +332,80 @@ function pContigPairStarts(s) {
 }
 
 // ---------------------------------------------------------------------------
+// Prod-ported helpers for the 2026-07-16 badge batch (Metronome / Crescendo /
+// Equation / Pocket Mirror / Mini Scramble). Transcribed from the live game's
+// BADGE_DEFINITIONS util module (research/rngdle-dump-2026-07-16), so these
+// match rngdle.com. Verified against each badge's shipped match/reject cases and
+// the published earn-probabilities. Do not "simplify" without re-checking parity.
+// ---------------------------------------------------------------------------
+
+// Partition `s` into exactly `count` non-empty parts (no leading zeros) and test
+// pred(numbers); returns {splits, numbers} for the first passing split or null. (prod `_`)
+function pSplitParts(s, count, pred) {
+  const splits = Array(count), nums = Array(count);
+  const rec = (idx, start) => {
+    if (idx === count - 1) {
+      const part = s.slice(start);
+      if (pLeadingZero(part)) return false;
+      splits[idx] = start; nums[idx] = Number(part);
+      return pred(nums);
+    }
+    const remaining = count - idx - 1;
+    for (let end = start + 1; end <= s.length - remaining; end++) {
+      const part = s.slice(start, end);
+      if (pLeadingZero(part)) continue;
+      splits[idx] = start; nums[idx] = Number(part);
+      if (rec(idx + 1, end)) return true;
+    }
+    return false;
+  };
+  return rec(0, 0) ? { splits: [...splits], numbers: [...nums] } : null;
+}
+// 3+ parts forming an arithmetic sequence with common difference d where |d| >= 2
+// (a diff of 0/±1 is Homogeneous / Cascade / Waterfall, not "Metronome"). (prod `S`)
+function findArithmeticSplit(s) {
+  for (let count = 3; count <= s.length; count++) {
+    const r = pSplitParts(s, count, nums => {
+      const diff = nums[1] - nums[0];
+      if (diff === -1 || diff === 0 || diff === 1) return false;
+      for (let i = 2; i < nums.length; i++) if (nums[i] - nums[i - 1] !== diff) return false;
+      return true;
+    });
+    if (r) return r;
+  }
+  return null;
+}
+// 3+ positive parts forming a geometric sequence (constant ratio via b^2 = a*c). (prod `A`)
+function findGeometricSplit(s) {
+  for (let count = 3; count <= s.length; count++) {
+    const r = pSplitParts(s, count, nums => {
+      if (nums.some(v => v <= 0) || nums[0] === nums[1]) return false;
+      for (let t = 0; t + 2 < nums.length; t++) if (nums[t + 1] * nums[t + 1] !== nums[t] * nums[t + 2]) return false;
+      return true;
+    });
+    if (r) return r;
+  }
+  return null;
+}
+// Splits into 3 non-zero parts a,b,c where inserting one of + - * / makes a op b === c. (prod `w`)
+function findEquation(s) {
+  return pSplitParts(s, 3, nums => {
+    const [a, b, c] = nums;
+    if (a === 0 || b === 0 || c === 0) return false;
+    return a + b === c || a - b === c || a * b === c || (a % b === 0 && a / b === c);
+  });
+}
+// Plain string palindrome (used by Pocket Mirror over substrings). (prod `r`)
+function isPalindromeStr(s) { for (let i = 0, j = s.length - 1; i < j; i++, j--) if (s[i] !== s[j]) return false; return true; }
+// `s` has >= minLen digits that, sorted ascending, form a run of consecutive values. (prod `N`)
+function isScrambledSeq(s, minLen) {
+  if (s.length < minLen) return false;
+  const arr = [...s].map(Number).sort((a, b) => a - b);
+  for (let i = 1; i < arr.length; i++) if (arr[i] !== arr[i - 1] + 1) return false;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Badge definitions: [id, label, emoji, ep, test(c)]
 // c = { n, s, len, d, counts, distinct, sum, prod, maxCount, has(sub), cnt(digit), withCount(k) }
 //
@@ -395,12 +469,20 @@ const BADGES = [
   ['BRAINROT', 'Brainrot', '🫠', 100000100, c => c.n === 676767],
   ['GROUNDHOG_DAY', 'Groundhog Day', '📅', 100000100, c => c.n === 365365],
   ['ONE_MILLION', 'One Million', '🐐', 100000100, c => c.n === 1000000],
+  ['ERROR_EXACT', 'Not Found', '🚫', 100000100, c => c.n === 404],
+  ['FULL_DAY', 'Full Day', '⏳', 100000100, c => c.n === 86400],
+  ['FOOTBALL_17776', '17776', '🏈', 100000100, c => c.n === 17776],
+  ['INFERNAL', 'Infernal', '🔱', 100000100, c => c.n === 666666],
+  ['ALWAYS', 'Always', '♾️', 50000050, c => c.s === '247365' || c.s === '365247'],
+  ['ULTIMEME_EXACT', 'Funny Number', '😂', 50000050, c => c.s === '69420' || c.s === '42069'],
   ['EXACT_BOOB', 'Exact Boob', '🍈', 50000050, c => c.n === 8008 || c.n === 58008],
 
   // --- Powers / math (Mythic/Anomaly) ---
   ['THIRTEENTH_POWER', '13th Power', '💀', 33333367, c => isPerfectPower(c.n, 13)],
   ['SEVENTEENTH_POWER', '17th Power', '🧙', 33333367, c => isPerfectPower(c.n, 17)],
   ['NINETEENTH_POWER', '19th Power', '🌑', 33333367, c => isPerfectPower(c.n, 19)],
+  ['TAU', 'Tau', '🌀', 33333367, c => c.s === '6283' || c.s === '62831' || c.s === '628318'],
+  ['GOLDEN_RATIO', 'Golden Ratio', '🐚', 33333367, c => c.s === '1618' || c.s === '16180' || c.s === '161803'],
   ['TENTH_POWER', '10th Power', '🔟', 25000025, c => isPerfectPower(c.n, 10)],
   ['ELEVENTH_POWER', '11th Power', '🕚', 25000025, c => isPerfectPower(c.n, 11)],
   ['PI', 'Pi', '🥧', 25000025, c => [314, 3141, 31415, 314159].includes(c.n)],
@@ -408,8 +490,11 @@ const BADGES = [
   ['CONSEC_QUAD_EXACT', '4 Consecutive Numbers', '⛓️', 25000025, c => { const r = pQuadExact(c.s); return !!r && pOrdered(r.numbers); }],
   ['NINTH_POWER', '9th Power', '☁️', 20000020, c => isPerfectPower(c.n, 9)],
   ['EIGHTH_POWER', '8th Power', '🎱', 16666683, c => isPerfectPower(c.n, 8)],
+  ['OUROBOROS', 'Ouroboros', '🐍', 14285729, c => c.n === 1 || c.n === 4 || c.n === 27 || c.n === 256 || c.n === 3125 || c.n === 46656 || c.n === 823543],
   ['SEVENTH_POWER', '7th Power', '🌈', 12500013, c => isPerfectPower(c.n, 7)],
+  ['POWER_OF_SEVEN', 'Power of Seven', '7️⃣', 12500013, c => { if (c.n <= 0) return false; let v = 1; while (v < c.n) v *= 7; return v === c.n; }],
   ['FACTORIAL', 'Factorial', '❗', 11111122, c => FACTORIALS.has(c.n)],
+  ['POWER_OF_FIVE', 'Power of Five', '5️⃣', 11111122, c => { if (c.n <= 0) return false; let v = 1; while (v < c.n) v *= 5; return v === c.n; }],
   ['HELLO', 'Hello', '👋', 11111122, c => c.has('07734')],
   ['SEQUENCE_6', 'Sequence (6)', '🔢', 11111122, c => pHasSequence(c.s, 6, false)],
   ['CONTIGUOUS_SIXES', 'Contiguous Sixes', '➖➖➖➖', 10000010, c => /(\d)\1{5}/.test(c.s)],
@@ -426,6 +511,7 @@ const BADGES = [
   ['BOOB_80085', '80085', '🅱️', 5000005, c => c.has('80085')],
   ['PI_CONTAINS_5', 'Pi Slice (5)', '🥧', 5000005, c => c.has('31415')],
   ['E_CONTAINS_5', 'E Slice (5)', '📈', 5000005, c => c.has('27182')],
+  ['TAU_SLICE_5', 'Tau Slice (5)', '🌀', 5000005, c => c.has('62831')],
   ['CASCADE', 'Cascade', '🌊', 3333337, c => consecInc(c.d)],
   ['FIBONACCI', 'Fibonacci Number', '🐚', 3333337, c => FIBS.has(c.n)],
   ['FOURTH_POWER', '4th Power', '📦', 3125003, c => isPerfectPower(c.n, 4)],
@@ -433,6 +519,7 @@ const BADGES = [
   ['CONSEC_QUAD_CONTAINS', '4 Consecutive Numbers (Contains)', '🔗', 2631582, c => pNAdjacent(c.s, 4) !== null],
   ['CONSEC_QUAD_SCRAMBLED', '4 Consecutive Numbers (Scrambled)', '🔀', 2272730, c => { const r = pQuadExact(c.s); return !!r && !pOrdered(r.numbers); }],
   ['HOMOGENEOUS', 'Homogeneous', '🥛', 2222224, c => c.len >= 2 && c.distinct === 1],
+  ['ULTIMEME', 'Funny Numbers', '😂', 1666668, c => c.has('69') && c.has('420')],
   ['BINARY_SOUL', 'Binary Soul', '🤖', 1538463, c => /^[01]+$/.test(c.s)],
   ['STRAIGHT_FLUSH', 'Straight Flush', '🃏', 1449277, c => c.has('02468') || c.has('13579') || c.has('86420') || c.has('97531')],
   ['TWO_DIGITS', 'Two Digits', '✌️', 1111112, c => c.len === 2],
@@ -460,13 +547,17 @@ const BADGES = [
   ['BIG_BROTHER', 'Big Brother', '👁️', 333334, c => c.has('1984')],
   ['PI_CONTAINS_4', 'Pi Slice (4)', '🥧', 333334, c => c.has('3141')],
   ['E_CONTAINS_4', 'E Slice (4)', '📈', 333334, c => c.has('2718')],
+  ['TAU_SLICE_4', 'Tau Slice (4)', '🌀', 333334, c => c.has('6283')],
   ['CONSEC_TRIPLE_SCRAMBLED', '3 Consecutive Numbers (Scrambled)', '🔀', 277778, c => { const r = pTripleExact(c.s); return !!r && !pOrdered(r.numbers); }],
   ['ZIPPER', 'Zipper', '🤐', 246914, c => c.len >= 2 && c.distinct === 2 && c.d.every((x, i) => i === 0 || x !== c.d[i - 1])],
   ['ASCENSION', 'Ascension', '📈', 219298, c => strictInc(c.d)],
+  ['GEOMETRIC', 'Crescendo', '🔊', 208334, c => findGeometricSplit(c.s) !== null],
+  ['FIVE_OF_A_KIND', 'Five of a Kind', '🃏', 198020, c => c.maxCount >= 5],
   ['CONSEC_TRIPLE_CONTAINS', '3 Consecutive Numbers (Contains)', '🔗', 157978, c => pNAdjacent(c.s, 3) !== null],
   ['CONTIGUOUS_THREE_PAIR', 'Contiguous Three Pair', '👨‍👩‍👧‍👦👯', 154321, c => { const a = pContigPairStarts(c.s); for (let i = 0; i < a.length - 2; i++) if (a[i] + 2 === a[i + 1] && a[i + 1] + 2 === a[i + 2]) return true; return false; }],
   ['FRAMED_PAIR', 'Framed Pair', '🖼️', 137174, c => c.len === 4 && c.d[1] === c.d[2] && c.d[0] !== c.d[1] && c.d[3] !== c.d[1]],
   ['FRAMED_TRIPLE', 'Framed Triple', '🖼️🖼️', 137174, c => c.len === 5 && c.d[1] === c.d[2] && c.d[2] === c.d[3] && c.d[0] !== c.d[1] && c.d[4] !== c.d[1]],
+  ['FRAMED_QUAD', 'Framed Quad', '🪟', 137174, c => c.len === 6 && c.d[1] === c.d[2] && c.d[2] === c.d[3] && c.d[3] === c.d[4] && c.d[0] !== c.d[1] && c.d[5] !== c.d[4]],
   ['DECAY', 'Decay', '📉', 119474, c => strictDec(c.d)],
   ['THREE_DIGITS', 'Three Digits', '🤟', 111111, c => c.len === 3],
   ['ECHO', 'Echo', '📣', 100100, c => c.len >= 2 && c.len % 2 === 0 && c.s.slice(0, c.len / 2) === c.s.slice(c.len / 2)],
@@ -508,7 +599,10 @@ const BADGES = [
   ['DIVISIBLE_BY_THREE', 'Divisible by Three', '🔺', 24414, c => c.d.every(x => x % 3 === 0)],
   ['SCRAMBLE', 'Scramble', '🔀', 22722, c => c.len >= 2 && c.distinct === c.len && (Math.max(...c.d) - Math.min(...c.d)) === c.len - 1],
   ['DUALITY', 'Duality', '☯️', 21654, c => c.distinct === 2],
+  ['STEPS', 'Steps', '🪜', 20202, c => { if (c.len < 2) return false; let rose = false; for (let i = 1; i < c.len; i++) { if (c.d[i] < c.d[i - 1]) return false; if (c.d[i] > c.d[i - 1]) rose = true; } return rose; }],
+  ['ARITHMETIC', 'Metronome', '🎼', 17784, c => findArithmeticSplit(c.s) !== null],
   ['FRAMED_DOUBLE', 'Framed Double', '🖼️🖼️🖼️', 15242, c => c.len === 6 && c.d[1] === c.d[2] && c.d[3] === c.d[4] && c.d[1] !== c.d[3] && c.d[0] !== c.d[1] && c.d[5] !== c.d[4]],
+  ['SLOPES', 'Slopes', '🛝', 12582, c => { if (c.len < 2) return false; let fell = false; for (let i = 1; i < c.len; i++) { if (c.d[i] > c.d[i - 1]) return false; if (c.d[i] < c.d[i - 1]) fell = true; } return fell; }],
   ['PAIRED_BOOKENDS', 'Paired Bookends', '👐', 11122, c => c.len >= 4 && c.d[0] === c.d[1] && c.d[c.len - 1] === c.d[c.len - 2] && c.d[0] !== c.d[c.len - 1]],
   ['FOUR_DIGITS', 'Four Digits', '🍀', 11111, c => c.len === 4],
   ['THREE_PAIR', 'Three Pair', '👯‍♀️👯', 10288, c => c.countExact(2) >= 3],
@@ -520,6 +614,7 @@ const BADGES = [
 
   // --- Uncommon ---
   ['QUADS', 'Four of a Kind', '🍀', 8436, c => c.maxCount >= 4],
+  ['EQUATION', 'Equation', '🟰', 7720, c => findEquation(c.s) !== null],
   ['LOW_BALL', 'Low Ball', '📉', 6400, c => /^[0-4]+$/.test(c.s)],
   ['CONTIGUOUS_TWO_PAIR', 'Contiguous Two Pair', '👨‍👩‍👧‍👦', 6142, c => { const a = pContigPairStarts(c.s); for (let i = 0; i < a.length - 1; i++) if (a[i] + 2 === a[i + 1]) return true; return false; }],
   ['MOUNTAIN', 'Mountain', '🏔️', 5885, c => mountain(c.d)],
@@ -534,6 +629,7 @@ const BADGES = [
   ['FEATHER', 'Feather', '🪶', 2667, c => c.sum < 15],
   ['BLACKJACK', 'Blackjack', '♠️', 2521, c => c.sum === 21],
   ['BOAT', 'Full House', '🏠', 2397, c => { const v = Object.values(c.counts).sort((a, b) => b - a); return v[0] >= 3 && (v[1] || 0) >= 2; }],
+  ['POCKET_MIRROR', 'Pocket Mirror', '🪞', 2124, c => { for (let L = 4; L <= c.len; L++) for (let i = 0; i + L <= c.len; i++) if (isPalindromeStr(c.s.slice(i, i + L))) return true; return false; }],
   ['SNAKE_EYES', 'Snake Eyes', '🎲', 2121, c => { if ((c.counts[1] || 0) !== 2) return false; for (const k in c.counts) if (k !== '1' && c.counts[k] >= 2) return false; return true; }],
   ['NICE', 'Nice', '😏', 2024, c => c.has('69')],
   ['MEANING', 'Meaning of Life', '🌌', 2024, c => c.has('42')],
@@ -557,9 +653,11 @@ const BADGES = [
   ['SEQUENCE_3', 'Sequence (3)', '🔢', 1716, c => pHasSequence(c.s, 3, false)],
   ['CONSEC_PAIR_ADJACENT', '2 Consecutive Numbers (Contains)', '🔗', 1659, c => pPairAdjacent(c.s) !== null],
   ['CONSEC_PAIR_NEARBY', '2 Consecutive Numbers (Nearby)', '🔗', 1575, c => pPairNearby(c.s) !== null],
+  ['MESA', 'Mesa', '🗻', 1568, c => { let rose = false, fell = false; for (let i = 1; i < c.len; i++) { const a = c.d[i], b = c.d[i - 1]; if (a > b) { if (fell) return false; rose = true; } else if (a < b) fell = true; } return rose && fell; }],
   ['PRIME', 'Prime Number', '💎', 1274, c => isPrime(c.n)],
   ['TRINITY', 'Trinity', '⚜️', 1265, c => c.distinct === 3],
   ['DOZEN', 'Dozen', '🍩', 1200, c => c.n > 0 && c.n % 12 === 0],
+  ['CANYON', 'Canyon', '🪨', 1184, c => { let rose = false, fell = false; for (let i = 1; i < c.len; i++) { const a = c.d[i], b = c.d[i - 1]; if (a < b) { if (rose) return false; fell = true; } else if (a > b) rose = true; } return rose && fell; }],
   ['FIVE_DIGITS', 'Five Digits', '🖐️', 1111, c => c.len === 5],
   ['ELEVEN', 'Eleven', '🕚', 1100, c => c.n > 0 && c.n % 11 === 0],
   ['HARSHAD', 'Harshad Number', '🤝', 1048, c => c.sum > 0 && c.n % c.sum === 0],
@@ -573,8 +671,10 @@ const BADGES = [
   ['TRIPS', 'Three of a Kind', '🎰', 724, c => c.countExact(3) > 0], // exactly 3 (a quad is not trips)
   ['LUCKY_SEVEN_DIV', 'Lucky Seven (Divisible)', '🎰', 700, c => c.n > 0 && c.n % 7 === 0],
   ['HETEROGENEOUS', 'Heterogeneous', '🥗', 593, c => c.distinct === c.len],
+  ['MINI_SCRAMBLE', 'Mini Scramble', '🧩', 579, c => { for (let L = 3; L <= c.len; L++) for (let i = 0; i + L <= c.len; i++) if (isScrambledSeq(c.s.slice(i, i + L), 3)) return true; return false; }],
   ['GAP_ONE', 'Gap One', '↕️', 529, c => c.len >= 2 && Math.abs(c.d[0] - c.d[c.len - 1]) === 1],
   ['TWO_PAIR', 'Two Pair', '👯‍♀️', 447, c => c.countExact(2) >= 2],
+  ['DUNES', 'Dunes', '🐫', 364, c => { let coll = c.s[0] ?? ''; for (let i = 1; i < c.len; i++) if (c.s[i] !== c.s[i - 1]) coll += c.s[i]; if (coll.length < 4) return false; for (let i = 2; i < coll.length; i++) { const p = +coll[i - 2], q = +coll[i - 1], r = +coll[i], a = q - p, b = r - q; if (a > 0 && b > 0 || a < 0 && b < 0) return false; } return true; }],
   ['HOPSCOTCH', 'Hopscotch', '🦘', 312, c => {
     if (c.len < 3 || c.distinct < 2) return false;
     for (let e = 0; e <= c.len - 3; e++) {
@@ -824,6 +924,33 @@ const DESCRIPTIONS = {
   NEIGHBORS: 'Contains two digits that are adjacent in value.',
   PAIR: 'Contains a pair of matching digits.',
   SIX_DIGITS: 'Has exactly six digits.',
+  // --- 2026-07-16 batch ---
+  STEPS: 'Digits never decrease.',
+  SLOPES: 'Digits never increase.',
+  MESA: 'Digits rise to a peak, then fall (flat stretches allowed).',
+  CANYON: 'Digits fall to a floor, then rise (flat stretches allowed).',
+  DUNES: 'Rises and falls keep alternating (flat stretches allowed).',
+  POCKET_MIRROR: 'Contains a palindrome of 4 or more digits.',
+  ARITHMETIC: 'Splits into three or more numbers with a constant difference.',
+  GEOMETRIC: 'Splits into three or more numbers with a constant ratio.',
+  EQUATION: 'Insert one of + − × ÷ and an equals sign to make a true equation.',
+  FIVE_OF_A_KIND: 'Contains five identical digits.',
+  FRAMED_QUAD: 'Four of a kind in the middle, bookended by different digits.',
+  OUROBOROS: 'A number raised to itself: nⁿ (1¹, 2², … 7⁷).',
+  POWER_OF_FIVE: 'A power of 5 (5ⁿ).',
+  POWER_OF_SEVEN: 'A power of 7 (7ⁿ).',
+  TAU: 'Exactly τ (6283, 62831, or 628318).',
+  TAU_SLICE_4: 'Contains "6283".',
+  TAU_SLICE_5: 'Contains "62831".',
+  GOLDEN_RATIO: 'Exactly φ (1618, 16180, or 161803).',
+  ALWAYS: 'Exactly "247365" or "365247" (24/7, 365).',
+  FULL_DAY: 'Exactly "86400", the number of seconds in a day.',
+  FOOTBALL_17776: 'Exactly "17776".',
+  ERROR_EXACT: 'Exactly "404".',
+  INFERNAL: 'Exactly "666666".',
+  ULTIMEME: 'Contains both "69" and "420".',
+  ULTIMEME_EXACT: 'Exactly "69420" or "42069".',
+  MINI_SCRAMBLE: 'Contains 3 or more adjacent digits that form a run when sorted.',
 };
 
 // PROBABILITIES (exact share of all 1,000,001 inputs 0..1,000,000 that earn each
@@ -847,14 +974,14 @@ function fmtProb(p) {
 // Supersession families: prod tags each badge with a `family` and, within a family, only
 // the single HIGHEST-EP earned badge scores - the rest are still displayed as earned but
 // score 0, because the higher tier already implies them. This list is the full family map
-// extracted from the live game's BADGE_DEFINITIONS (35 families / 138 badges); the remaining
-// 65 badges are standalone and always score. Member order is irrelevant - the scorer keeps
+// extracted from the live game's BADGE_DEFINITIONS (40 families / 161 badges); the remaining
+// 69 badges are standalone and always score. Member order is irrelevant - the scorer keeps
 // the max-EP member - but each family is listed highest-EP first for readability.
 const FAMILIES = [
-  ['THIRTEENTH_POWER', 'SEVENTEENTH_POWER', 'NINETEENTH_POWER', 'TENTH_POWER', 'ELEVENTH_POWER', 'NINTH_POWER', 'EIGHTH_POWER', 'SEVENTH_POWER', 'SIXTH_POWER', 'FIFTH_POWER', 'FOURTH_POWER', 'CUBE', 'SQUARE'], // POWER
+  ['THIRTEENTH_POWER', 'SEVENTEENTH_POWER', 'NINETEENTH_POWER', 'TENTH_POWER', 'ELEVENTH_POWER', 'NINTH_POWER', 'EIGHTH_POWER', 'SEVENTH_POWER', 'SIXTH_POWER', 'FIFTH_POWER', 'FOURTH_POWER', 'CUBE', 'SQUARE', 'OUROBOROS'], // POWER
   ['DIGIT_ZERO', 'DIGIT_ONE', 'DIGIT_TWO', 'DIGIT_THREE', 'DIGIT_FOUR', 'DIGIT_FIVE', 'DIGIT_SIX', 'DIGIT_SEVEN', 'DIGIT_EIGHT', 'DIGIT_NINE', 'ONE_DIGIT'], // SINGLE_DIGIT
   ['CONSEC_QUAD_EXACT', 'CONSEC_QUAD_CONTAINS', 'CONSEC_QUAD_SCRAMBLED', 'CONSEC_TRIPLE_EXACT', 'CONSEC_TRIPLE_SCRAMBLED', 'CONSEC_TRIPLE_CONTAINS', 'CONSEC_PAIR_EXACT', 'CONSEC_PAIR_ADJACENT', 'CONSEC_PAIR_NEARBY'], // CONSECUTIVE
-  ['SEQUENCE_6', 'CASCADE', 'WATERFALL', 'EVEN_SPACING', 'EVEN_SPACING_ABS', 'TURTLE', 'SEQUENCE_4', 'SCRAMBLE', 'SEQUENCE_3'], // PROGRESSION
+  ['SEQUENCE_6', 'CASCADE', 'WATERFALL', 'EVEN_SPACING', 'EVEN_SPACING_ABS', 'TURTLE', 'SEQUENCE_4', 'SCRAMBLE', 'SEQUENCE_3', 'GEOMETRIC', 'ARITHMETIC', 'MINI_SCRAMBLE'], // PROGRESSION
   ['CONTIGUOUS_THREE_PAIR', 'FRAMED_PAIR', 'FRAMED_DOUBLE', 'THREE_PAIR', 'CONTIGUOUS_TWO_PAIR', 'TWO_PAIR', 'CONTIGUOUS_PAIR', 'PAIR'], // PAIRS
   ['EXACT_BOOB_80085', 'EXACT_BOOB', 'BOOB_58008', 'BOOB_80085', 'BOOB_8008'], // BOOB
   ['BOTANIST_EXACT', 'MEANING_EXACT', 'HOTBOX', 'BOTANIST', 'MEANING'], // BOTANIST
@@ -867,13 +994,13 @@ const FAMILIES = [
   ['SIXTY_SEVEN_EXACT', 'BRAINROT', 'SIXTY_SEVEN_DOUBLE', 'SIXTY_SEVEN'], // SIXTY_SEVEN
   ['DEEP_VOID_FIVE', 'DEEP_VOID_FOUR', 'DEEP_VOID_THREE', 'DEEP_VOID'], // VOID_DEPTH
   ['PAIRED_BOOKENDS', 'BOOKENDS', 'MIRROR_BOOKENDS'], // BOOKENDS
-  ['CALENDAR_EXACT', 'GROUNDHOG_DAY', 'CALENDAR'], // CALENDAR
+  ['CALENDAR_EXACT', 'GROUNDHOG_DAY', 'CALENDAR', 'ALWAYS'], // CALENDAR
   ['EMERGENCY_EXACT', 'MAYDAY', 'EMERGENCY'], // EMERGENCY
-  ['FRAMED_TRIPLE', 'QUADS', 'TRIPS'], // OF_A_KIND
+  ['FRAMED_TRIPLE', 'FRAMED_QUAD', 'QUADS', 'FIVE_OF_A_KIND', 'TRIPS'], // OF_A_KIND
   ['ROYAL_FLUSH', 'STRAIGHT_FLUSH', 'STRAIGHT'], // STRAIGHT
   ['BIG_BROTHER_EXACT', 'BIG_BROTHER'], // BIG_BROTHER
   ['CONTIGUOUS_BOAT', 'BOAT'], // BOAT
-  ['DEVIL_EXACT', 'DEVIL'], // DEVIL
+  ['DEVIL_EXACT', 'INFERNAL', 'DEVIL'], // DEVIL
   ['FIREFLY', 'DUALITY'], // DUALITY
   ['EIGHTY_SIX_EXACT', 'EIGHTY_SIX'], // EIGHTY_SIX
   ['EQUILIBRIUM', 'SANDWICH'], // EQUILIBRIUM
@@ -881,11 +1008,16 @@ const FAMILIES = [
   ['DOUBLE_HOP', 'HOPSCOTCH'], // HOPSCOTCH
   ['LEET_EXACT', 'LEET'], // LEET
   ['UNIVERSAL_ANSWER', 'DEEPER_MEANING'], // MEANING
-  ['ASCENSION', 'DECAY'], // MONOTONIC
+  ['ASCENSION', 'DECAY', 'STEPS', 'SLOPES'], // MONOTONIC
   ['ORIENTATION_EXACT', 'ORIENTATION'], // ORIENTATION
-  ['MOUNTAIN', 'VALLEY'], // PEAK
+  ['MOUNTAIN', 'VALLEY', 'MESA', 'CANYON'], // PEAK
   ['MINI_ECHO', 'RHYME'], // REPEAT
   ['TREE_FIDDY_EXACT', 'TREE_FIDDY'], // TREE_FIDDY
+  ['ERROR_EXACT', 'ERROR'], // ERROR (2026-07-16)
+  ['HILLS', 'DUNES'], // HILLS (2026-07-16)
+  ['PALINDROME', 'POCKET_MIRROR'], // PALINDROME (2026-07-16)
+  ['TAU', 'TAU_SLICE_5', 'TAU_SLICE_4'], // TAU (2026-07-16)
+  ['ULTIMEME_EXACT', 'ULTIMEME'], // ULTIMEME (2026-07-16)
 ];
 
 // Display names for FAMILIES, index-aligned with the array above (same order as
@@ -896,8 +1028,26 @@ const FAMILY_NAMES = [
   'Void Depth', 'Bookends', 'Calendar', 'Emergency', 'Of a Kind', 'Straight',
   'Big Brother', 'Boat', 'Devil', 'Duality', 'Eighty-Six', 'Equilibrium', 'Hell',
   'Hopscotch', 'Leet', 'Meaning', 'Monotonic', 'Orientation', 'Peak', 'Repeat',
-  'Tree Fiddy',
+  'Tree Fiddy', 'Error', 'Hills', 'Palindrome', 'Tau', 'Ultimeme',
 ];
+
+// Badges added to this tool after the initial full-parity port, keyed to the date we
+// added them here. Powers the "Newly added" section + per-card markers on /badges.
+// When a fresh batch lands (see CLAUDE.md), append entries with the new date and bump
+// LATEST_BADGE_BATCH so only the most recent batch gets the highlight.
+const BADGE_ADDED = {
+  STEPS: '2026-07-16', SLOPES: '2026-07-16', MESA: '2026-07-16', CANYON: '2026-07-16',
+  DUNES: '2026-07-16', POCKET_MIRROR: '2026-07-16', ARITHMETIC: '2026-07-16',
+  GEOMETRIC: '2026-07-16', EQUATION: '2026-07-16', FIVE_OF_A_KIND: '2026-07-16',
+  FRAMED_QUAD: '2026-07-16', OUROBOROS: '2026-07-16', POWER_OF_FIVE: '2026-07-16',
+  POWER_OF_SEVEN: '2026-07-16', TAU: '2026-07-16', TAU_SLICE_4: '2026-07-16',
+  TAU_SLICE_5: '2026-07-16', GOLDEN_RATIO: '2026-07-16', ALWAYS: '2026-07-16',
+  FULL_DAY: '2026-07-16', FOOTBALL_17776: '2026-07-16', ERROR_EXACT: '2026-07-16',
+  INFERNAL: '2026-07-16', ULTIMEME: '2026-07-16', ULTIMEME_EXACT: '2026-07-16',
+  MINI_SCRAMBLE: '2026-07-16',
+};
+// Badges added on this date get the "Newly added" treatment on /badges.
+const LATEST_BADGE_BATCH = '2026-07-16';
 
 function compute(n) {
   const s = String(n);
@@ -939,7 +1089,7 @@ function compute(n) {
 // ---------------------------------------------------------------------------
 // Browser engine (for the "Analyze all scores" feature)
 //
-// Computing all 1,000,000 numbers x 204 badge tests is far beyond a single
+// Computing all 1,000,000 numbers x 230 badge tests is far beyond a single
 // Worker request's CPU budget, so the analysis runs client-side in a Web Worker.
 // Rather than duplicate the 200+ badge rules, we GENERATE a self-contained ES
 // module from the live definitions via Function.prototype.toString(). Any edit to
@@ -956,6 +1106,8 @@ function engineModuleSource() {
     pLeadingZero, pMultiPart, pConsecSet, pDigitCounts, pContig, pOrdered, pHasSequence,
     pPairExact, pTripleExact, pQuadExact, pPairAdjacent, pPairNearby,
     pNAdjacentBuild, pNAdjacentAt, pNAdjacent, pContigPairStarts,
+    // 2026-07-16 batch helpers (Metronome / Crescendo / Equation / Pocket Mirror / Mini Scramble)
+    pSplitParts, findArithmeticSplit, findGeometricSplit, findEquation, isPalindromeStr, isScrambledSeq,
   ];
   const namedSrc = named.map(f => f.toString()).join('\n');
 
@@ -2515,7 +2667,7 @@ function renderGrid() {
   <div class="credit">Heavily inspired by <b>basiliotornado</b></div>
   <div class="nav"><a href="/">&larr; calculator</a> &nbsp;·&nbsp; <a href="/badges">badge index</a></div>
   <div id="vtitle">All numbers - badge count</div>
-  <input id="search" type="search" placeholder="Filter 204 badges…" autocomplete="off">
+  <input id="search" type="search" placeholder="Filter 230 badges…" autocomplete="off">
   <div id="list"></div>
   <div class="nav">Pick a badge to highlight which numbers earn it. Click any cell to open it.</div>
 </div>
@@ -2550,7 +2702,7 @@ const __GRID_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + gridWorker.to
 // /badges - browsable index of every badge: obtainment method, EP, rarity tier,
 // share of numbers that earn it, family/supersession relations, and example
 // numbers (clickable into the calculator) + a link to its /grid highlight view.
-// All 204 cards are server-rendered; a small inline script does search / rarity
+// All 230 cards are server-rendered; a small inline script does search / rarity
 // filtering / sorting on the DOM.
 // ---------------------------------------------------------------------------
 
@@ -2560,12 +2712,15 @@ function renderBadgeIndex() {
   const byId = new Map(BADGES.map(b => [b[0], b]));
 
   const tierCounts = { mythic: 0, anomaly: 0, epic: 0, rare: 0, uncommon: 0, common: 0 };
+  const newBadges = [];
   const cards = BADGES.map(([id, label, emoji, ep]) => {
     const tier = tierFromScore(ep);
     tierCounts[tier]++;
     const pal = TIER_PALETTE[tier];
     const desc = DESCRIPTIONS[id] || 'No description.';
     const prob = PROBABILITIES[id];
+    const isNew = BADGE_ADDED[id] === LATEST_BADGE_BATCH;
+    if (isNew) newBadges.push([id, label, emoji]);
     const ex = (EXAMPLES[id] || []).map(n => `<a href="/?n=${n}">${n.toLocaleString()}</a>`).join(' · ');
 
     // Family relations: within a family only the highest-EP earned badge scores,
@@ -2585,9 +2740,9 @@ function renderBadgeIndex() {
       famHTML = `<div class="bd-fam"><b>${esc(FAMILY_NAMES[fi])} family</b> · ${parts.join('; ')}</div>`;
     }
 
-    const search = `${label} ${id} ${desc} ${tier}`.toLowerCase();
-    return `<article class="bd" id="${id}" data-search="${esc(search)}" data-ep="${ep}" data-prob="${prob ?? -1}" data-tier="${tier}" style="--tc:${pal.accent}">
-  <header><span class="bd-emoji">${emoji}</span><h2>${esc(label)}</h2><span class="bd-pill">${pal.label}</span></header>
+    const search = `${label} ${id} ${desc} ${tier}${isNew ? ' new newly added' : ''}`.toLowerCase();
+    return `<article class="bd${isNew ? ' is-new' : ''}" id="${id}" data-search="${esc(search)}" data-ep="${ep}" data-prob="${prob ?? -1}" data-tier="${tier}" data-new="${isNew ? '1' : '0'}" style="--tc:${pal.accent}">
+  <header><span class="bd-emoji">${emoji}</span><h2>${esc(label)}</h2>${isNew ? '<span class="bd-new">New</span>' : ''}<span class="bd-pill">${pal.label}</span></header>
   <p class="bd-desc">${esc(desc)}</p>
   <div class="bd-stats"><span class="bd-ep">+${ep.toLocaleString()} EP</span><span class="bd-prob" title="Exact share of all inputs 0-1,000,000 that earn this badge">${fmtProb(prob)} of numbers</span></div>
   ${famHTML}
@@ -2601,6 +2756,19 @@ function renderBadgeIndex() {
     chip('', 'All', BADGES.length),
     ...['mythic', 'anomaly', 'epic', 'rare', 'uncommon', 'common'].map(t => chip(t, TIER_PALETTE[t].label, tierCounts[t])),
   ].join('');
+
+  // "Newly added" banner: the most recent batch, linking to each new badge's card.
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
+  const [by, bm, bd] = LATEST_BADGE_BATCH.split('-').map(Number);
+  const batchDate = `${bd} ${MONTHS[bm - 1]} ${by}`;
+  const newBox = newBadges.length ? `<section class="newbox">
+    <div class="newbox-head"><span class="newbox-tag">✨ Newly added</span>
+      <span class="newbox-date">${newBadges.length} new badge${newBadges.length === 1 ? '' : 's'} · ${batchDate}</span>
+      <button type="button" id="only-new" class="newbox-btn">Show only new</button></div>
+    <div class="newbox-list">${newBadges.map(([id, label, emoji]) =>
+      `<a class="newbox-chip" href="#${id}">${emoji} ${esc(label)}</a>`).join('')}</div>
+  </section>` : '';
 
   return `<!doctype html>
 <html lang="en"><head>
@@ -2656,6 +2824,26 @@ function renderBadgeIndex() {
   .bd-pill { flex:0 0 auto; font-size:.64rem; font-weight:700; letter-spacing:.09em; padding:.14rem .5rem;
     border-radius:999px; color:var(--tc); border:1px solid var(--tc);
     background:color-mix(in srgb, var(--tc) 14%, transparent); }
+  .bd-new { flex:0 0 auto; font-size:.62rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase;
+    padding:.14rem .45rem; border-radius:999px; color:#0a1a10; background:#43d17f; border:1px solid #43d17f; }
+  .bd.is-new { border-color:color-mix(in srgb, #43d17f 45%, var(--border)); }
+  .bd.is-new:target { box-shadow:0 0 0 3px color-mix(in srgb, #43d17f 30%, transparent); }
+
+  /* --- newly-added banner --- */
+  .newbox { border:1px solid color-mix(in srgb, #43d17f 40%, var(--border)); border-radius:12px;
+    background:color-mix(in srgb, #43d17f 7%, var(--surface)); padding:.85rem 1rem; margin-bottom:1.1rem; }
+  .newbox-head { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem .7rem; margin-bottom:.6rem; }
+  .newbox-tag { font-size:.9rem; font-weight:700; color:#7ee6ab; letter-spacing:.01em; }
+  .newbox-date { font-size:.8rem; color:var(--muted); }
+  .newbox-btn { margin-left:auto; font-family:inherit; font-size:.78rem; font-weight:600; cursor:pointer;
+    padding:.32rem .7rem; border-radius:999px; color:#7ee6ab; border:1px solid color-mix(in srgb, #43d17f 45%, var(--border-2));
+    background:transparent; transition:background .12s, color .12s; }
+  .newbox-btn:hover { background:color-mix(in srgb, #43d17f 16%, transparent); color:var(--text); }
+  .newbox-btn.on { background:#43d17f; color:#0a1a10; border-color:#43d17f; }
+  .newbox-list { display:flex; flex-wrap:wrap; gap:.4rem; }
+  .newbox-chip { font-size:.8rem; text-decoration:none; padding:.28rem .6rem; border-radius:8px;
+    color:var(--text); background:var(--surface-2); border:1px solid var(--border-2); white-space:nowrap; }
+  .newbox-chip:hover { border-color:#43d17f; }
   .bd-desc { margin:0; font-size:.86rem; color:#c8ccd8; }
   .bd-stats { display:flex; align-items:baseline; gap:.8rem; font-size:.82rem; }
   .bd-ep { font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; }
@@ -2679,6 +2867,7 @@ function renderBadgeIndex() {
   <h1>Badge Index</h1>
   <p class="tag">All ${BADGES.length} badges — how to earn each one, its rarity, EP score, and how many numbers hit it.
     Example numbers open the calculator; <b>map</b> highlights every earning number on the grid.</p>
+  ${newBox}
   <div class="bar">
     <input id="q" type="search" placeholder="Search ${BADGES.length} badges (name, rule, rarity)…" autocomplete="off">
     ${chips}
@@ -2710,7 +2899,9 @@ ${cards}
   var sortEl = document.getElementById('sort');
   var countEl = document.getElementById('count');
   var chips = [].slice.call(document.querySelectorAll('.chip'));
+  var onlyNewBtn = document.getElementById('only-new');
   var tier = '';
+  var onlyNew = false;
 
   function cmp(a, b) {
     switch (sortEl.value) {
@@ -2726,7 +2917,8 @@ ${cards}
     cards.slice().sort(cmp).forEach(function (c) { grid.appendChild(c); });
     var shown = 0;
     cards.forEach(function (c) {
-      var ok = (!tier || c.dataset.tier === tier) && (!f || c.dataset.search.indexOf(f) !== -1);
+      var ok = (!tier || c.dataset.tier === tier) && (!f || c.dataset.search.indexOf(f) !== -1)
+        && (!onlyNew || c.dataset.new === '1');
       c.style.display = ok ? '' : 'none';
       if (ok) shown++;
     });
@@ -2734,6 +2926,11 @@ ${cards}
   }
   q.addEventListener('input', apply);
   sortEl.addEventListener('change', apply);
+  if (onlyNewBtn) onlyNewBtn.addEventListener('click', function () {
+    onlyNew = !onlyNew;
+    onlyNewBtn.classList.toggle('on', onlyNew);
+    apply();
+  });
   chips.forEach(function (ch) {
     ch.addEventListener('click', function () {
       tier = ch.dataset.tier;
@@ -2750,6 +2947,8 @@ ${cards}
     if (!el || !el.classList.contains('bd')) return;
     if (el.style.display === 'none') {
       q.value = ''; tier = '';
+      onlyNew = false;
+      if (onlyNewBtn) onlyNewBtn.classList.remove('on');
       chips.forEach(function (c) { c.classList.toggle('on', !c.dataset.tier); });
       apply();
     }

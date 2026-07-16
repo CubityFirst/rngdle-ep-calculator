@@ -1,7 +1,7 @@
 {
  "range": "0..1000000",
  "numbers": 1000001,
- "badges": 204,
+ "badges": 230,
  "note": "earn = numbers earning the badge; score = numbers where it scores >0 EP after family supersession. Regenerate with `npm run gen`.",
  "tally": {
   "NICE_EXACT": {
@@ -136,6 +136,30 @@
    "earn": 1,
    "score": 1
   },
+  "ERROR_EXACT": {
+   "earn": 1,
+   "score": 1
+  },
+  "FULL_DAY": {
+   "earn": 1,
+   "score": 1
+  },
+  "FOOTBALL_17776": {
+   "earn": 1,
+   "score": 1
+  },
+  "INFERNAL": {
+   "earn": 1,
+   "score": 1
+  },
+  "ALWAYS": {
+   "earn": 2,
+   "score": 2
+  },
+  "ULTIMEME_EXACT": {
+   "earn": 2,
+   "score": 2
+  },
   "EXACT_BOOB": {
    "earn": 2,
    "score": 2
@@ -151,6 +175,14 @@
   "NINETEENTH_POWER": {
    "earn": 3,
    "score": 1
+  },
+  "TAU": {
+   "earn": 3,
+   "score": 3
+  },
+  "GOLDEN_RATIO": {
+   "earn": 3,
+   "score": 3
   },
   "TENTH_POWER": {
    "earn": 4,
@@ -180,11 +212,23 @@
    "earn": 6,
    "score": 4
   },
+  "OUROBOROS": {
+   "earn": 7,
+   "score": 5
+  },
   "SEVENTH_POWER": {
    "earn": 8,
-   "score": 6
+   "score": 5
+  },
+  "POWER_OF_SEVEN": {
+   "earn": 8,
+   "score": 8
   },
   "FACTORIAL": {
+   "earn": 9,
+   "score": 9
+  },
+  "POWER_OF_FIVE": {
    "earn": 9,
    "score": 9
   },
@@ -214,7 +258,7 @@
   },
   "SIXTH_POWER": {
    "earn": 11,
-   "score": 8
+   "score": 7
   },
   "POWER_OF_THREE": {
    "earn": 13,
@@ -222,7 +266,7 @@
   },
   "FIFTH_POWER": {
    "earn": 16,
-   "score": 12
+   "score": 11
   },
   "JACKPOT_FIVE": {
    "earn": 19,
@@ -249,6 +293,10 @@
    "score": 18
   },
   "E_CONTAINS_5": {
+   "earn": 20,
+   "score": 18
+  },
+  "TAU_SLICE_5": {
    "earn": 20,
    "score": 18
   },
@@ -280,6 +328,10 @@
    "earn": 45,
    "score": 45
   },
+  "ULTIMEME": {
+   "earn": 60,
+   "score": 58
+  },
   "BINARY_SOUL": {
    "earn": 65,
    "score": 65
@@ -306,7 +358,7 @@
   },
   "CUBE": {
    "earn": 101,
-   "score": 87
+   "score": 86
   },
   "EVEN_SPACING": {
    "earn": 116,
@@ -372,6 +424,10 @@
    "earn": 300,
    "score": 279
   },
+  "TAU_SLICE_4": {
+   "earn": 300,
+   "score": 279
+  },
   "CONSEC_TRIPLE_SCRAMBLED": {
    "earn": 360,
    "score": 360
@@ -383,6 +439,14 @@
   "ASCENSION": {
    "earn": 456,
    "score": 456
+  },
+  "GEOMETRIC": {
+   "earn": 480,
+   "score": 480
+  },
+  "FIVE_OF_A_KIND": {
+   "earn": 505,
+   "score": 505
   },
   "CONSEC_TRIPLE_CONTAINS": {
    "earn": 633,
@@ -397,6 +461,10 @@
    "score": 729
   },
   "FRAMED_TRIPLE": {
+   "earn": 729,
+   "score": 729
+  },
+  "FRAMED_QUAD": {
    "earn": 729,
    "score": 729
   },
@@ -434,11 +502,11 @@
   },
   "SQUARE": {
    "earn": 1001,
-   "score": 959
+   "score": 958
   },
   "EVEN_SPACING_ABS": {
    "earn": 1099,
-   "score": 983
+   "score": 982
   },
   "FIREFLY": {
    "earn": 1216,
@@ -462,7 +530,7 @@
   },
   "TURTLE": {
    "earn": 2774,
-   "score": 2290
+   "score": 2286
   },
   "SECRET_AGENT": {
    "earn": 2889,
@@ -482,15 +550,15 @@
   },
   "DEVIL": {
    "earn": 3700,
-   "score": 3699
+   "score": 3698
   },
   "SEQUENCE_4": {
    "earn": 3860,
-   "score": 3520
+   "score": 3515
   },
   "ERROR": {
    "earn": 3979,
-   "score": 3979
+   "score": 3978
   },
   "ORIENTATION": {
    "earn": 3979,
@@ -518,7 +586,7 @@
   },
   "CALENDAR": {
    "earn": 3999,
-   "score": 3997
+   "score": 3995
   },
   "DIVISIBLE_BY_THREE": {
    "earn": 4096,
@@ -532,9 +600,21 @@
    "earn": 4618,
    "score": 3402
   },
+  "STEPS": {
+   "earn": 4950,
+   "score": 4494
+  },
+  "ARITHMETIC": {
+   "earn": 5623,
+   "score": 5444
+  },
   "FRAMED_DOUBLE": {
    "earn": 6561,
    "score": 6561
+  },
+  "SLOPES": {
+   "earn": 7948,
+   "score": 7111
   },
   "PAIRED_BOOKENDS": {
    "earn": 8991,
@@ -570,7 +650,11 @@
   },
   "QUADS": {
    "earn": 11854,
-   "score": 11854
+   "score": 10620
+  },
+  "EQUATION": {
+   "earn": 12954,
+   "score": 12954
   },
   "LOW_BALL": {
    "earn": 15626,
@@ -628,6 +712,10 @@
    "earn": 41715,
    "score": 38394
   },
+  "POCKET_MIRROR": {
+   "earn": 47089,
+   "score": 45199
+  },
   "SNAKE_EYES": {
    "earn": 47139,
    "score": 47139
@@ -658,7 +746,7 @@
   },
   "SEQUENCE_3": {
    "earn": 58287,
-   "score": 52632
+   "score": 52220
   },
   "CONSEC_PAIR_ADJACENT": {
    "earn": 60270,
@@ -667,6 +755,10 @@
   "CONSEC_PAIR_NEARBY": {
    "earn": 63491,
    "score": 57021
+  },
+  "MESA": {
+   "earn": 63762,
+   "score": 46770
   },
   "PRIME": {
    "earn": 78498,
@@ -679,6 +771,10 @@
   "DOZEN": {
    "earn": 83333,
    "score": 83333
+  },
+  "CANYON": {
+   "earn": 84432,
+   "score": 60615
   },
   "FIVE_DIGITS": {
    "earn": 90000,
@@ -724,6 +820,10 @@
    "earn": 168571,
    "score": 168571
   },
+  "MINI_SCRAMBLE": {
+   "earn": 172847,
+   "score": 110333
+  },
   "GAP_ONE": {
    "earn": 188888,
    "score": 188888
@@ -731,6 +831,10 @@
   "TWO_PAIR": {
    "earn": 223803,
    "score": 199017
+  },
+  "DUNES": {
+   "earn": 274590,
+   "score": 138165
   },
   "HOPSCOTCH": {
    "earn": 320193,
