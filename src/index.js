@@ -2482,12 +2482,14 @@ function gridClient(WORKER_SRC, LABELS) {
     else selectCount();
   }
   function selectCount() {
+    haltLife();
     view = 'count'; member = null;
     if (!countCanvas) buildCount();
     src = countCanvas;
     highlight(); updateLegend(); render(); setHash('count');
   }
   function selectEP() {
+    haltLife();
     view = 'ep'; member = null;
     if (!epCanvas) buildEP();
     src = epCanvas;
@@ -2507,6 +2509,7 @@ function gridClient(WORKER_SRC, LABELS) {
     highlight(); updateLegend(); render();
   }
   function selectBadge(label, idx) {
+    haltLife();
     view = label;
     setHash(label);
     highlight(); updateLegend();
@@ -2639,6 +2642,78 @@ function gridClient(WORKER_SRC, LABELS) {
   };
   document.getElementById('sideshow').onclick = () => document.body.classList.remove('nav-collapsed');
   cmapSel.addEventListener('change', () => { currentCmap = cmapSel.value; recolor(); });
+
+  // --- Konami code: Conway's Game of Life seeded from the current view ------
+  // ↑↑↓↓←→←→BA turns the visible map into a torus-wrapped Game of Life. Alive
+  // cells are the "lit" half of the active view (members for a badge view, above
+  // the midpoint for count/EP). Esc — or the code again — stops it and restores
+  // the normal view. Pan/zoom keep working while it runs.
+  const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
+  let konamiPos = 0;
+  let life = null;                 // { cur, nxt, gen, timer, canvas, img }
+  function lifeSeed() {
+    const N = SIZE * SIZE, a = new Uint8Array(N);
+    if (view === 'count' && counts) {
+      const mid = (cmin + cmax) / 2;
+      for (let i = 0; i < N; i++) a[i] = counts[i] > mid ? 1 : 0;
+    } else if (view === 'ep' && epArr) {
+      const lo = Math.log(emin + 1), span = (Math.log(emax + 1) - lo) || 1;
+      for (let i = 0; i < N; i++) a[i] = (Math.log(epArr[i] + 1) - lo) / span >= 0.5 ? 1 : 0;
+    } else if (member) {
+      a.set(member);
+    } else return null;
+    return a;
+  }
+  function paintLife() {
+    const lctx = life.canvas.getContext('2d'), d = life.img.data;
+    const hi = cmap(1), hr = hi[0] | 0, hg = hi[1] | 0, hb = hi[2] | 0;
+    const lo = cmap(0), lr = lo[0] | 0, lg = lo[1] | 0, lb = lo[2] | 0;
+    const cur = life.cur;
+    let alive = 0;
+    for (let i = 0; i < cur.length; i++) {
+      const p = i << 2;
+      if (cur[i]) { alive++; d[p] = hr; d[p + 1] = hg; d[p + 2] = hb; } else { d[p] = lr; d[p + 1] = lg; d[p + 2] = lb; }
+      d[p + 3] = 255;
+    }
+    lctx.putImageData(life.img, 0, 0);
+    src = life.canvas;
+    titleEl.textContent = "Conway's Game of Life - gen " + life.gen + ' · ' + alive.toLocaleString() + ' alive';
+    render();
+  }
+  function stepLife() {
+    const cur = life.cur, nxt = life.nxt, S = SIZE;
+    for (let y = 0; y < S; y++) {
+      const row = y * S, up = (y === 0 ? S - 1 : y - 1) * S, dn = (y === S - 1 ? 0 : y + 1) * S;
+      for (let x = 0; x < S; x++) {
+        const l = x === 0 ? S - 1 : x - 1, r = x === S - 1 ? 0 : x + 1;
+        const nb = cur[up + l] + cur[up + x] + cur[up + r] + cur[row + l] + cur[row + r] + cur[dn + l] + cur[dn + x] + cur[dn + r];
+        nxt[row + x] = (nb === 3 || (nb === 2 && cur[row + x])) ? 1 : 0;
+      }
+    }
+    life.cur = nxt; life.nxt = cur;
+    life.gen++;
+    paintLife();
+  }
+  function haltLife() { if (life) { clearInterval(life.timer); life = null; } }
+  function stopLife() { haltLife(); go(curHash() || 'count'); flash('Game of Life stopped'); }
+  function startLife() {
+    const seed = lifeSeed();
+    if (!seed) { flash('Still building the grid…'); return; }
+    const canvas = document.createElement('canvas');
+    canvas.width = SIZE; canvas.height = SIZE;
+    life = { cur: seed, nxt: new Uint8Array(seed.length), gen: 0, timer: 0,
+      canvas: canvas, img: canvas.getContext('2d').createImageData(SIZE, SIZE) };
+    paintLife();
+    life.timer = setInterval(stepLife, 100);
+    flash("Conway's Game of Life - Esc to stop");
+  }
+  document.addEventListener('keydown', e => {
+    if (life && e.key === 'Escape') { stopLife(); return; }
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    konamiPos = k === KONAMI[konamiPos] ? konamiPos + 1 : (k === KONAMI[0] ? 1 : 0);
+    if (konamiPos === KONAMI.length) { konamiPos = 0; if (life) stopLife(); else startLife(); }
+  });
 
   // --- worker ---------------------------------------------------------------
   const worker = new Worker(URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' })), { type: 'module' });
