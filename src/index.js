@@ -3317,6 +3317,9 @@ function renderProfile(username, sum) {
               <label class="cfg-row"><input type="checkbox" id="cfg-pct">
                 <span>Percentile labels
                   <small>Show the &quot;Top X% / Bottom X%&quot; blurb next to each tier name.</small></span></label>
+              <label class="cfg-row"><input type="checkbox" id="cfg-share">
+                <span>Roll share percentages
+                  <small>Show what % of your rolls landed in each tier, e.g. &quot;· 5.0%&quot;.</small></span></label>
               <label class="cfg-row"><input type="checkbox" id="cfg-expected">
                 <span>Expected-rate markers
                   <small>Per tier: 🟢 above / 🔴 below the expected count for your total rolls, ❌ when you have none.</small></span></label>
@@ -3357,7 +3360,7 @@ function renderProfile(username, sum) {
 
   // Settings live in localStorage; unknown keys are ignored so old stores stay valid.
   var KEY = 'rngdle-profile-copy-settings';
-  var cfg = { pct: true, expected: false, expectedCount: false };
+  var cfg = { pct: true, share: true, expected: false, expectedCount: false };
   try {
     var stored = JSON.parse(localStorage.getItem(KEY));
     if (stored && typeof stored === 'object') for (var k in cfg) if (k in stored) cfg[k] = !!stored[k];
@@ -3368,7 +3371,7 @@ function renderProfile(username, sum) {
   function fmtExp(x) { var e = Math.round(x * 10) / 10; return e % 1 ? e.toFixed(1) : String(e); }
   function buildText() {
     var lines = d.tiers.map(function (t) {
-      var l = t.emoji + ' ' + t.label + (cfg.pct ? ' (' + t.pct + ')' : '') + ' ' + t.n + ' · ' + t.share;
+      var l = t.emoji + ' ' + t.label + (cfg.pct ? ' (' + t.pct + ')' : '') + ' ' + t.n + (cfg.share ? ' · ' + t.share : '');
       if (cfg.expected) l += ' ' + marker(t);
       if (cfg.expectedCount) l += ' (Expected: ' + fmtExp(t.exp) + ')';
       return l;
@@ -3379,7 +3382,7 @@ function renderProfile(username, sum) {
   var gear = document.getElementById('cfg-btn'), modal = document.getElementById('cfg-modal');
   var preview = document.getElementById('cfg-preview-text');
   function updatePreview() { if (preview) preview.textContent = buildText(); }
-  [['cfg-pct', 'pct'], ['cfg-expected', 'expected'], ['cfg-expected-count', 'expectedCount']].forEach(function (m) {
+  [['cfg-pct', 'pct'], ['cfg-share', 'share'], ['cfg-expected', 'expected'], ['cfg-expected-count', 'expectedCount']].forEach(function (m) {
     var cb = document.getElementById(m[0]);
     if (cb) { cb.checked = cfg[m[1]]; cb.addEventListener('change', function () { cfg[m[1]] = cb.checked; save(); updatePreview(); }); }
   });
