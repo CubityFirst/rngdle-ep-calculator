@@ -3182,11 +3182,20 @@ function profileHead(title) {
   .copy-btn.ok { color:#0a1a10; background:#43d17f; border-color:#43d17f; }
   .pbtns { position:relative; display:flex; gap:.4rem; flex:0 0 auto; align-items:flex-start; }
   .cfg-btn { padding:.5rem .6rem; }
-  .cfg-pop { display:none; position:absolute; right:0; top:calc(100% + .45rem); z-index:20; width:250px;
-    background:var(--surface-2); border:1px solid var(--border-2); border-radius:10px; padding:.75rem .85rem;
-    box-shadow:0 10px 28px rgba(0,0,0,.55); }
-  .cfg-pop.open { display:block; }
-  .cfg-pop h3 { font-size:.7rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 .55rem; }
+  .cfg-modal { position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:1rem; }
+  .cfg-modal[hidden] { display:none; }
+  .cfg-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.62); }
+  .cfg-dialog { position:relative; width:min(700px,100%); max-height:88vh; overflow:auto; background:var(--surface);
+    border:1px solid var(--border-2); border-radius:14px; padding:1rem 1.15rem 1.15rem; box-shadow:0 18px 48px rgba(0,0,0,.6); }
+  .cfg-head { display:flex; align-items:center; justify-content:space-between; margin:0 0 .8rem; }
+  .cfg-head h3 { font-size:.72rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0; }
+  .cfg-x { background:none; border:none; color:var(--muted); font-size:.95rem; cursor:pointer; padding:.2rem .35rem; border-radius:6px; }
+  .cfg-x:hover { color:var(--text); background:var(--surface-2); }
+  .cfg-body { display:grid; grid-template-columns:1fr 1fr; gap:1.1rem; align-items:start; }
+  @media (max-width:640px) { .cfg-body { grid-template-columns:1fr; } }
+  .cfg-preview h4 { font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); margin:0 0 .45rem; }
+  .cfg-preview pre { margin:0; font-family:var(--mono); font-size:.74rem; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere;
+    background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:.7rem .8rem; }
   .cfg-row { display:flex; gap:.55rem; align-items:flex-start; font-size:.85rem; cursor:pointer; }
   .cfg-row input { margin:.2rem 0 0; accent-color:var(--accent); flex:0 0 auto; }
   .cfg-row + .cfg-row { margin-top:.55rem; }
@@ -3296,15 +3305,27 @@ function renderProfile(username, sum) {
     </div>
     <div class="pbtns">
       <button type="button" id="copy-btn" class="copy-btn" title="Copy the summary as text">📋 Copy text</button>
-      <button type="button" id="cfg-btn" class="copy-btn cfg-btn" title="Copy text settings" aria-haspopup="true" aria-expanded="false">⚙️</button>
-      <div id="cfg-pop" class="cfg-pop">
-        <h3>Copy text settings</h3>
-        <label class="cfg-row"><input type="checkbox" id="cfg-expected">
-          <span>Expected-rate markers
-            <small>Per tier: 🟢 above / 🔴 below the expected count for your total rolls, ❌ when you have none.</small></span></label>
-        <label class="cfg-row"><input type="checkbox" id="cfg-expected-count">
-          <span>Expected counts
-            <small>Append the expected number of rolls per tier, e.g. &quot;(Expected: 3)&quot;.</small></span></label>
+      <button type="button" id="cfg-btn" class="copy-btn cfg-btn" title="Copy text settings" aria-haspopup="dialog">⚙️</button>
+      <div id="cfg-modal" class="cfg-modal" hidden>
+        <div id="cfg-backdrop" class="cfg-backdrop"></div>
+        <div class="cfg-dialog" role="dialog" aria-modal="true" aria-labelledby="cfg-title">
+          <div class="cfg-head"><h3 id="cfg-title">Copy text settings</h3>
+            <button type="button" id="cfg-close" class="cfg-x" aria-label="Close">✕</button></div>
+          <div class="cfg-body">
+            <div class="cfg-opts">
+              <label class="cfg-row"><input type="checkbox" id="cfg-pct">
+                <span>Percentile labels
+                  <small>Show the &quot;Top X% / Bottom X%&quot; blurb next to each tier name.</small></span></label>
+              <label class="cfg-row"><input type="checkbox" id="cfg-expected">
+                <span>Expected-rate markers
+                  <small>Per tier: 🟢 above / 🔴 below the expected count for your total rolls, ❌ when you have none.</small></span></label>
+              <label class="cfg-row"><input type="checkbox" id="cfg-expected-count">
+                <span>Expected counts
+                  <small>Append the expected number of rolls per tier, e.g. &quot;(Expected: 3)&quot;.</small></span></label>
+            </div>
+            <div class="cfg-preview"><h4>Preview</h4><pre id="cfg-preview-text"></pre></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -3332,7 +3353,7 @@ function renderProfile(username, sum) {
 
   // Settings live in localStorage; unknown keys are ignored so old stores stay valid.
   var KEY = 'rngdle-profile-copy-settings';
-  var cfg = { expected: false, expectedCount: false };
+  var cfg = { pct: true, expected: false, expectedCount: false };
   try {
     var stored = JSON.parse(localStorage.getItem(KEY));
     if (stored && typeof stored === 'object') for (var k in cfg) if (k in stored) cfg[k] = !!stored[k];
@@ -3343,7 +3364,7 @@ function renderProfile(username, sum) {
   function fmtExp(x) { var e = Math.round(x * 10) / 10; return e % 1 ? e.toFixed(1) : String(e); }
   function buildText() {
     var lines = d.tiers.map(function (t) {
-      var l = t.emoji + ' ' + t.label + ' (' + t.pct + ') ' + t.n + ' · ' + t.share;
+      var l = t.emoji + ' ' + t.label + (cfg.pct ? ' (' + t.pct + ')' : '') + ' ' + t.n + ' · ' + t.share;
       if (cfg.expected) l += ' ' + marker(t);
       if (cfg.expectedCount) l += ' (Expected: ' + fmtExp(t.exp) + ')';
       return l;
@@ -3351,21 +3372,20 @@ function renderProfile(username, sum) {
     return lines.join('\\n') + '\\n\\n' + d.stats.join('\\n');
   }
 
-  var gear = document.getElementById('cfg-btn'), pop = document.getElementById('cfg-pop');
-  [['cfg-expected', 'expected'], ['cfg-expected-count', 'expectedCount']].forEach(function (m) {
+  var gear = document.getElementById('cfg-btn'), modal = document.getElementById('cfg-modal');
+  var preview = document.getElementById('cfg-preview-text');
+  function updatePreview() { if (preview) preview.textContent = buildText(); }
+  [['cfg-pct', 'pct'], ['cfg-expected', 'expected'], ['cfg-expected-count', 'expectedCount']].forEach(function (m) {
     var cb = document.getElementById(m[0]);
-    if (cb) { cb.checked = cfg[m[1]]; cb.addEventListener('change', function () { cfg[m[1]] = cb.checked; save(); }); }
+    if (cb) { cb.checked = cfg[m[1]]; cb.addEventListener('change', function () { cfg[m[1]] = cb.checked; save(); updatePreview(); }); }
   });
-  if (gear && pop) {
-    gear.addEventListener('click', function () {
-      var open = pop.classList.toggle('open');
-      gear.setAttribute('aria-expanded', open ? 'true' : 'false');
-    });
-    document.addEventListener('click', function (e) {
-      if (pop.classList.contains('open') && !pop.contains(e.target) && !gear.contains(e.target)) {
-        pop.classList.remove('open'); gear.setAttribute('aria-expanded', 'false');
-      }
-    });
+  if (gear && modal) {
+    function openModal() { updatePreview(); modal.hidden = false; }
+    function closeModal() { modal.hidden = true; }
+    gear.addEventListener('click', openModal);
+    document.getElementById('cfg-close').addEventListener('click', closeModal);
+    document.getElementById('cfg-backdrop').addEventListener('click', closeModal);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
   }
 
   function done() { btn.textContent = '✓ Copied'; btn.classList.add('ok'); setTimeout(function () { btn.textContent = '📋 Copy text'; btn.classList.remove('ok'); }, 1400); }
