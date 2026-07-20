@@ -1737,7 +1737,7 @@ function fallbackCells(id, s) {
     case 'FRAMED_QUAD': return [1, 2, 3, 4];
     // Whole-number identity badges: the entire number is the badge.
     case 'ERROR_EXACT': case 'FULL_DAY': case 'FOOTBALL_17776': case 'INFERNAL':
-    case 'ALWAYS': case 'ULTIMEME_EXACT': case 'TAU': case 'GOLDEN_RATIO':
+    case 'ALWAYS': case 'ULTIMEME_EXACT': case 'TAU': case 'GOLDEN_RATIO': case 'E':
       return [...s].map((_, i) => i);
     default: return [];
   }
@@ -1810,6 +1810,12 @@ function powNote(base, n) {
   while (v < n) { v *= base; k++; }
   return v === n ? `${base}${sup(k)} = ${n.toLocaleString()}` : null;
 }
+// k-th root breakdown for the fixed-exponent power badges (2nd Power … 19th Power).
+function rootNote(n, p) {
+  const k = Math.round(Math.pow(n, 1 / p));
+  for (const c of [k - 1, k, k + 1]) if (c >= 0 && Math.pow(c, p) === n) return `${c}${sup(p)} = ${n.toLocaleString()}`;
+  return null;
+}
 function badgeNote(id, r) {
   const d = [...String(r.number)].map(ch => ch.charCodeAt(0) - 48);
   const sum = d.reduce((a, b) => a + b, 0);
@@ -1822,8 +1828,27 @@ function badgeNote(id, r) {
     case 'EVEN_SPACING': { const g = d[1] - d[0]; return `${d.join(', ')}  →  ${g >= 0 ? '+' : ''}${g} each step`; }
     case 'EVEN_SPACING_ABS': return `${d.join(', ')}  →  ±${Math.abs(d[1] - d[0])} each step`;
     case 'OUROBOROS': { for (let k = 1; k <= 7; k++) if (Math.pow(k, k) === r.number) return `${k}${sup(k)} = ${r.number.toLocaleString()}`; return null; }
+    case 'POWER_OF_TWO': return powNote(2, r.number);
+    case 'POWER_OF_THREE': return powNote(3, r.number);
     case 'POWER_OF_FIVE': return powNote(5, r.number);
     case 'POWER_OF_SEVEN': return powNote(7, r.number);
+    case 'SQUARE': return rootNote(r.number, 2);
+    case 'CUBE': return rootNote(r.number, 3);
+    case 'FOURTH_POWER': return rootNote(r.number, 4);
+    case 'FIFTH_POWER': return rootNote(r.number, 5);
+    case 'SIXTH_POWER': return rootNote(r.number, 6);
+    case 'SEVENTH_POWER': return rootNote(r.number, 7);
+    case 'EIGHTH_POWER': return rootNote(r.number, 8);
+    case 'NINTH_POWER': return rootNote(r.number, 9);
+    case 'TENTH_POWER': return rootNote(r.number, 10);
+    case 'ELEVENTH_POWER': return rootNote(r.number, 11);
+    case 'THIRTEENTH_POWER': return rootNote(r.number, 13);
+    case 'SEVENTEENTH_POWER': return rootNote(r.number, 17);
+    case 'NINETEENTH_POWER': return rootNote(r.number, 19);
+    case 'FACTORIAL': { let k = 1, v = 1; while (v < r.number) { k++; v *= k; } return v === r.number ? `${k}! = ${r.number.toLocaleString()}` : null; }
+    case 'FIBONACCI': { let a = 0, b = 1; while (b < r.number) { const t = a + b; a = b; b = t; } return r.number >= 2 && b === r.number ? `${(r.number - a).toLocaleString()} + ${a.toLocaleString()} = ${r.number.toLocaleString()}` : null; }
+    case 'PRONIC': { const k = Math.floor(Math.sqrt(r.number)); return k * (k + 1) === r.number ? `${k} × ${k + 1} = ${r.number.toLocaleString()}` : null; }
+    case 'LUCKY_SEVEN_DIV': return `${r.number.toLocaleString()} ÷ 7 = ${(r.number / 7).toLocaleString()}`;
     case 'BALANCED': {
       const h = d.length / 2, a = d.slice(0, h), b = d.slice(h);
       const sa = a.reduce((x, y) => x + y, 0), sb = b.reduce((x, y) => x + y, 0);
