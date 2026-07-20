@@ -1772,13 +1772,15 @@ function badgeGroups(id, s) {
 
 // Scramble / Mini Scramble: "from:to" slot moves that sort the scrambled digits into
 // their consecutive run, so the beta card can animate the unscramble on hover.
-// Scramble covers the whole number; Mini Scramble covers the first substring (same
-// scan order as the badge test — shortest, then leftmost) that sorts consecutive.
+// Scramble covers the whole number; Mini Scramble covers the LONGEST substring that
+// sorts consecutive (leftmost on ties). The badge test itself stops at the first
+// shortest match — existence is the same either way — but the longest run is the
+// more honest thing to show (90213 contains 0213, not just 021).
 function scramblePerm(id, s) {
   const permOf = (str, off) => [...str].map((ch, j) => [Number(ch), off + j])
     .sort((a, b) => a[0] - b[0]).map((e, k) => `${e[1]}:${off + k}`).join(',');
   if (id === 'SCRAMBLE') return permOf(s, 0);
-  for (let L = 3; L <= s.length; L++) for (let i = 0; i + L <= s.length; i++)
+  for (let L = s.length; L >= 3; L--) for (let i = 0; i + L <= s.length; i++)
     if (isScrambledSeq(s.slice(i, i + L), 3)) return permOf(s.slice(i, i + L), i);
   return null;
 }
