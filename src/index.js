@@ -3189,6 +3189,7 @@ function profileHead(title) {
   .cfg-pop h3 { font-size:.7rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 .55rem; }
   .cfg-row { display:flex; gap:.55rem; align-items:flex-start; font-size:.85rem; cursor:pointer; }
   .cfg-row input { margin:.2rem 0 0; accent-color:var(--accent); flex:0 0 auto; }
+  .cfg-row + .cfg-row { margin-top:.55rem; }
   .cfg-row small { display:block; color:var(--muted); font-size:.74rem; line-height:1.35; margin-top:.1rem; }
   p.tag { color:var(--muted); margin:.1rem 0 1.5rem; font-size:.92rem; }
   .uform { display:flex; gap:.5rem; max-width:420px; margin:1rem 0; }
@@ -3301,6 +3302,9 @@ function renderProfile(username, sum) {
         <label class="cfg-row"><input type="checkbox" id="cfg-expected">
           <span>Expected-rate markers
             <small>Per tier: 🟢 above / 🔴 below the expected count for your total rolls, ❌ when you have none.</small></span></label>
+        <label class="cfg-row"><input type="checkbox" id="cfg-expected-count">
+          <span>Expected counts
+            <small>Append the expected number of rolls per tier, e.g. &quot;(Expected: 3)&quot;.</small></span></label>
       </div>
     </div>
   </div>
@@ -3328,7 +3332,7 @@ function renderProfile(username, sum) {
 
   // Settings live in localStorage; unknown keys are ignored so old stores stay valid.
   var KEY = 'rngdle-profile-copy-settings';
-  var cfg = { expected: false };
+  var cfg = { expected: false, expectedCount: false };
   try {
     var stored = JSON.parse(localStorage.getItem(KEY));
     if (stored && typeof stored === 'object') for (var k in cfg) if (k in stored) cfg[k] = !!stored[k];
@@ -3336,18 +3340,22 @@ function renderProfile(username, sum) {
   function save() { try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch (e) {} }
 
   function marker(t) { return t.n === 0 ? '❌' : t.n >= t.exp ? '🟢' : '🔴'; }
+  function fmtExp(x) { var e = Math.round(x * 10) / 10; return e % 1 ? e.toFixed(1) : String(e); }
   function buildText() {
     var lines = d.tiers.map(function (t) {
       var l = t.emoji + ' ' + t.label + ' (' + t.pct + ') ' + t.n + ' · ' + t.share;
       if (cfg.expected) l += ' ' + marker(t);
+      if (cfg.expectedCount) l += ' (Expected: ' + fmtExp(t.exp) + ')';
       return l;
     });
     return lines.join('\\n') + '\\n\\n' + d.stats.join('\\n');
   }
 
   var gear = document.getElementById('cfg-btn'), pop = document.getElementById('cfg-pop');
-  var cb = document.getElementById('cfg-expected');
-  if (cb) { cb.checked = cfg.expected; cb.addEventListener('change', function () { cfg.expected = cb.checked; save(); }); }
+  [['cfg-expected', 'expected'], ['cfg-expected-count', 'expectedCount']].forEach(function (m) {
+    var cb = document.getElementById(m[0]);
+    if (cb) { cb.checked = cfg[m[1]]; cb.addEventListener('change', function () { cfg[m[1]] = cb.checked; save(); }); }
+  });
   if (gear && pop) {
     gear.addEventListener('click', function () {
       var open = pop.classList.toggle('open');
