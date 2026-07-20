@@ -3148,11 +3148,11 @@ function profileCopyData(sum) {
       exp: sum.totalRolls * TIER_EXPECTED_RATE[key],
     })),
     stats: [
-      `🧮 ${sum.totalRolls.toLocaleString()} Total Rolls`,
-      `🔥 ${sum.maxStreak.toLocaleString()} Day Max Streak`,
-      `🏅 ${sum.distinctBadges} Badges`,
-      `📈 ${sum.totalEP.toLocaleString()} (Total) EP`,
-      `🎲 Best Roll: ${b ? `${b.number} (${b.ep.toLocaleString()} EP) on ${fmtDateNumeric(b.at)}` : '—'}`,
+      ['totalRolls', `🧮 ${sum.totalRolls.toLocaleString()} Total Rolls`],
+      ['streak', `🔥 ${sum.maxStreak.toLocaleString()} Day Max Streak`],
+      ['badges', `🏅 ${sum.distinctBadges} Badges`],
+      ['ep', `📈 ${sum.totalEP.toLocaleString()} (Total) EP`],
+      ['bestRoll', `🎲 Best Roll: ${b ? `${b.number} (${b.ep.toLocaleString()} EP) on ${fmtDateNumeric(b.at)}` : '—'}`],
     ],
   };
 }
@@ -3196,10 +3196,16 @@ function profileHead(title) {
   .cfg-preview h4 { font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); margin:0 0 .45rem; }
   .cfg-preview pre { margin:0; font-family:var(--mono); font-size:.74rem; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere;
     background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:.7rem .8rem; }
-  .cfg-foot { display:flex; justify-content:flex-end; margin-top:1.1rem; }
+  .cfg-foot { display:flex; justify-content:space-between; align-items:center; gap:.6rem; margin-top:1.1rem; }
+  .cfg-reset { color:var(--muted); font-weight:500; }
+  .cfg-reset:hover { color:var(--text); }
   .cfg-row { display:flex; gap:.55rem; align-items:flex-start; font-size:.85rem; cursor:pointer; }
   .cfg-row input { margin:.2rem 0 0; accent-color:var(--accent); flex:0 0 auto; }
   .cfg-row + .cfg-row { margin-top:.55rem; }
+  .cfg-mini + .cfg-mini { margin-top:.3rem; }
+  .cfg-mini input { margin-top:.15rem; }
+  .cfg-sub { font-size:.66rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); margin:.95rem 0 .5rem; }
+  .cfg-sub:first-child { margin-top:0; }
   .cfg-row small { display:block; color:var(--muted); font-size:.74rem; line-height:1.35; margin-top:.1rem; }
   p.tag { color:var(--muted); margin:.1rem 0 1.5rem; font-size:.92rem; }
   .uform { display:flex; gap:.5rem; max-width:420px; margin:1rem 0; }
@@ -3314,6 +3320,7 @@ function renderProfile(username, sum) {
             <button type="button" id="cfg-close" class="cfg-x" aria-label="Close">✕</button></div>
           <div class="cfg-body">
             <div class="cfg-opts">
+              <h4 class="cfg-sub">Tier lines</h4>
               <label class="cfg-row"><input type="checkbox" id="cfg-pct">
                 <span>Percentile labels
                   <small>Show the &quot;Top X% / Bottom X%&quot; blurb next to each tier name.</small></span></label>
@@ -3326,10 +3333,17 @@ function renderProfile(username, sum) {
               <label class="cfg-row"><input type="checkbox" id="cfg-expected-count">
                 <span>Expected counts
                   <small>Append the expected number of rolls per tier, e.g. &quot;(Expected: 3)&quot;.</small></span></label>
+              <h4 class="cfg-sub">Stat lines</h4>
+              <label class="cfg-row cfg-mini"><input type="checkbox" id="cfg-stat-totalRolls"><span>🧮 Total Rolls</span></label>
+              <label class="cfg-row cfg-mini"><input type="checkbox" id="cfg-stat-streak"><span>🔥 Day Max Streak</span></label>
+              <label class="cfg-row cfg-mini"><input type="checkbox" id="cfg-stat-badges"><span>🏅 Badges</span></label>
+              <label class="cfg-row cfg-mini"><input type="checkbox" id="cfg-stat-ep"><span>📈 Total EP</span></label>
+              <label class="cfg-row cfg-mini"><input type="checkbox" id="cfg-stat-bestRoll"><span>🎲 Best Roll</span></label>
             </div>
             <div class="cfg-preview"><h4>Preview</h4><pre id="cfg-preview-text"></pre></div>
           </div>
           <div class="cfg-foot">
+            <button type="button" id="cfg-reset" class="copy-btn cfg-reset" title="Reset all settings to their defaults">↺ Reset to default</button>
             <button type="button" id="cfg-copy" class="copy-btn" title="Copy the summary as text">📋 Copy text</button>
           </div>
         </div>
@@ -3360,7 +3374,10 @@ function renderProfile(username, sum) {
 
   // Settings live in localStorage; unknown keys are ignored so old stores stay valid.
   var KEY = 'rngdle-profile-copy-settings';
-  var cfg = { pct: true, share: true, expected: false, expectedCount: false };
+  var DEFAULTS = { pct: true, share: true, expected: false, expectedCount: false,
+    totalRolls: true, streak: true, badges: true, ep: true, bestRoll: true };
+  var cfg = {};
+  for (var dk in DEFAULTS) cfg[dk] = DEFAULTS[dk];
   try {
     var stored = JSON.parse(localStorage.getItem(KEY));
     if (stored && typeof stored === 'object') for (var k in cfg) if (k in stored) cfg[k] = !!stored[k];
@@ -3376,15 +3393,29 @@ function renderProfile(username, sum) {
       if (cfg.expectedCount) l += ' (Expected: ' + fmtExp(t.exp) + ')';
       return l;
     });
-    return lines.join('\\n') + '\\n\\n' + d.stats.join('\\n');
+    var out = lines.join('\\n');
+    var statLines = d.stats.filter(function (s) { return cfg[s[0]]; }).map(function (s) { return s[1]; });
+    if (statLines.length) out += '\\n\\n' + statLines.join('\\n');
+    return out;
   }
 
   var gear = document.getElementById('cfg-btn'), modal = document.getElementById('cfg-modal');
   var preview = document.getElementById('cfg-preview-text');
   function updatePreview() { if (preview) preview.textContent = buildText(); }
-  [['cfg-pct', 'pct'], ['cfg-share', 'share'], ['cfg-expected', 'expected'], ['cfg-expected-count', 'expectedCount']].forEach(function (m) {
+  var MAP = [['cfg-pct', 'pct'], ['cfg-share', 'share'], ['cfg-expected', 'expected'], ['cfg-expected-count', 'expectedCount'],
+    ['cfg-stat-totalRolls', 'totalRolls'], ['cfg-stat-streak', 'streak'], ['cfg-stat-badges', 'badges'],
+    ['cfg-stat-ep', 'ep'], ['cfg-stat-bestRoll', 'bestRoll']];
+  function syncBoxes() { MAP.forEach(function (m) { var cb = document.getElementById(m[0]); if (cb) cb.checked = cfg[m[1]]; }); }
+  MAP.forEach(function (m) {
     var cb = document.getElementById(m[0]);
-    if (cb) { cb.checked = cfg[m[1]]; cb.addEventListener('change', function () { cfg[m[1]] = cb.checked; save(); updatePreview(); }); }
+    if (cb) cb.addEventListener('change', function () { cfg[m[1]] = cb.checked; save(); updatePreview(); });
+  });
+  syncBoxes();
+  var resetBtn = document.getElementById('cfg-reset');
+  if (resetBtn) resetBtn.addEventListener('click', function () {
+    for (var rk in DEFAULTS) cfg[rk] = DEFAULTS[rk];
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    syncBoxes(); updatePreview();
   });
   if (gear && modal) {
     function openModal() { updatePreview(); modal.hidden = false; }
