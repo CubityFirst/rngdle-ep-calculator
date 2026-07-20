@@ -3071,12 +3071,12 @@ ${cards}
 // over a real profile), so every stat below is derived locally at full fidelity.
 // ---------------------------------------------------------------------------
 
-// tier key -> [display label, percentile blurb], highest first.
+// tier key -> [display label, percentile blurb, square emoji], highest first.
 const PROFILE_TIERS = [
-  ['mythic', 'Mythic', 'Top 1%'], ['anomaly', 'Anomaly', 'Top 5%'],
-  ['epic', 'Epic', 'Top 10%'], ['rare', 'Rare', 'Top 25%'],
-  ['uncommon', 'Uncommon', 'Top 50%'], ['common', 'Common', 'Bottom 50%'],
-  ['trash', 'Trash', 'Bottom 1%'],
+  ['mythic', 'Mythic', 'Top 1%', '🟥'], ['anomaly', 'Anomaly', 'Top 5%', '🟧'],
+  ['epic', 'Epic', 'Top 10%', '🟪'], ['rare', 'Rare', 'Top 25%', '🟦'],
+  ['uncommon', 'Uncommon', 'Top 50%', '🟩'], ['common', 'Common', 'Bottom 50%', '⬜'],
+  ['trash', 'Trash', 'Bottom 1%', '🟫'],
 ];
 const VALID_USERNAME = /^[A-Za-z0-9_-]{1,40}$/;
 
@@ -3118,6 +3118,22 @@ function fmtDate(iso) {
   const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
   return `${d.getUTCDate()} ${mon} ${d.getUTCFullYear()}`;
 }
+// Numeric D-M-YYYY (matches rngdle's copy format, e.g. "4-7-2026").
+function fmtDateNumeric(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getUTCDate()}-${d.getUTCMonth() + 1}-${d.getUTCFullYear()}`;
+}
+// The shareable plain-text summary for the "Copy text" button.
+function profileCopyText(username, sum) {
+  const lines = PROFILE_TIERS.map(([key, label, pct, emoji]) => `${emoji} ${label} (${pct}) ${sum.tierCounts[key]}`);
+  const b = sum.best;
+  lines.push('');
+  lines.push(`🏅 ${sum.distinctBadges} Badges`);
+  lines.push(`📈 ${sum.totalEP.toLocaleString()} (Total) EP`);
+  lines.push(`🎲 Best Roll: ${b ? `${b.number} (${b.ep.toLocaleString()} EP) on ${fmtDateNumeric(b.at)}` : '—'}`);
+  return lines.join('\n');
+}
 
 // Shared <head> for the profile pages (mirrors the /badges dark theme tokens).
 function profileHead(title) {
@@ -3136,6 +3152,12 @@ function profileHead(title) {
   .nav a { text-decoration:none; } .nav a:hover { text-decoration:underline; }
   h1 { font-size:1.5rem; font-weight:600; letter-spacing:-.02em; margin:0 0 .2rem; }
   h1 .at { color:var(--faint); font-weight:400; }
+  .phead { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; }
+  .copy-btn { flex:0 0 auto; font-family:inherit; font-size:.85rem; font-weight:600; cursor:pointer; white-space:nowrap;
+    padding:.5rem .85rem; border-radius:8px; color:var(--text); background:var(--surface-2);
+    border:1px solid var(--border-2); transition:border-color .12s, background .12s, color .12s; }
+  .copy-btn:hover { border-color:var(--accent); }
+  .copy-btn.ok { color:#0a1a10; background:#43d17f; border-color:#43d17f; }
   p.tag { color:var(--muted); margin:.1rem 0 1.5rem; font-size:.92rem; }
   .uform { display:flex; gap:.5rem; max-width:420px; margin:1rem 0; }
   .uform input { flex:1; font-size:.95rem; padding:.55rem .7rem; border-radius:8px; border:1px solid var(--border-2);
@@ -3222,11 +3244,18 @@ function renderProfile(username, sum) {
     </tr>`;
   }).join('');
 
+  const copyText = profileCopyText(username, sum);
   return `<!doctype html><html lang="en"><head>${profileHead('RNGdle - ' + username)}</head><body><div class="wrap">
   <div class="nav"><a href="/u">&larr; profiles</a> &nbsp;·&nbsp; <a href="/">calculator</a> &nbsp;·&nbsp; <a href="/badges">badge index</a></div>
-  <h1><span class="at">@</span>${esc(username)}</h1>
-  <p class="tag">${sum.totalRolls.toLocaleString()} roll${sum.totalRolls === 1 ? '' : 's'} · scored with this tool
-    · <a href="https://www.rngdle.com/u/${encodeURIComponent(username)}" target="_blank" rel="noopener">on rngdle &rarr;</a></p>
+  <div class="phead">
+    <div>
+      <h1><span class="at">@</span>${esc(username)}</h1>
+      <p class="tag">${sum.totalRolls.toLocaleString()} roll${sum.totalRolls === 1 ? '' : 's'} · scored with this tool
+        · <a href="https://www.rngdle.com/u/${encodeURIComponent(username)}" target="_blank" rel="noopener">on rngdle &rarr;</a></p>
+    </div>
+    <button type="button" id="copy-btn" class="copy-btn" title="Copy the summary as text">📋 Copy text</button>
+  </div>
+  <script type="application/json" id="copy-data">${JSON.stringify(copyText).replace(/</g, '\\u003c')}</script>
   <div class="grid2">
     <div class="panel"><h2>Rarity spread</h2>${tierRows}</div>
     <div class="panel"><h2>Collection</h2>
@@ -3240,7 +3269,27 @@ function renderProfile(username, sum) {
     <thead><tr><th>Date</th><th>Number</th><th>Tier</th><th>EP</th><th>Badges</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-</div></body></html>`;
+</div>
+<script>
+(function () {
+  var btn = document.getElementById('copy-btn'), data = document.getElementById('copy-data');
+  if (!btn || !data) return;
+  var text = JSON.parse(data.textContent);
+  function done() { btn.textContent = '✓ Copied'; btn.classList.add('ok'); setTimeout(function () { btn.textContent = '📋 Copy text'; btn.classList.remove('ok'); }, 1400); }
+  btn.addEventListener('click', function () {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(fallback);
+    } else { fallback(); }
+    function fallback() {
+      var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta); done();
+    }
+  });
+})();
+</script>
+</body></html>`;
 }
 
 export { compute, BADGES, FAMILIES, engineModuleSource };
