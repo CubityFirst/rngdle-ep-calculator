@@ -2053,7 +2053,7 @@ function renderHTML(result) {
   <p class="tag">Click the box and type a number from 0 to 1,000,000 to see its EP and badges.</p>
   ${body}
 
-  <div class="an-bar"><button type="button" id="an-btn">Analyze all scores</button><a class="grid-btn" href="/grid">Explore all 1,000,000 numbers &rarr;</a><a class="grid-btn" href="/badges">Browse all ${BADGES.length} badges &rarr;</a></div>
+  <div class="an-bar"><button type="button" id="an-btn">Analyze all scores</button><a class="grid-btn" href="/grid">Explore all 1,000,000 numbers &rarr;</a><a class="grid-btn" href="/badges">Browse all ${BADGES.length} badges &rarr;</a><a class="grid-btn" href="/u">Player profiles &rarr;</a></div>
 
   <section id="analysis" hidden>
     <h2>EP distribution across 0-1,000,000</h2>
@@ -2964,7 +2964,7 @@ function renderBadgeIndex() {
 </style></head>
 <body>
 <div class="wrap">
-  <div class="nav"><a href="/">&larr; calculator</a> &nbsp;·&nbsp; <a href="/grid">number grid</a></div>
+  <div class="nav"><a href="/">&larr; calculator</a> &nbsp;·&nbsp; <a href="/grid">number grid</a> &nbsp;·&nbsp; <a href="/u">player profiles</a></div>
   <h1>Badge Index</h1>
   <p class="tag">All ${BADGES.length} badges — how to earn each one, its rarity, EP score, and how many numbers hit it.
     Example numbers open the calculator; <b>map</b> highlights every earning number on the grid.</p>
@@ -3063,6 +3063,186 @@ ${cards}
 </body></html>`;
 }
 
+// ---------------------------------------------------------------------------
+// User profiles: pull a player's rolls from rngdle.com's public API and compute
+// their collection summary ourselves. rngdle doesn't export this summary; its
+// /api/users/<name>/rolls endpoint is offset-paginated ({rolls, hasMore}). Our
+// compute() reproduces the stored per-roll score exactly (verified 0 mismatches
+// over a real profile), so every stat below is derived locally at full fidelity.
+// ---------------------------------------------------------------------------
+
+// tier key -> [display label, percentile blurb], highest first.
+const PROFILE_TIERS = [
+  ['mythic', 'Mythic', 'Top 1%'], ['anomaly', 'Anomaly', 'Top 5%'],
+  ['epic', 'Epic', 'Top 10%'], ['rare', 'Rare', 'Top 25%'],
+  ['uncommon', 'Uncommon', 'Top 50%'], ['common', 'Common', 'Bottom 50%'],
+  ['trash', 'Trash', 'Bottom 1%'],
+];
+const VALID_USERNAME = /^[A-Za-z0-9_-]{1,40}$/;
+
+async function fetchUserRolls(username) {
+  const rolls = [];
+  for (let offset = 0; offset < 20000; offset += 100) { // hard safety cap
+    const api = `https://www.rngdle.com/api/users/${encodeURIComponent(username)}/rolls?limit=100&offset=${offset}`;
+    const res = await fetch(api, { headers: { 'user-agent': 'rngdle-ep-calculator (github.com/CubityFirst/rngdle-ep-calculator)' } });
+    if (!res.ok) { if (offset === 0) { const e = new Error('not_found'); e.status = res.status; throw e; } break; }
+    const data = await res.json();
+    const page = data.rolls || [];
+    rolls.push(...page);
+    if (!data.hasMore || page.length === 0) break;
+  }
+  return rolls;
+}
+
+// Derive the collection summary from a rolls list using our own scorer.
+function profileSummary(rolls) {
+  const tierCounts = { mythic: 0, anomaly: 0, epic: 0, rare: 0, uncommon: 0, common: 0, trash: 0 };
+  const badgeSet = new Set();
+  let totalEP = 0, best = null;
+  const scored = rolls.map(roll => {
+    const ep = roll.totalScore ?? 0;
+    const tier = cardTier(ep);
+    tierCounts[tier]++;
+    totalEP += ep;
+    if (!best || ep > best.ep) best = { number: roll.number, ep, at: roll.rolledAt };
+    // Distinct badges ever earned (compute keeps superseded badges in the list too).
+    for (const b of compute(roll.number).badges) badgeSet.add(b.id);
+    return { number: roll.number, ep, tier, badgeCount: roll.badgeCount, at: roll.rolledAt };
+  });
+  return { totalRolls: rolls.length, tierCounts, distinctBadges: badgeSet.size, totalEP, best, scored };
+}
+
+function fmtDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+  return `${d.getUTCDate()} ${mon} ${d.getUTCFullYear()}`;
+}
+
+// Shared <head> for the profile pages (mirrors the /badges dark theme tokens).
+function profileHead(title) {
+  return `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>${esc(title)}</title>
+<style>
+  :root { color-scheme:dark; --bg:#08090c; --surface:#131419; --surface-2:#181a20; --border:#24262d;
+    --border-2:#30333c; --text:#e7e8ea; --muted:#8b8e97; --faint:#595c65; --accent:#5b93d6;
+    --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace; }
+  * { box-sizing:border-box; }
+  body { font-family:var(--font); background:var(--bg); color:var(--text); margin:0; padding:2.2rem 1.25rem 4rem;
+    line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:920px; margin:0 auto; }
+  a { color:var(--accent); }
+  .nav { font-size:.85rem; color:var(--muted); margin-bottom:.9rem; }
+  .nav a { text-decoration:none; } .nav a:hover { text-decoration:underline; }
+  h1 { font-size:1.5rem; font-weight:600; letter-spacing:-.02em; margin:0 0 .2rem; }
+  h1 .at { color:var(--faint); font-weight:400; }
+  p.tag { color:var(--muted); margin:.1rem 0 1.5rem; font-size:.92rem; }
+  .uform { display:flex; gap:.5rem; max-width:420px; margin:1rem 0; }
+  .uform input { flex:1; font-size:.95rem; padding:.55rem .7rem; border-radius:8px; border:1px solid var(--border-2);
+    background:var(--surface); color:var(--text); font-family:inherit; }
+  .uform input:focus { outline:none; border-color:var(--accent); }
+  .uform button { font-family:inherit; font-weight:600; font-size:.9rem; padding:.55rem 1rem; border-radius:8px; cursor:pointer;
+    color:#0a1220; background:var(--accent); border:1px solid var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1.1fr 1fr; gap:1rem; margin-bottom:1.3rem; }
+  @media (max-width:680px) { .grid2 { grid-template-columns:1fr; } }
+  .panel { border:1px solid var(--border); border-radius:12px; background:var(--surface); padding:1rem 1.1rem; }
+  .panel h2 { font-size:.78rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin:0 0 .7rem; }
+  .tier-row { display:flex; align-items:center; gap:.6rem; padding:.28rem 0; font-size:.92rem; }
+  .tier-dot { width:.62rem; height:.62rem; border-radius:50%; flex:0 0 auto; background:var(--tc); box-shadow:0 0 8px var(--tc); }
+  .tier-name { font-weight:600; } .tier-pct { color:var(--faint); font-size:.8rem; }
+  .tier-n { margin-left:auto; font-family:var(--mono); font-variant-numeric:tabular-nums; font-weight:600; }
+  .tier-row.zero { opacity:.4; }
+  .stat { display:flex; align-items:baseline; justify-content:space-between; padding:.4rem 0; border-bottom:1px solid var(--border); }
+  .stat:last-child { border-bottom:none; }
+  .stat .k { color:var(--muted); font-size:.9rem; } .stat .v { font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; }
+  .stat .v small { color:var(--faint); font-weight:400; }
+  .rolls { border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .rolls table { width:100%; border-collapse:collapse; font-size:.88rem; }
+  .rolls th { text-align:left; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--faint);
+    padding:.55rem .8rem; background:var(--surface-2); font-weight:600; }
+  .rolls td { padding:.5rem .8rem; border-top:1px solid var(--border); font-variant-numeric:tabular-nums; }
+  .rolls tr:hover td { background:var(--surface-2); }
+  .rolls .num a { font-family:var(--mono); text-decoration:none; }
+  .rolls .num a:hover { text-decoration:underline; }
+  .rp { display:inline-block; font-size:.66rem; font-weight:700; letter-spacing:.05em; padding:.1rem .45rem; border-radius:999px;
+    color:var(--tc); border:1px solid var(--tc); background:color-mix(in srgb, var(--tc) 14%, transparent); }
+  .ep { font-family:var(--mono); } .muted { color:var(--muted); }
+  .err { border:1px solid #7c2d3a; background:color-mix(in srgb,#e5484d 8%,var(--surface)); border-radius:12px; padding:1rem 1.1rem; color:#ffb3b8; }
+</style>`;
+}
+
+// The username search form (shown at /u with no name, and atop each profile).
+function profileForm(value) {
+  return `<form class="uform" action="/u" method="get" onsubmit="var v=this.u.value.trim();if(v){location.href='/u/'+encodeURIComponent(v);}return false;">
+    <input name="u" placeholder="rngdle username, e.g. cubityfirst" value="${esc(value || '')}" autocomplete="off" spellcheck="false">
+    <button type="submit">View</button>
+  </form>`;
+}
+
+function renderProfileForm(prefill) {
+  return `<!doctype html><html lang="en"><head>${profileHead('RNGdle - Player Profile')}</head><body><div class="wrap">
+  <div class="nav"><a href="/">&larr; calculator</a> &nbsp;·&nbsp; <a href="/badges">badge index</a></div>
+  <h1>Player Profile</h1>
+  <p class="tag">Enter a rngdle.com username to compute their collection summary — tier spread, badges collected,
+    total EP and best roll — scored locally with this tool.</p>
+  ${profileForm(prefill)}
+</div></body></html>`;
+}
+
+function renderProfileError(username, status) {
+  const msg = status === 404 ? `No rngdle profile found for <b>${esc(username)}</b>.` : `Couldn't load <b>${esc(username)}</b> from rngdle (status ${status}).`;
+  return `<!doctype html><html lang="en"><head>${profileHead('RNGdle - Profile not found')}</head><body><div class="wrap">
+  <div class="nav"><a href="/u">&larr; profiles</a> &nbsp;·&nbsp; <a href="/">calculator</a></div>
+  <h1>Player Profile</h1>
+  ${profileForm(username)}
+  <div class="err">${msg}</div>
+</div></body></html>`;
+}
+
+function renderProfile(username, sum) {
+  const tierRows = PROFILE_TIERS.map(([key, label, pct]) => {
+    const n = sum.tierCounts[key];
+    const acc = TIER_PALETTE[key].accent;
+    return `<div class="tier-row${n === 0 ? ' zero' : ''}" style="--tc:${acc}">
+      <span class="tier-dot"></span><span class="tier-name">${label}</span>
+      <span class="tier-pct">${pct}</span><span class="tier-n">${n}</span></div>`;
+  }).join('');
+
+  const b = sum.best;
+  const bestHTML = b ? `<a href="/?n=${b.number}">${b.number.toLocaleString()}</a> <small>(${b.ep.toLocaleString()} EP)</small> · ${fmtDate(b.at)}` : '—';
+
+  const rows = sum.scored.slice().sort((a, c) => new Date(c.at) - new Date(a.at)).map(r => {
+    const acc = TIER_PALETTE[r.tier].accent;
+    return `<tr>
+      <td class="muted">${fmtDate(r.at)}</td>
+      <td class="num"><a href="/?n=${r.number}">${r.number.toLocaleString()}</a></td>
+      <td><span class="rp" style="--tc:${acc}">${TIER_PALETTE[r.tier].label}</span></td>
+      <td class="ep">${r.ep.toLocaleString()}</td>
+      <td class="muted">${r.badgeCount ?? ''}</td>
+    </tr>`;
+  }).join('');
+
+  return `<!doctype html><html lang="en"><head>${profileHead('RNGdle - ' + username)}</head><body><div class="wrap">
+  <div class="nav"><a href="/u">&larr; profiles</a> &nbsp;·&nbsp; <a href="/">calculator</a> &nbsp;·&nbsp; <a href="/badges">badge index</a></div>
+  <h1><span class="at">@</span>${esc(username)}</h1>
+  <p class="tag">${sum.totalRolls.toLocaleString()} roll${sum.totalRolls === 1 ? '' : 's'} · scored with this tool
+    · <a href="https://www.rngdle.com/u/${encodeURIComponent(username)}" target="_blank" rel="noopener">on rngdle &rarr;</a></p>
+  <div class="grid2">
+    <div class="panel"><h2>Rarity spread</h2>${tierRows}</div>
+    <div class="panel"><h2>Collection</h2>
+      <div class="stat"><span class="k">Total Rolls</span><span class="v">${sum.totalRolls.toLocaleString()}</span></div>
+      <div class="stat"><span class="k">Badges collected</span><span class="v">${sum.distinctBadges} <small>/ ${BADGES.length}</small></span></div>
+      <div class="stat"><span class="k">Total EP</span><span class="v">${sum.totalEP.toLocaleString()}</span></div>
+      <div class="stat"><span class="k">Best roll</span><span class="v" style="font-weight:500">${bestHTML}</span></div>
+    </div>
+  </div>
+  <div class="rolls"><table>
+    <thead><tr><th>Date</th><th>Number</th><th>Tier</th><th>EP</th><th>Badges</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>
+</div></body></html>`;
+}
+
 export { compute, BADGES, FAMILIES, engineModuleSource };
 
 export default {
@@ -3118,6 +3298,43 @@ export default {
       return new Response(renderBadgeIndex(), {
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
+    }
+
+    // Player profiles: /u (search form), /u/<name> (computed summary), and a JSON
+    // endpoint /api/profile?u=<name>. Rolls come from rngdle's public API; every
+    // stat is computed locally with compute(). Cached at the edge to be polite.
+    if (url.pathname === '/api/profile') {
+      const u = (url.searchParams.get('u') || '').trim();
+      if (!VALID_USERNAME.test(u)) {
+        return new Response(JSON.stringify({ error: 'Provide u as a valid username.' }),
+          { status: 400, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } });
+      }
+      try {
+        const sum = profileSummary(await fetchUserRolls(u));
+        return new Response(JSON.stringify({ username: u, ...sum }), {
+          headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=300' },
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message === 'not_found' ? 'user not found' : 'fetch failed', status: e.status || 502 }),
+          { status: e.status === 404 ? 404 : 502, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } });
+      }
+    }
+    if (url.pathname === '/u' || url.pathname === '/u/') {
+      const u = (url.searchParams.get('u') || '').trim();
+      if (u && VALID_USERNAME.test(u)) return Response.redirect(`${url.origin}/u/${encodeURIComponent(u)}`, 302);
+      return new Response(renderProfileForm(u), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    }
+    if (url.pathname.startsWith('/u/')) {
+      const u = decodeURIComponent(url.pathname.slice(3)).trim();
+      if (!VALID_USERNAME.test(u)) return new Response(renderProfileForm(u), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+      try {
+        const sum = profileSummary(await fetchUserRolls(u));
+        return new Response(renderProfile(u, sum), {
+          headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=300' },
+        });
+      } catch (e) {
+        return new Response(renderProfileError(u, e.status || 502), { status: e.status === 404 ? 404 : 502, headers: { 'content-type': 'text/html; charset=utf-8' } });
+      }
     }
 
     if (url.pathname === '/' || url.pathname === '') {
