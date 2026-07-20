@@ -1732,19 +1732,64 @@ function fallbackCells(label, s) {
   return [];
 }
 
-// Digit-group boundaries for the "split into N numbers" badges (Metronome / Crescendo
-// / Equation). The split-finding helpers already return part start-indices, so we turn
-// them into [start,end) ranges; the beta card slides these parts apart on hover to
-// reveal the constant-difference / constant-ratio / equation split. Returns null for
-// badges that aren't group-based.
+// Digit-group boundaries for the badges whose number splits into constituent numbers
+// (Metronome / Crescendo / Equation, the whole Consecutive Numbers family, and Echo).
+// The split-finding helpers already return the part start-indices, so we turn them into
+// [start,end) ranges; the beta card slides these parts apart on hover to reveal the
+// split. Returns null for badges that aren't group-based (or when no split is found).
 function badgeGroups(id, s) {
-  let r = null;
-  if (id === 'ARITHMETIC') r = findArithmeticSplit(s);
-  else if (id === 'GEOMETRIC') r = findGeometricSplit(s);
-  else if (id === 'EQUATION') r = findEquation(s);
-  if (!r) return null;
-  const sp = r.splits;
-  return sp.map((start, i) => [start, i + 1 < sp.length ? sp[i + 1] : s.length]);
+  // Contiguous parts from a list of split start-indices, ending at `end`.
+  const rng = (splits, end) => splits.map((st, i) => [st, i + 1 < splits.length ? splits[i + 1] : end]);
+  let r;
+  switch (id) {
+    case 'ARITHMETIC': r = findArithmeticSplit(s); return r ? rng(r.splits, s.length) : null;
+    case 'GEOMETRIC':  r = findGeometricSplit(s);  return r ? rng(r.splits, s.length) : null;
+    case 'EQUATION':   r = findEquation(s);        return r ? rng(r.splits, s.length) : null;
+    // Consecutive Numbers (whole number splits into the parts) — Exact + Scrambled.
+    case 'CONSEC_PAIR_EXACT':      r = pPairExact(s);  return r ? rng(r.splits, s.length) : null;
+    case 'CONSEC_TRIPLE_EXACT':
+    case 'CONSEC_TRIPLE_SCRAMBLED': r = pTripleExact(s); return r ? rng(r.splits, s.length) : null;
+    case 'CONSEC_QUAD_EXACT':
+    case 'CONSEC_QUAD_SCRAMBLED':   r = pQuadExact(s);   return r ? rng(r.splits, s.length) : null;
+    // Consecutive Numbers found inside a longer number — split only that sub-run.
+    case 'CONSEC_TRIPLE_CONTAINS': r = pNAdjacent(s, 3); return r ? rng(r.splits, r.end) : null;
+    case 'CONSEC_QUAD_CONTAINS':   r = pNAdjacent(s, 4); return r ? rng(r.splits, r.end) : null;
+    case 'CONSEC_PAIR_ADJACENT': {
+      r = pPairAdjacent(s); if (!r) return null;
+      const b = r.splits[1]; // second part starts here; its length = the printed second value
+      return [[r.splits[0], b], [b, b + String(r.numbers[1]).length]];
+    }
+    case 'CONSEC_PAIR_NEARBY': {
+      r = pPairNearby(s); if (!r) return null;
+      return [[r.a.start, r.a.end], [r.b.start, r.b.end]]; // two non-adjacent runs
+    }
+    case 'ECHO':
+      return s.length >= 2 && s.length % 2 === 0 && s.slice(0, s.length / 2) === s.slice(s.length / 2)
+        ? [[0, s.length / 2], [s.length / 2, s.length]] : null;
+    default: return null;
+  }
+}
+
+// A short "why it scores" breakdown for the arithmetic-property badges, shown as a
+// caption on hover (these have no meaningful digit-position highlight on their own).
+function badgeNote(id, r) {
+  const d = [...String(r.number)].map(ch => ch.charCodeAt(0) - 48);
+  const sum = d.reduce((a, b) => a + b, 0);
+  switch (id) {
+    case 'HARSHAD': return `${d.join(' + ')} = ${sum},  ${r.number} ÷ ${sum} = ${r.number / sum}`;
+    case 'SPY':     return `${d.join(' + ')} = ${sum} = ${d.join(' × ')}`;
+    case 'BLACKJACK': return `${d.join(' + ')} = 21`;
+    case 'HEAVY':   return `digit sum ${sum} — over 45`;
+    case 'FEATHER': return `digit sum ${sum} — under 15`;
+    case 'EVEN_SPACING': { const g = d[1] - d[0]; return `${d.join(', ')}  →  ${g >= 0 ? '+' : ''}${g} each step`; }
+    case 'EVEN_SPACING_ABS': return `${d.join(', ')}  →  ±${Math.abs(d[1] - d[0])} each step`;
+    case 'BALANCED': {
+      const h = d.length / 2, a = d.slice(0, h), b = d.slice(h);
+      const sa = a.reduce((x, y) => x + y, 0), sb = b.reduce((x, y) => x + y, 0);
+      return `${a.join('+')} = ${sa}   ∥   ${b.join('+')} = ${sb}`;
+    }
+    default: return null;
+  }
 }
 
 // Beta renderer: rngdle.com-style card. The number lives in an editable card you
@@ -1784,13 +1829,17 @@ function betaOutHTML(result) {
       cells = groups.flatMap(([a, z]) => { const r = []; for (let i = a; i < z; i++) r.push(i); return r; });
       groupsAttr = ` data-groups="${groups.map(g => `${g[0]}-${g[1]}`).join('|')}"`;
     }
+    // Property badges (Harshad / Spy / Blackjack / …) carry a formula breakdown that
+    // shows in the caption line on hover, since digit highlighting can't explain them.
+    const note = badgeNote(b.id, result);
+    const noteAttr = note ? ` data-note="${esc(note)}"` : '';
     // Pill border + digit-highlight colours come from rngdle.com's RARITY_PALETTE,
     // keyed by this badge's own rarity tier (so anomaly reads orange, epic purple, etc.).
     const pal2 = TIER_PALETTE[b.rarity.toLowerCase()] || TIER_PALETTE.common;
     const req = b.desc || 'No description.';
     const tip = esc(`${req}\n${b.rarity} · ${fmtProb(b.prob)} earn this · +${b.ep.toLocaleString()} EP`);
     return `<button type="button" class="bn-b" style="--bc:${pal2.accent}"
-       data-cells="${cells.join(',')}" data-hl="${pal2.hl}" data-tip="${tip}"${groupsAttr}
+       data-cells="${cells.join(',')}" data-hl="${pal2.hl}" data-tip="${tip}"${groupsAttr}${noteAttr}
        aria-label="${esc(b.label)}. ${tip}">${b.emoji} <span>${esc(b.label)}</span> <em>+${b.ep.toLocaleString()}</em></button>`;
   }).join('');
 
@@ -1809,6 +1858,7 @@ function betaOutHTML(result) {
       <span class="bn-ep">${result.totalEP.toLocaleString()} EP</span>
     </div>
     <div class="bn-sub">${result.count} badge${result.count === 1 ? '' : 's'} · hover a badge to see where it scores</div>
+    <div class="bn-note" id="bn-note" aria-live="polite"></div>
     <div class="bn-badges">${pills}</div>`;
 }
 
@@ -1968,6 +2018,11 @@ function renderHTML(result) {
   .bn-d.hl { background:var(--hc,#fff); color:#08090c; box-shadow:0 0 14px var(--hc,#fff); transform:translateY(-2px); }
   /* Group badges slide their split-parts apart: a gap opens before each part after the first. */
   .bn-d.grp-gap { margin-left:.85em; }
+  /* Formula caption for property badges (Harshad / Spy / …), shown on hover. */
+  .bn-note { min-height:1.2em; margin-top:.35rem; text-align:center; font-family:var(--mono);
+    font-size:.82rem; color:var(--accent); font-variant-numeric:tabular-nums; letter-spacing:.01em;
+    opacity:0; transition:opacity .12s; }
+  .bn-note.show { opacity:1; }
   .bn[data-tier="empty"] .bn-card { border-style:dashed; }
   .bn[data-tier="empty"] .bn-pill { display:none; }
   .bn-meta { display:flex; align-items:center; justify-content:center; gap:.55rem; margin-top:1rem; flex-wrap:wrap; }
@@ -2066,15 +2121,21 @@ function renderHTML(result) {
     });
   }
   function clearSlide() { digits.forEach(function (d) { d.classList.remove('grp-gap'); }); }
+  // Formula caption (Harshad / Spy / …): show the badge's breakdown on hover.
+  function showNote(note) { var el = document.getElementById('bn-note'); if (!el) return; el.textContent = note || ''; el.classList.toggle('show', !!note); }
+  function clearNote() { var el = document.getElementById('bn-note'); if (el) { el.textContent = ''; el.classList.remove('show'); } }
   function wireBadges() {
     [].slice.call(outEl.querySelectorAll('.bn-b')).forEach(function (b) {
       var cells = (b.dataset.cells || '').split(',').filter(Boolean).map(Number);
       var color = (b.dataset.hl || '').trim() || '#fff';
       var groups = b.dataset.groups || '';
-      b.addEventListener('mouseenter', function () { highlight(cells, color); slideGroups(groups); });
-      b.addEventListener('mouseleave', function () { clearHl(); clearSlide(); });
-      b.addEventListener('focus', function () { highlight(cells, color); slideGroups(groups); });
-      b.addEventListener('blur', function () { clearHl(); clearSlide(); });
+      var note = b.dataset.note || '';
+      function on() { highlight(cells, color); slideGroups(groups); showNote(note); }
+      function off() { clearHl(); clearSlide(); clearNote(); }
+      b.addEventListener('mouseenter', on);
+      b.addEventListener('mouseleave', off);
+      b.addEventListener('focus', on);
+      b.addEventListener('blur', off);
     });
   }
   refreshDigits(); wireBadges();
