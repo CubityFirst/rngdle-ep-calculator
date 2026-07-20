@@ -1777,6 +1777,11 @@ function badgeGroups(id, s) {
     case 'ECHO':
       return s.length >= 2 && s.length % 2 === 0 && s.slice(0, s.length / 2) === s.slice(s.length / 2)
         ? [[0, s.length / 2], [s.length / 2, s.length]] : null;
+    // Even Spacing: every digit is its own part, so the card spreads the whole
+    // number evenly apart — mirroring the constant step the badge is about.
+    case 'EVEN_SPACING':
+    case 'EVEN_SPACING_ABS':
+      return [...s].map((_, i) => [i, i + 1]);
     default: return null;
   }
 }
