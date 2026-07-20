@@ -1712,24 +1712,35 @@ function parseN(raw) {
   return n;
 }
 
-// A few rngdle.com badges score on a number but their getContributors returns
-// nothing (the highlight logic is narrower than the check): "Pair" only resolves
-// a digit appearing exactly twice (so 12131's triple-1 highlights nothing), and
-// "Snake Eyes" only resolves adjacent "11" (so 101's split 1s highlight nothing).
-// Fall back to the digits that actually justify the badge so something lights up.
-function fallbackCells(label, s) {
-  const l = label.toLowerCase();
-  if (l === 'snake eyes') {
-    const idx = []; for (let i = 0; i < s.length; i++) if (s[i] === '1') idx.push(i); return idx;
-  }
-  if (l === 'pair') {
+// Some rngdle.com badges score on a number but their getContributors returns
+// nothing — either the highlight logic is narrower than the check ("Pair" only
+// resolves a digit appearing exactly twice, "Snake Eyes" only adjacent "11"), or
+// the badge shipped without any (most of the 2026-07-16 batch: Five of a Kind,
+// Framed Quad, the exact-number badges). Fall back to the digits that actually
+// justify the badge so something lights up on hover.
+function fallbackCells(id, s) {
+  // All positions of the first digit (in string order) appearing >= min times.
+  const firstWith = min => {
     const counts = {}; for (const ch of s) counts[ch] = (counts[ch] || 0) + 1;
-    for (let i = 0; i < s.length; i++) if (counts[s[i]] >= 2) {
+    for (let i = 0; i < s.length; i++) if (counts[s[i]] >= min) {
       const occ = []; for (let j = 0; j < s.length; j++) if (s[j] === s[i]) occ.push(j);
-      return occ.slice(0, 2); // show "a pair": the first two matching digits
+      return occ;
     }
+    return [];
+  };
+  switch (id) {
+    case 'SNAKE_EYES': { const idx = []; for (let i = 0; i < s.length; i++) if (s[i] === '1') idx.push(i); return idx; }
+    case 'PAIR': return firstWith(2).slice(0, 2); // show "a pair": the first two matching digits
+    case 'FIVE_OF_A_KIND': return firstWith(5);
+    // Framed runs: light the of-a-kind middle (the bookends are "anything different").
+    case 'FRAMED_TRIPLE': return [1, 2, 3];
+    case 'FRAMED_QUAD': return [1, 2, 3, 4];
+    // Whole-number identity badges: the entire number is the badge.
+    case 'ERROR_EXACT': case 'FULL_DAY': case 'FOOTBALL_17776': case 'INFERNAL':
+    case 'ALWAYS': case 'ULTIMEME_EXACT': case 'TAU': case 'GOLDEN_RATIO':
+      return [...s].map((_, i) => i);
+    default: return [];
   }
-  return [];
 }
 
 // Digit-group boundaries for the badges whose number splits into constituent numbers
@@ -1787,6 +1798,13 @@ function scramblePerm(id, s) {
 
 // A short "why it scores" breakdown for the arithmetic-property badges, shown as a
 // caption on hover (these have no meaningful digit-position highlight on their own).
+const SUP = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+const sup = k => [...String(k)].map(c => SUP[+c]).join('');
+function powNote(base, n) {
+  let k = 0, v = 1;
+  while (v < n) { v *= base; k++; }
+  return v === n ? `${base}${sup(k)} = ${n.toLocaleString()}` : null;
+}
 function badgeNote(id, r) {
   const d = [...String(r.number)].map(ch => ch.charCodeAt(0) - 48);
   const sum = d.reduce((a, b) => a + b, 0);
@@ -1798,6 +1816,9 @@ function badgeNote(id, r) {
     case 'FEATHER': return `digit sum ${sum} — under 15`;
     case 'EVEN_SPACING': { const g = d[1] - d[0]; return `${d.join(', ')}  →  ${g >= 0 ? '+' : ''}${g} each step`; }
     case 'EVEN_SPACING_ABS': return `${d.join(', ')}  →  ±${Math.abs(d[1] - d[0])} each step`;
+    case 'OUROBOROS': { for (let k = 1; k <= 7; k++) if (Math.pow(k, k) === r.number) return `${k}${sup(k)} = ${r.number.toLocaleString()}`; return null; }
+    case 'POWER_OF_FIVE': return powNote(5, r.number);
+    case 'POWER_OF_SEVEN': return powNote(7, r.number);
     case 'BALANCED': {
       const h = d.length / 2, a = d.slice(0, h), b = d.slice(h);
       const sa = a.reduce((x, y) => x + y, 0), sb = b.reduce((x, y) => x + y, 0);
@@ -1835,7 +1856,7 @@ function betaOutHTML(result) {
   const scoring = result.badges.filter(b => b.ep > 0).slice().sort((a, b) => b.ep - a.ep);
   const pills = scoring.map(b => {
     let cells = contrib[b.label.toLowerCase()] || [];
-    if (!cells.length) cells = fallbackCells(b.label, s);
+    if (!cells.length) cells = fallbackCells(b.id, s);
     // Group badges (Metronome / Crescendo / Equation) light up every digit in the split
     // and carry their part boundaries so the card can slide the parts apart on hover.
     const groups = badgeGroups(b.id, s);
