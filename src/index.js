@@ -3137,7 +3137,7 @@ function fmtDateNumeric(iso) {
 // The shareable plain-text summary for the "Copy text" button.
 function profileCopyText(username, sum) {
   const share = n => sum.totalRolls ? `${(n / sum.totalRolls * 100).toFixed(1)}%` : '0%';
-  const lines = PROFILE_TIERS.map(([key, label, pct, emoji]) => `${emoji} ${label} (${pct}) ${sum.tierCounts[key]} — ${share(sum.tierCounts[key])}`);
+  const lines = PROFILE_TIERS.map(([key, label, pct, emoji]) => `${emoji} ${label} (${pct}) ${sum.tierCounts[key]} · ${share(sum.tierCounts[key])}`);
   const b = sum.best;
   lines.push('');
   lines.push(`🧮 ${sum.totalRolls.toLocaleString()} Total Rolls`);
