@@ -3185,13 +3185,13 @@ function profileHead(title) {
   .cfg-modal { position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:1rem; }
   .cfg-modal[hidden] { display:none; }
   .cfg-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.62); }
-  .cfg-dialog { position:relative; width:min(700px,100%); max-height:88vh; overflow:auto; background:var(--surface);
+  .cfg-dialog { position:relative; width:min(880px,100%); max-height:88vh; overflow:auto; background:var(--surface);
     border:1px solid var(--border-2); border-radius:14px; padding:1rem 1.15rem 1.15rem; box-shadow:0 18px 48px rgba(0,0,0,.6); }
   .cfg-head { display:flex; align-items:center; justify-content:space-between; margin:0 0 .8rem; }
   .cfg-head h3 { font-size:.72rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0; }
   .cfg-x { background:none; border:none; color:var(--muted); font-size:.95rem; cursor:pointer; padding:.2rem .35rem; border-radius:6px; }
   .cfg-x:hover { color:var(--text); background:var(--surface-2); }
-  .cfg-body { display:grid; grid-template-columns:1fr 1fr; gap:1.1rem; align-items:start; }
+  .cfg-body { display:grid; grid-template-columns:1fr 1.25fr; gap:1.2rem; align-items:start; }
   @media (max-width:640px) { .cfg-body { grid-template-columns:1fr; } }
   .cfg-preview h4 { font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); margin:0 0 .45rem; }
   .cfg-preview pre { margin:0; font-family:var(--mono); font-size:.74rem; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere;
