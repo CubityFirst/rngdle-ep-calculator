@@ -3118,11 +3118,12 @@ function fmtDate(iso) {
   const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
   return `${d.getUTCDate()} ${mon} ${d.getUTCFullYear()}`;
 }
-// Numeric D-M-YYYY (matches rngdle's copy format, e.g. "4-7-2026").
+// ISO-style YYYY-MM-DD for the copy-text summary (e.g. "2026-07-04").
 function fmtDateNumeric(iso) {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
-  return `${d.getUTCDate()}-${d.getUTCMonth() + 1}-${d.getUTCFullYear()}`;
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
 }
 // The shareable plain-text summary for the "Copy text" button.
 function profileCopyText(username, sum) {
