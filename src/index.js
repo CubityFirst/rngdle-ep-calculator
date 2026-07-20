@@ -1770,17 +1770,16 @@ function badgeGroups(id, s) {
   }
 }
 
-// Mini Scramble: the first substring (same scan order as the badge test — shortest,
-// then leftmost) whose digits sort into a consecutive run. Returns "from:to" slot
-// moves so the beta card can animate the digits unscrambling into order on hover.
-function miniScramblePerm(s) {
-  for (let L = 3; L <= s.length; L++) for (let i = 0; i + L <= s.length; i++) {
-    const sub = s.slice(i, i + L);
-    if (isScrambledSeq(sub, 3)) {
-      const sorted = [...sub].map((ch, j) => [Number(ch), i + j]).sort((a, b) => a[0] - b[0]);
-      return sorted.map((e, k) => `${e[1]}:${i + k}`).join(',');
-    }
-  }
+// Scramble / Mini Scramble: "from:to" slot moves that sort the scrambled digits into
+// their consecutive run, so the beta card can animate the unscramble on hover.
+// Scramble covers the whole number; Mini Scramble covers the first substring (same
+// scan order as the badge test — shortest, then leftmost) that sorts consecutive.
+function scramblePerm(id, s) {
+  const permOf = (str, off) => [...str].map((ch, j) => [Number(ch), off + j])
+    .sort((a, b) => a[0] - b[0]).map((e, k) => `${e[1]}:${off + k}`).join(',');
+  if (id === 'SCRAMBLE') return permOf(s, 0);
+  for (let L = 3; L <= s.length; L++) for (let i = 0; i + L <= s.length; i++)
+    if (isScrambledSeq(s.slice(i, i + L), 3)) return permOf(s.slice(i, i + L), i);
   return null;
 }
 
@@ -1843,11 +1842,11 @@ function betaOutHTML(result) {
       cells = groups.flatMap(([a, z]) => { const r = []; for (let i = a; i < z; i++) r.push(i); return r; });
       groupsAttr = ` data-groups="${groups.map(g => `${g[0]}-${g[1]}`).join('|')}"`;
     }
-    // Mini Scramble carries the digit moves that sort its hidden run into order, so
-    // the card can animate the run unscrambling on hover (and highlight exactly it).
+    // Scramble / Mini Scramble carry the digit moves that sort their run into order,
+    // so the card can animate the unscramble on hover (and highlight exactly the run).
     let permAttr = '';
-    if (b.id === 'MINI_SCRAMBLE') {
-      const perm = miniScramblePerm(s);
+    if (b.id === 'MINI_SCRAMBLE' || b.id === 'SCRAMBLE') {
+      const perm = scramblePerm(b.id, s);
       if (perm) {
         permAttr = ` data-perm="${perm}"`;
         cells = perm.split(',').map(m => Number(m.split(':')[0])).sort((x, y) => x - y);
