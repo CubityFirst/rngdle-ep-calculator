@@ -3196,6 +3196,7 @@ function profileHead(title) {
   .cfg-preview h4 { font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); margin:0 0 .45rem; }
   .cfg-preview pre { margin:0; font-family:var(--mono); font-size:.74rem; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere;
     background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:.7rem .8rem; }
+  .cfg-foot { display:flex; justify-content:flex-end; margin-top:1.1rem; }
   .cfg-row { display:flex; gap:.55rem; align-items:flex-start; font-size:.85rem; cursor:pointer; }
   .cfg-row input { margin:.2rem 0 0; accent-color:var(--accent); flex:0 0 auto; }
   .cfg-row + .cfg-row { margin-top:.55rem; }
@@ -3325,6 +3326,9 @@ function renderProfile(username, sum) {
             </div>
             <div class="cfg-preview"><h4>Preview</h4><pre id="cfg-preview-text"></pre></div>
           </div>
+          <div class="cfg-foot">
+            <button type="button" id="cfg-copy" class="copy-btn" title="Copy the summary as text">📋 Copy text</button>
+          </div>
         </div>
       </div>
     </div>
@@ -3388,19 +3392,24 @@ function renderProfile(username, sum) {
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
   }
 
-  function done() { btn.textContent = '✓ Copied'; btn.classList.add('ok'); setTimeout(function () { btn.textContent = '📋 Copy text'; btn.classList.remove('ok'); }, 1400); }
-  btn.addEventListener('click', function () {
-    var text = buildText();
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done).catch(fallback);
-    } else { fallback(); }
-    function fallback() {
-      var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.focus(); ta.select();
-      try { document.execCommand('copy'); } catch (e) {}
-      document.body.removeChild(ta); done();
-    }
-  });
+  function bindCopy(b) {
+    if (!b) return;
+    b.addEventListener('click', function () {
+      var text = buildText();
+      function done() { b.textContent = '✓ Copied'; b.classList.add('ok'); setTimeout(function () { b.textContent = '📋 Copy text'; b.classList.remove('ok'); }, 1400); }
+      function fallback() {
+        var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta); done();
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(fallback);
+      } else { fallback(); }
+    });
+  }
+  bindCopy(btn);
+  bindCopy(document.getElementById('cfg-copy'));
 })();
 </script>
 </body></html>`;
