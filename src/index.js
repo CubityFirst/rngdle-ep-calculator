@@ -3109,7 +3109,16 @@ function profileSummary(rolls) {
     for (const b of compute(roll.number).badges) badgeSet.add(b.id);
     return { number: roll.number, ep, tier, badgeCount: roll.badgeCount, at: roll.rolledAt };
   });
-  return { totalRolls: rolls.length, tierCounts, distinctBadges: badgeSet.size, totalEP, best, scored };
+  // Max streak: longest run of consecutive UTC days with at least one roll.
+  const days = [...new Set(rolls.map(r => (r.rolledAt || '').slice(0, 10)).filter(Boolean))].sort();
+  let maxStreak = 0, streak = 0, prevDay = null;
+  for (const d of days) {
+    const t = Date.parse(d + 'T00:00:00Z');
+    streak = prevDay !== null && t - prevDay === 86400000 ? streak + 1 : 1;
+    prevDay = t;
+    if (streak > maxStreak) maxStreak = streak;
+  }
+  return { totalRolls: rolls.length, tierCounts, distinctBadges: badgeSet.size, totalEP, best, maxStreak, scored };
 }
 
 function fmtDate(iso) {
@@ -3127,9 +3136,12 @@ function fmtDateNumeric(iso) {
 }
 // The shareable plain-text summary for the "Copy text" button.
 function profileCopyText(username, sum) {
-  const lines = PROFILE_TIERS.map(([key, label, pct, emoji]) => `${emoji} ${label} (${pct}) ${sum.tierCounts[key]}`);
+  const share = n => sum.totalRolls ? `${(n / sum.totalRolls * 100).toFixed(1)}%` : '0%';
+  const lines = PROFILE_TIERS.map(([key, label, pct, emoji]) => `${emoji} ${label} (${pct}) ${sum.tierCounts[key]} — ${share(sum.tierCounts[key])}`);
   const b = sum.best;
   lines.push('');
+  lines.push(`🧮 ${sum.totalRolls.toLocaleString()} Total Rolls`);
+  lines.push(`🔥 ${sum.maxStreak.toLocaleString()} Day Max Streak`);
   lines.push(`🏅 ${sum.distinctBadges} Badges`);
   lines.push(`📈 ${sum.totalEP.toLocaleString()} (Total) EP`);
   lines.push(`🎲 Best Roll: ${b ? `${b.number} (${b.ep.toLocaleString()} EP) on ${fmtDateNumeric(b.at)}` : '—'}`);
@@ -3174,7 +3186,10 @@ function profileHead(title) {
   .tier-dot { width:.62rem; height:.62rem; border-radius:50%; flex:0 0 auto; background:var(--tc); box-shadow:0 0 8px var(--tc); }
   .tier-name { font-weight:600; } .tier-pct { color:var(--faint); font-size:.8rem; }
   .tier-n { margin-left:auto; font-family:var(--mono); font-variant-numeric:tabular-nums; font-weight:600; }
+  .tier-share { flex:0 0 3.2rem; text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums;
+    font-size:.78rem; color:var(--muted); }
   .tier-row.zero { opacity:.4; }
+  .tier-total { margin-top:.35rem; padding-top:.5rem; padding-left:1.22rem; border-top:1px solid var(--border); }
   .stat { display:flex; align-items:baseline; justify-content:space-between; padding:.4rem 0; border-bottom:1px solid var(--border); }
   .stat:last-child { border-bottom:none; }
   .stat .k { color:var(--muted); font-size:.9rem; } .stat .v { font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; }
@@ -3223,13 +3238,18 @@ function renderProfileError(username, status) {
 }
 
 function renderProfile(username, sum) {
+  const share = n => sum.totalRolls ? `${(n / sum.totalRolls * 100).toFixed(1)}%` : '0%';
   const tierRows = PROFILE_TIERS.map(([key, label, pct]) => {
     const n = sum.tierCounts[key];
     const acc = TIER_PALETTE[key].accent;
     return `<div class="tier-row${n === 0 ? ' zero' : ''}" style="--tc:${acc}">
       <span class="tier-dot"></span><span class="tier-name">${label}</span>
-      <span class="tier-pct">${pct}</span><span class="tier-n">${n}</span></div>`;
-  }).join('');
+      <span class="tier-pct">${pct}</span><span class="tier-n">${n}</span>
+      <span class="tier-share">${share(n)}</span></div>`;
+  }).join('') + `<div class="tier-row tier-total">
+      <span class="tier-name">Total</span>
+      <span class="tier-n">${sum.totalRolls.toLocaleString()}</span>
+      <span class="tier-share">100%</span></div>`;
 
   const b = sum.best;
   const bestHTML = b ? `<a href="/?n=${b.number}">${b.number.toLocaleString()}</a> <small>(${b.ep.toLocaleString()} EP)</small> · ${fmtDate(b.at)}` : '—';
@@ -3263,6 +3283,7 @@ function renderProfile(username, sum) {
       <div class="stat"><span class="k">Total Rolls</span><span class="v">${sum.totalRolls.toLocaleString()}</span></div>
       <div class="stat"><span class="k">Badges collected</span><span class="v">${sum.distinctBadges} <small>/ ${BADGES.length}</small></span></div>
       <div class="stat"><span class="k">Total EP</span><span class="v">${sum.totalEP.toLocaleString()}</span></div>
+      <div class="stat"><span class="k">Max streak</span><span class="v">${sum.maxStreak.toLocaleString()} <small>day${sum.maxStreak === 1 ? '' : 's'}</small></span></div>
       <div class="stat"><span class="k">Best roll</span><span class="v" style="font-weight:500">${bestHTML}</span></div>
     </div>
   </div>
