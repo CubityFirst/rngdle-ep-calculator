@@ -1770,6 +1770,20 @@ function badgeGroups(id, s) {
   }
 }
 
+// Mini Scramble: the first substring (same scan order as the badge test — shortest,
+// then leftmost) whose digits sort into a consecutive run. Returns "from:to" slot
+// moves so the beta card can animate the digits unscrambling into order on hover.
+function miniScramblePerm(s) {
+  for (let L = 3; L <= s.length; L++) for (let i = 0; i + L <= s.length; i++) {
+    const sub = s.slice(i, i + L);
+    if (isScrambledSeq(sub, 3)) {
+      const sorted = [...sub].map((ch, j) => [Number(ch), i + j]).sort((a, b) => a[0] - b[0]);
+      return sorted.map((e, k) => `${e[1]}:${i + k}`).join(',');
+    }
+  }
+  return null;
+}
+
 // A short "why it scores" breakdown for the arithmetic-property badges, shown as a
 // caption on hover (these have no meaningful digit-position highlight on their own).
 function badgeNote(id, r) {
@@ -1829,6 +1843,16 @@ function betaOutHTML(result) {
       cells = groups.flatMap(([a, z]) => { const r = []; for (let i = a; i < z; i++) r.push(i); return r; });
       groupsAttr = ` data-groups="${groups.map(g => `${g[0]}-${g[1]}`).join('|')}"`;
     }
+    // Mini Scramble carries the digit moves that sort its hidden run into order, so
+    // the card can animate the run unscrambling on hover (and highlight exactly it).
+    let permAttr = '';
+    if (b.id === 'MINI_SCRAMBLE') {
+      const perm = miniScramblePerm(s);
+      if (perm) {
+        permAttr = ` data-perm="${perm}"`;
+        cells = perm.split(',').map(m => Number(m.split(':')[0])).sort((x, y) => x - y);
+      }
+    }
     // Property badges (Harshad / Spy / Blackjack / …) carry a formula breakdown that
     // shows in the caption line on hover, since digit highlighting can't explain them.
     const note = badgeNote(b.id, result);
@@ -1839,7 +1863,7 @@ function betaOutHTML(result) {
     const req = b.desc || 'No description.';
     const tip = esc(`${req}\n${b.rarity} · ${fmtProb(b.prob)} earn this · +${b.ep.toLocaleString()} EP`);
     return `<button type="button" class="bn-b" style="--bc:${pal2.accent}"
-       data-cells="${cells.join(',')}" data-hl="${pal2.hl}" data-tip="${tip}"${groupsAttr}${noteAttr}
+       data-cells="${cells.join(',')}" data-hl="${pal2.hl}" data-tip="${tip}"${groupsAttr}${permAttr}${noteAttr}
        aria-label="${esc(b.label)}. ${tip}">${b.emoji} <span>${esc(b.label)}</span> <em>+${b.ep.toLocaleString()}</em></button>`;
   }).join('');
 
@@ -2018,6 +2042,9 @@ function renderHTML(result) {
   .bn-d.hl { background:var(--hc,#fff); color:#08090c; box-shadow:0 0 14px var(--hc,#fff); transform:translateY(-2px); }
   /* Group badges slide their split-parts apart: a gap opens before each part after the first. */
   .bn-d.grp-gap { margin-left:.85em; }
+  /* Mini Scramble: digits of the hidden run glide into sorted order (springy, slower than hl). */
+  .bn-d.prm { position:relative; z-index:1;
+    transition:background .12s, color .12s, box-shadow .12s, transform .38s cubic-bezier(.34,1.4,.5,1); }
   /* Formula caption for property badges (Harshad / Spy / …), shown on hover. */
   .bn-note { min-height:1.2em; margin-top:.35rem; text-align:center; font-family:var(--mono);
     font-size:.82rem; color:var(--accent); font-variant-numeric:tabular-nums; letter-spacing:.01em;
@@ -2121,6 +2148,19 @@ function renderHTML(result) {
     });
   }
   function clearSlide() { digits.forEach(function (d) { d.classList.remove('grp-gap'); }); }
+  // Mini Scramble: glide each digit of the run to its sorted slot ("from:to" pairs,
+  // measured in px so it works at any font size). translateY(-2px) keeps the lift
+  // the .hl class would otherwise apply (inline transform overrides it).
+  function permute(spec) {
+    if (!spec) return;
+    spec.split(',').forEach(function (m) {
+      var p = m.split(':'), el = digits[Number(p[0])], tgt = digits[Number(p[1])];
+      if (!el || !tgt) return;
+      el.classList.add('prm');
+      el.style.transform = 'translateX(' + (tgt.offsetLeft - el.offsetLeft) + 'px) translateY(-2px)';
+    });
+  }
+  function clearPerm() { digits.forEach(function (d) { d.classList.remove('prm'); d.style.transform = ''; }); }
   // Formula caption (Harshad / Spy / …): show the badge's breakdown on hover.
   function showNote(note) { var el = document.getElementById('bn-note'); if (!el) return; el.textContent = note || ''; el.classList.toggle('show', !!note); }
   function clearNote() { var el = document.getElementById('bn-note'); if (el) { el.textContent = ''; el.classList.remove('show'); } }
@@ -2129,9 +2169,10 @@ function renderHTML(result) {
       var cells = (b.dataset.cells || '').split(',').filter(Boolean).map(Number);
       var color = (b.dataset.hl || '').trim() || '#fff';
       var groups = b.dataset.groups || '';
+      var perm = b.dataset.perm || '';
       var note = b.dataset.note || '';
-      function on() { highlight(cells, color); slideGroups(groups); showNote(note); }
-      function off() { clearHl(); clearSlide(); clearNote(); }
+      function on() { highlight(cells, color); slideGroups(groups); permute(perm); showNote(note); }
+      function off() { clearHl(); clearSlide(); clearPerm(); clearNote(); }
       b.addEventListener('mouseenter', on);
       b.addEventListener('mouseleave', off);
       b.addEventListener('focus', on);
