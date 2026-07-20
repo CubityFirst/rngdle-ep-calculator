@@ -3134,18 +3134,27 @@ function fmtDateNumeric(iso) {
   const p = n => String(n).padStart(2, '0');
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
 }
-// The shareable plain-text summary for the "Copy text" button.
-function profileCopyText(username, sum) {
+// Expected share of rolls landing in each card tier, from the percentile thresholds
+// (trash<1, common<50, uncommon<75, rare<90, epic<95, anomaly<99, else mythic).
+const TIER_EXPECTED_RATE = { mythic: .01, anomaly: .04, epic: .05, rare: .15, uncommon: .25, common: .49, trash: .01 };
+// Structured data for the "Copy text" button. The text itself is assembled client-side
+// so localStorage settings (gear popover) can change what appears without a reload.
+function profileCopyData(sum) {
   const share = n => sum.totalRolls ? `${(n / sum.totalRolls * 100).toFixed(1)}%` : '0%';
-  const lines = PROFILE_TIERS.map(([key, label, pct, emoji]) => `${emoji} ${label} (${pct}) ${sum.tierCounts[key]} · ${share(sum.tierCounts[key])}`);
   const b = sum.best;
-  lines.push('');
-  lines.push(`🧮 ${sum.totalRolls.toLocaleString()} Total Rolls`);
-  lines.push(`🔥 ${sum.maxStreak.toLocaleString()} Day Max Streak`);
-  lines.push(`🏅 ${sum.distinctBadges} Badges`);
-  lines.push(`📈 ${sum.totalEP.toLocaleString()} (Total) EP`);
-  lines.push(`🎲 Best Roll: ${b ? `${b.number} (${b.ep.toLocaleString()} EP) on ${fmtDateNumeric(b.at)}` : '—'}`);
-  return lines.join('\n');
+  return {
+    tiers: PROFILE_TIERS.map(([key, label, pct, emoji]) => ({
+      emoji, label, pct, n: sum.tierCounts[key], share: share(sum.tierCounts[key]),
+      exp: sum.totalRolls * TIER_EXPECTED_RATE[key],
+    })),
+    stats: [
+      `🧮 ${sum.totalRolls.toLocaleString()} Total Rolls`,
+      `🔥 ${sum.maxStreak.toLocaleString()} Day Max Streak`,
+      `🏅 ${sum.distinctBadges} Badges`,
+      `📈 ${sum.totalEP.toLocaleString()} (Total) EP`,
+      `🎲 Best Roll: ${b ? `${b.number} (${b.ep.toLocaleString()} EP) on ${fmtDateNumeric(b.at)}` : '—'}`,
+    ],
+  };
 }
 
 // Shared <head> for the profile pages (mirrors the /badges dark theme tokens).
@@ -3171,6 +3180,16 @@ function profileHead(title) {
     border:1px solid var(--border-2); transition:border-color .12s, background .12s, color .12s; }
   .copy-btn:hover { border-color:var(--accent); }
   .copy-btn.ok { color:#0a1a10; background:#43d17f; border-color:#43d17f; }
+  .pbtns { position:relative; display:flex; gap:.4rem; flex:0 0 auto; align-items:flex-start; }
+  .cfg-btn { padding:.5rem .6rem; }
+  .cfg-pop { display:none; position:absolute; right:0; top:calc(100% + .45rem); z-index:20; width:250px;
+    background:var(--surface-2); border:1px solid var(--border-2); border-radius:10px; padding:.75rem .85rem;
+    box-shadow:0 10px 28px rgba(0,0,0,.55); }
+  .cfg-pop.open { display:block; }
+  .cfg-pop h3 { font-size:.7rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 .55rem; }
+  .cfg-row { display:flex; gap:.55rem; align-items:flex-start; font-size:.85rem; cursor:pointer; }
+  .cfg-row input { margin:.2rem 0 0; accent-color:var(--accent); flex:0 0 auto; }
+  .cfg-row small { display:block; color:var(--muted); font-size:.74rem; line-height:1.35; margin-top:.1rem; }
   p.tag { color:var(--muted); margin:.1rem 0 1.5rem; font-size:.92rem; }
   .uform { display:flex; gap:.5rem; max-width:420px; margin:1rem 0; }
   .uform input { flex:1; font-size:.95rem; padding:.55rem .7rem; border-radius:8px; border:1px solid var(--border-2);
@@ -3265,7 +3284,7 @@ function renderProfile(username, sum) {
     </tr>`;
   }).join('');
 
-  const copyText = profileCopyText(username, sum);
+  const copyData = profileCopyData(sum);
   return `<!doctype html><html lang="en"><head>${profileHead('RNGdle - ' + username)}</head><body><div class="wrap">
   <div class="nav"><a href="/u">&larr; profiles</a> &nbsp;·&nbsp; <a href="/">calculator</a> &nbsp;·&nbsp; <a href="/badges">badge index</a></div>
   <div class="phead">
@@ -3274,9 +3293,18 @@ function renderProfile(username, sum) {
       <p class="tag">${sum.totalRolls.toLocaleString()} roll${sum.totalRolls === 1 ? '' : 's'} · scored with this tool
         · <a href="https://www.rngdle.com/u/${encodeURIComponent(username)}" target="_blank" rel="noopener">on rngdle &rarr;</a></p>
     </div>
-    <button type="button" id="copy-btn" class="copy-btn" title="Copy the summary as text">📋 Copy text</button>
+    <div class="pbtns">
+      <button type="button" id="copy-btn" class="copy-btn" title="Copy the summary as text">📋 Copy text</button>
+      <button type="button" id="cfg-btn" class="copy-btn cfg-btn" title="Copy text settings" aria-haspopup="true" aria-expanded="false">⚙️</button>
+      <div id="cfg-pop" class="cfg-pop">
+        <h3>Copy text settings</h3>
+        <label class="cfg-row"><input type="checkbox" id="cfg-expected">
+          <span>Expected-rate markers
+            <small>Per tier: 🟢 above / 🔴 below the expected count for your total rolls, ❌ when you have none.</small></span></label>
+      </div>
+    </div>
   </div>
-  <script type="application/json" id="copy-data">${JSON.stringify(copyText).replace(/</g, '\\u003c')}</script>
+  <script type="application/json" id="copy-data">${JSON.stringify(copyData).replace(/</g, '\\u003c')}</script>
   <div class="grid2">
     <div class="panel"><h2>Rarity spread</h2>${tierRows}</div>
     <div class="panel"><h2>Collection</h2>
@@ -3296,9 +3324,45 @@ function renderProfile(username, sum) {
 (function () {
   var btn = document.getElementById('copy-btn'), data = document.getElementById('copy-data');
   if (!btn || !data) return;
-  var text = JSON.parse(data.textContent);
+  var d = JSON.parse(data.textContent);
+
+  // Settings live in localStorage; unknown keys are ignored so old stores stay valid.
+  var KEY = 'rngdle-profile-copy-settings';
+  var cfg = { expected: false };
+  try {
+    var stored = JSON.parse(localStorage.getItem(KEY));
+    if (stored && typeof stored === 'object') for (var k in cfg) if (k in stored) cfg[k] = !!stored[k];
+  } catch (e) {}
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch (e) {} }
+
+  function marker(t) { return t.n === 0 ? '❌' : t.n >= t.exp ? '🟢' : '🔴'; }
+  function buildText() {
+    var lines = d.tiers.map(function (t) {
+      var l = t.emoji + ' ' + t.label + ' (' + t.pct + ') ' + t.n + ' · ' + t.share;
+      if (cfg.expected) l += ' ' + marker(t);
+      return l;
+    });
+    return lines.join('\\n') + '\\n\\n' + d.stats.join('\\n');
+  }
+
+  var gear = document.getElementById('cfg-btn'), pop = document.getElementById('cfg-pop');
+  var cb = document.getElementById('cfg-expected');
+  if (cb) { cb.checked = cfg.expected; cb.addEventListener('change', function () { cfg.expected = cb.checked; save(); }); }
+  if (gear && pop) {
+    gear.addEventListener('click', function () {
+      var open = pop.classList.toggle('open');
+      gear.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    document.addEventListener('click', function (e) {
+      if (pop.classList.contains('open') && !pop.contains(e.target) && !gear.contains(e.target)) {
+        pop.classList.remove('open'); gear.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
   function done() { btn.textContent = '✓ Copied'; btn.classList.add('ok'); setTimeout(function () { btn.textContent = '📋 Copy text'; btn.classList.remove('ok'); }, 1400); }
   btn.addEventListener('click', function () {
+    var text = buildText();
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(done).catch(fallback);
     } else { fallback(); }
