@@ -13,6 +13,11 @@ files with the change:
 `npm run deploy` runs the generator automatically via `predeploy`, but the resulting
 diff still has to be committed. Never hand-edit `*.gen.js` files.
 
+## Commit messages
+
+Conventional Commits (`type(scope): summary`) — types, scopes, and examples are in
+CONTRIBUTING.md. Pre-2026-07-21 history uses an older style; don't rewrite it.
+
 ## Other invariants
 
 - Badge rules are at full parity with rngdle.com; don't "simplify" a `test` or the
