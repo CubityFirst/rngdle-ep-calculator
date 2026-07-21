@@ -2081,11 +2081,14 @@ function renderHTML(result) {
     box-shadow:0 14px 34px -18px var(--glow);
     transition:border-color .25s, box-shadow .25s; }
   .bn-card:focus-within { border-color:var(--accent); box-shadow:0 14px 34px -16px var(--glow), 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
-  /* Transparent input overlays the card: clicking anywhere focuses it, typing drives the digits. */
+  /* Transparent input overlays the card: clicking anywhere focuses it, typing drives the digits.
+     Its (invisible) text must keep the same per-glyph pitch as .bn-number, or text selection
+     drifts off the drawn digits: .18em = .02em letter-spacing + 2x.05em .bn-d padding + .06em gap. */
   .bn-input { position:absolute; inset:0; width:100%; height:100%; margin:0; padding:0; border:0; border-radius:var(--r-card);
     background:transparent; color:transparent; caret-color:var(--accent); text-align:center; cursor:text;
-    font-family:var(--mono); font-weight:700; letter-spacing:.08em; font-size:clamp(2.4rem, 11vw, 4rem); }
+    font-family:var(--mono); font-weight:700; letter-spacing:.18em; font-size:clamp(2.4rem, 11vw, 4rem); }
   .bn-input:focus { outline:none; }
+  .bn-number[data-len="1"]+.bn-input, .bn-number[data-len="2"]+.bn-input, .bn-number[data-len="3"]+.bn-input { font-size:4rem; }
   .bn-number { display:flex; gap:.06em; font-family:var(--mono); font-weight:700; letter-spacing:.02em;
     font-size:clamp(2.4rem, 11vw, 4rem); line-height:1; pointer-events:none; }
   .bn-number[data-len="1"], .bn-number[data-len="2"], .bn-number[data-len="3"] { font-size:4rem; }
