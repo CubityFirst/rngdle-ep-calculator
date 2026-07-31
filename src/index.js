@@ -3183,6 +3183,39 @@ function chainsWorker() {
     return best;
   }
 
+  // The local graph around one number, for the network view: breadth-first over the
+  // UNDIRECTED graph, so it picks up both what `focus` scores its way toward and the
+  // numbers that score their way into it. Capped, because a readable node-link diagram
+  // tops out in the low hundreds - the whole million only reads as the radial plate.
+  function neighbourhood(focus, cap) {
+    const { nextOf, depth, attractor, cycIdx, inOff, inSrc } = LAY;
+    const idx = new Map([[focus, 0]]);
+    const order = [focus];
+    for (let head = 0; head < order.length && order.length < cap; head++) {
+      const n = order[head];
+      const nbrs = [];
+      if (nextOf[n] >= 0) nbrs.push(nextOf[n]);
+      for (let i = inOff[n]; i < inOff[n + 1] && nbrs.length < 24; i++) nbrs.push(inSrc[i]);
+      for (const q of nbrs) {
+        if (idx.has(q) || order.length >= cap) continue;
+        idx.set(q, order.length); order.push(q);
+      }
+    }
+    const edges = [];
+    for (const n of order) {
+      const p = nextOf[n];
+      if (p >= 0 && idx.has(p)) edges.push(idx.get(n), idx.get(p));
+    }
+    const nodes = order.map(n => ({
+      n, depth: depth[n],
+      slot: cycIdx.has(attractor[n]) ? cycIdx.get(attractor[n]) : -1,
+      loop: depth[n] === 0 && nextOf[n] >= 0,
+      sink: nextOf[n] < 0,
+      inDeg: inOff[n + 1] - inOff[n],
+    }));
+    return { focus, nodes, edges, truncated: order.length >= cap };
+  }
+
   self.onmessage = async (ev) => {
     const m = ev.data;
     if (m.cmd === 'view' && LAY) {
@@ -3193,6 +3226,10 @@ function chainsWorker() {
     if (m.cmd === 'pick' && LAY) {
       const n = pick(m.x, m.y, m.radius);
       self.postMessage({ type: 'pick', id: m.id, n, next: n >= 0 ? LAY.nextOf[n] : -1, depth: n >= 0 ? LAY.depth[n] : -1 });
+      return;
+    }
+    if (m.cmd === 'neigh' && LAY) {
+      self.postMessage({ type: 'neigh', id: m.id, ...neighbourhood(m.focus, m.cap || 220) });
       return;
     }
     if (m.cmd !== 'build') return;
@@ -3302,8 +3339,17 @@ function chainsWorker() {
         (grid[k] || (grid[k] = [])).push(n);
       }
 
+      // Reverse adjacency (CSR), so the network view can walk in-edges: which numbers
+      // score their way INTO a given number. Out-edges are just nextOf.
+      const inOff = new Int32Array(N + 2);
+      for (let n = 0; n < N; n++) if (nextOf[n] >= 0) inOff[nextOf[n] + 1]++;
+      for (let i = 1; i <= N; i++) inOff[i] += inOff[i - 1];
+      const inSrc = new Int32Array(N - sinkCount);
+      const cursor = inOff.slice(0, N + 1);
+      for (let n = 0; n < N; n++) if (nextOf[n] >= 0) inSrc[cursor[nextOf[n]]++] = n;
+
       const S = m.size || 1500;
-      LAY = { X, Y, nextOf, depth, attractor, cycIdx, roots, bounds,
+      LAY = { X, Y, nextOf, depth, attractor, cycIdx, roots, bounds, inOff, inSrc,
               grid, gw, gh, gx0: bounds.x0, gy0: bounds.y0, cell,
               baseScale: S / (half * 2) };
 
@@ -3456,14 +3502,59 @@ function chainsClient(WORKER_SRC) {
       view = { x0: pt.x - w0 * fx, y0: pt.y - w0 * fy, x1: pt.x + w0 * (1 - fx), y1: pt.y + w0 * (1 - fy) };
       paint(); requestView(); updateZoom();
     }
-    cv.addEventListener('wheel', e => { e.preventDefault(); zoomAt(toLayout(e), e.deltaY > 0 ? 1.25 : 0.8); }, { passive: false });
+    cv.addEventListener('wheel', e => {
+      e.preventDefault();
+      if (mode === 'network') {
+        if (!net) return;
+        net.autofit = false;
+        net.scale = Math.max(0.25, Math.min(6, net.scale * (e.deltaY > 0 ? 0.85 : 1.18)));
+        drawNet();
+        return;
+      }
+      zoomAt(toLayout(e), e.deltaY > 0 ? 1.25 : 0.8);
+    }, { passive: false });
 
     let drag = null, hoverN = -1;
     cv.addEventListener('pointerdown', e => {
-      drag = { ...toLayout(e), moved: false };
       cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing';
+      if (mode === 'network') {
+        if (!net) return;
+        const pt = netAt(e), hit = netPick(pt);
+        drag = { sx: e.clientX, sy: e.clientY, ox: net.ox, oy: net.oy, node: hit, moved: false };
+        if (hit) { net.held = hit; net.alpha = Math.max(net.alpha, 0.35); tick(); }
+        return;
+      }
+      drag = { ...toLayout(e), moved: false };
     });
     cv.addEventListener('pointermove', e => {
+      if (mode === 'network') {
+        if (!net) return;
+        if (drag) {
+          if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 2) drag.moved = true;
+          net.autofit = false;
+          if (drag.node) {                                  // drag the node itself
+            const pt = netAt(e);
+            drag.node.x = pt.x; drag.node.y = pt.y;
+            drawNet();
+          } else {                                          // pan the whole graph
+            net.ox = drag.ox + (e.clientX - drag.sx);
+            net.oy = drag.oy + (e.clientY - drag.sy);
+            drawNet();
+          }
+          return;
+        }
+        const hit = netPick(netAt(e));
+        if (hit !== netHover) {
+          netHover = hit;
+          cv.style.cursor = hit ? 'pointer' : 'grab';
+          $('plate-readout').innerHTML = hit
+            ? '<strong>' + fmt(hit.n) + '</strong> · ' + (hit.sink ? 'ends here' : hit.loop ? 'in a loop' : hit.depth + ' step' + (hit.depth === 1 ? '' : 's') + ' from settling') +
+              ' · ' + fmt(hit.inDeg) + ' number' + (hit.inDeg === 1 ? '' : 's') + ' score it'
+            : '';
+          drawNet();
+        }
+        return;
+      }
       if (drag) {
         const p = toLayout(e);
         const dx = drag.x - p.x, dy = drag.y - p.y;
@@ -3476,15 +3567,20 @@ function chainsClient(WORKER_SRC) {
       const id = ++hoverId;
       w.postMessage({ cmd: 'pick', id, x: p.x, y: p.y, radius: (view.x1 - view.x0) / cv.clientWidth * 6 });
     });
-    const endDrag = e => {
+    const endDrag = () => {
       if (!drag) return;
-      const wasClick = !drag.moved;
+      const wasClick = !drag.moved, node = drag.node;
       drag = null; cv.style.cursor = 'grab';
+      if (mode === 'network') {
+        if (net) { net.held = null; }
+        if (wasClick && node) { trace(node.n, true); loadNet(node.n); }   // click re-centres
+        return;
+      }
       if (wasClick && hoverN >= 0) { trace(hoverN, true); $('trace-form').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
     };
     cv.addEventListener('pointerup', endDrag);
     cv.addEventListener('pointercancel', endDrag);
-    cv.addEventListener('pointerleave', () => { $('plate-readout').textContent = ''; hoverN = -1; });
+    cv.addEventListener('pointerleave', () => { $('plate-readout').textContent = ''; hoverN = -1; netHover = null; if (mode === 'network') drawNet(); });
 
     function updateZoom() {
       const z = (B.x1 - B.x0) / (view.x1 - view.x0);
@@ -3492,11 +3588,180 @@ function chainsClient(WORKER_SRC) {
       $('plate-reset').hidden = z < 1.05;
     }
     $('plate-reset').addEventListener('click', () => {
+      if (mode === 'network') { if (net) { net.autofit = true; net.alpha = 1; tick(); } return; }
       view = { x0: B.x0, y0: B.y0, x1: B.x1, y1: B.y1 };
       paint(); requestView(); updateZoom();
     });
-    addEventListener('resize', paint);
+    addEventListener('resize', () => (mode === 'network' ? drawNet() : paint()));
     updateZoom();
+
+    // --- network view: the local graph around one number ---------------------
+    // Small circular nodes and links, laid out by a plain force simulation. Only the
+    // neighbourhood is drawn - a node-link diagram stops being readable in the low
+    // hundreds, which is exactly what the radial plate is for.
+    let mode = 'radial', net = null, netReq = 0, raf = 0;
+    const NET_HUE = ['#FF5A5C', '#FFB040', '#6EE18C', '#78AAFF', '#E17DFF'];
+    const SINK_HUE = '#7891AF';
+    const netColour = d => d.sink ? SINK_HUE : (d.slot >= 0 ? NET_HUE[d.slot % NET_HUE.length] : SINK_HUE);
+
+    viewHandlers.neigh = msg => {
+      if (msg.id !== netReq) return;
+      $('plate-wrap').classList.remove('busy');
+      const R = 260;
+      net = {
+        focus: msg.focus, truncated: msg.truncated,
+        nodes: msg.nodes.map((d, i) => {
+          const a = i / msg.nodes.length * Math.PI * 2;
+          // Size by how many numbers score INTO it; the focus keeps a floor so it stays
+          // findable even when nothing scores it (a chain's starting number, typically).
+          const r = Math.min(9, 3.2 + Math.sqrt(d.inDeg) * 1.1);
+          return { ...d, x: Math.cos(a) * R * (i ? 1 : 0), y: Math.sin(a) * R * (i ? 1 : 0), vx: 0, vy: 0,
+                   r: d.n === msg.focus ? Math.max(5.5, r) : r };
+        }),
+        edges: [], scale: 1, ox: 0, oy: 0, alpha: 1, held: null, autofit: true,
+      };
+      for (let i = 0; i < msg.edges.length; i += 2) net.edges.push([msg.edges[i], msg.edges[i + 1]]);
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) { for (let i = 0; i < 260; i++) step(); net.alpha = 0; }
+      tick();
+    };
+
+    function step() {
+      const ns = net.nodes, L = ns.length;
+      for (let i = 0; i < L; i++) {                       // repulsion
+        const a = ns[i];
+        for (let j = i + 1; j < L; j++) {
+          const bn = ns[j];
+          let dx = a.x - bn.x, dy = a.y - bn.y;
+          let d2 = dx * dx + dy * dy;
+          if (d2 < 1e-4) { dx = (i % 7) - 3; dy = (j % 7) - 3; d2 = dx * dx + dy * dy + 1e-4; }
+          if (d2 > 90000) continue;
+          // Clamped: 900/d2 goes to infinity as two nodes coincide, and one such kick
+          // flings a node clear of the cluster, which then wrecks the auto-framing.
+          const f = Math.min(3.5, 900 / d2);
+          const d = Math.sqrt(d2), ux = dx / d * f, uy = dy / d * f;
+          a.vx += ux; a.vy += uy; bn.vx -= ux; bn.vy -= uy;
+        }
+      }
+      for (const [s, t] of net.edges) {                    // springs
+        const a = ns[s], bn = ns[t];
+        const dx = bn.x - a.x, dy = bn.y - a.y;
+        const d = Math.hypot(dx, dy) || 1e-3;
+        const f = Math.max(-6, Math.min(6, (d - 46) * 0.045));
+        const ux = dx / d * f, uy = dy / d * f;
+        a.vx += ux; a.vy += uy; bn.vx -= ux; bn.vy -= uy;
+      }
+      for (const n of ns) {                                // centring + damping
+        n.vx -= n.x * 0.0025; n.vy -= n.y * 0.0025;
+        if (n === net.held) { n.vx = n.vy = 0; continue; }
+        n.vx *= 0.86; n.vy *= 0.86;
+        const sp = Math.hypot(n.vx, n.vy);                 // terminal velocity, same reason
+        if (sp > 14) { n.vx = n.vx / sp * 14; n.vy = n.vy / sp * 14; }
+        n.x += n.vx; n.y += n.vy;
+      }
+    }
+
+    function drawNet() {
+      const dpr = Math.min(2, self.devicePixelRatio || 1);
+      const w = cv.clientWidth || 700;
+      if (cv.width !== Math.round(w * dpr)) { cv.width = cv.height = Math.round(w * dpr); }
+      ctx.fillStyle = '#08090C';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      if (!net) return;
+      const S = cv.width;
+      // Keep the whole neighbourhood framed while it settles; the moment the reader
+      // pans, zooms or drags a node, the framing is theirs and we stop interfering.
+      if (net.autofit) {
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const n of net.nodes) {
+          if (n.x - n.r < x0) x0 = n.x - n.r; if (n.x + n.r > x1) x1 = n.x + n.r;
+          if (n.y - n.r < y0) y0 = n.y - n.r; if (n.y + n.r > y1) y1 = n.y + n.r;
+        }
+        const span = Math.max(x1 - x0, y1 - y0, 1);
+        net.scale = Math.max(0.25, Math.min(6, (cv.clientWidth || 700) * 0.86 / span * 1.6));
+        net.ox = -((x0 + x1) / 2) * (net.scale / 1.6);
+        net.oy = -((y0 + y1) / 2) * (net.scale / 1.6);
+      }
+      ctx.save();
+      ctx.translate(S / 2 + net.ox * dpr, S / 2 + net.oy * dpr);
+      ctx.scale(net.scale * dpr / 1.6, net.scale * dpr / 1.6);
+      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = 'rgba(190,200,220,.30)';
+      ctx.beginPath();
+      for (const [s, t] of net.edges) {
+        const a = net.nodes[s], bn = net.nodes[t];
+        ctx.moveTo(a.x, a.y); ctx.lineTo(bn.x, bn.y);
+      }
+      ctx.stroke();
+      for (const n of net.nodes) {
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+        ctx.fillStyle = netColour(n);
+        ctx.globalAlpha = n.n === net.focus ? 1 : .88;
+        ctx.fill();
+        if (n.n === net.focus || n.loop) {
+          ctx.globalAlpha = 1;
+          ctx.lineWidth = n.n === net.focus ? 2.4 : 1.4;
+          ctx.strokeStyle = n.n === net.focus ? '#fff' : netColour(n);
+          ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 3.4, 0, Math.PI * 2); ctx.stroke();
+          ctx.lineWidth = 1.1;
+        }
+      }
+      ctx.globalAlpha = 1;
+      // Label the focus and anything big enough to carry one.
+      ctx.font = '11px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      for (const n of net.nodes) {
+        if (n.n !== net.focus && n.r < 5.4 && n !== netHover) continue;
+        ctx.fillStyle = n.n === net.focus ? '#fff' : 'rgba(215,222,235,.9)';
+        ctx.fillText(n.n.toLocaleString('en-US'), n.x, n.y - n.r - 5);
+      }
+      ctx.restore();
+    }
+
+    function tick() {
+      cancelAnimationFrame(raf);
+      const run = () => {
+        if (mode !== 'network' || !net) return;
+        if (net.alpha > 0) { step(); net.alpha -= 0.0045; }
+        drawNet();
+        if (net.alpha > 0 || net.held) raf = requestAnimationFrame(run);
+      };
+      raf = requestAnimationFrame(run);
+    }
+
+    let netHover = null;
+    const netAt = e => {                                   // screen -> sim coords
+      const r = cv.getBoundingClientRect();
+      return { x: (e.clientX - r.left - r.width / 2 - net.ox) / (net.scale / 1.6),
+               y: (e.clientY - r.top - r.height / 2 - net.oy) / (net.scale / 1.6) };
+    };
+    const netPick = pt => {
+      const reach = 15 / (net.scale / 1.6);                // constant on screen, not in sim units
+      let best = null, bd = reach * reach;
+      for (const n of net.nodes) {
+        const dx = n.x - pt.x, dy = n.y - pt.y, d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = n; }
+      }
+      return best;
+    };
+
+    function loadNet(focus) {
+      $('plate-wrap').classList.add('busy');
+      w.postMessage({ cmd: 'neigh', id: ++netReq, focus, cap: 220 });
+    }
+    function setMode(next, focus) {
+      mode = next;
+      for (const btn of $('plate-modes').querySelectorAll('button')) btn.classList.toggle('on', btn.dataset.mode === next);
+      $('plate-reset').hidden = next === 'network' ? false : (B.x1 - B.x0) / (view.x1 - view.x0) < 1.05;
+      $('plate-readout').textContent = '';
+      if (next === 'radial') { cancelAnimationFrame(raf); updateZoom(); paint(); return; }
+      $('plate-zoom').textContent = 'local graph';
+      loadNet(focus != null ? focus : (lastTraced >= 0 ? lastTraced : D.deepestChain.start));
+    }
+    $('plate-modes').addEventListener('click', e => {
+      const btn = e.target.closest('button'); if (!btn) return;
+      setMode(btn.dataset.mode);
+    });
 
     // --- figures -----------------------------------------------------------
     const c = D.counts;
@@ -3558,6 +3823,7 @@ function chainsClient(WORKER_SRC) {
     // The successor of every number is resident here, so a trace is a plain walk:
     // follow the arrows until the chain ends or revisits something it has seen.
     const nextOf = new Int32Array(D.nextOf);
+    let lastTraced = -1;                         // what the network view centres on
     const loopOf = new Map();                    // loop member -> its cycle
     D.cycles.forEach(cy => cy.members.forEach(mm => loopOf.set(mm, cy)));
     const form = $('trace-form'), input = $('trace-n'), msg = $('trace-msg'), out = $('trace-out');
@@ -3605,6 +3871,10 @@ function chainsClient(WORKER_SRC) {
         : 'Highlighted: the ' + loop.length + ' numbers that belong to the loop.';
       out.hidden = false;
       input.value = String(n);
+      lastTraced = n;
+      // Keep the network view centred on whatever is being traced, unless the trace
+      // came from clicking a node there (loadNet already ran for that one).
+      if (mode === 'network' && (!net || net.focus !== n)) loadNet(n);
       if (pushUrl) history.replaceState(null, '', '/chains?n=' + n);
     }
 
@@ -3706,6 +3976,12 @@ function renderChains() {
   #plate-hud button{pointer-events:auto;padding:4px 10px;font:inherit;color:#C7CEDA;
     background:rgba(12,14,22,.82);border:1px solid rgba(255,255,255,.16);border-radius:2px;cursor:pointer}
   #plate-hud button:hover{border-color:var(--accent);color:var(--accent)}
+  #plate-modes{display:inline-flex;pointer-events:auto}
+  #plate-modes button{border-radius:0;margin-left:-1px}
+  #plate-modes button:first-child{border-radius:2px 0 0 2px;margin-left:0}
+  #plate-modes button:last-child{border-radius:0 2px 2px 0}
+  #plate-modes button.on{color:#08090C;background:var(--accent);border-color:var(--accent)}
+  #plate-hud button:focus-visible,#plate-modes button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   #plate-readout{position:absolute;left:12px;bottom:10px;font-size:.78rem;color:#C7CEDA;
     line-height:1.4;pointer-events:none;text-shadow:0 1px 3px #000}
   #plate-readout strong{color:#fff}
@@ -3793,6 +4069,10 @@ function renderChains() {
         <div id="plate-hud">
           <span id="plate-zoom" class="mono"></span>
           <button type="button" id="plate-reset" hidden>Reset</button>
+          <span id="plate-modes" role="group" aria-label="Graph view">
+            <button type="button" data-mode="radial" class="on">Radial</button>
+            <button type="button" data-mode="network">Network</button>
+          </span>
         </div>
         <div id="plate-readout" class="mono" aria-live="polite"></div>
       </div>
