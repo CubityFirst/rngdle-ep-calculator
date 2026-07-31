@@ -16,7 +16,7 @@ install.
 ## Before any commit or deploy
 
 If a badge `test`, EP value, `FAMILIES` entry, or the badge list changed, run
-`npm run gen` (full 1,000,001-number scan, ~25 s) and commit the regenerated files
+`npm run gen` (full 1,000,001-number scan, ~5 s on 16 cores) and commit the regenerated files
 **in the same commit** as the change:
 
 - `src/examples.gen.js` — per-badge example numbers, used by `/badges`
