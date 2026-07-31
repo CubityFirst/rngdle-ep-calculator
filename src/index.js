@@ -3264,8 +3264,14 @@ function chainsWorker() {
       for (let n = 0; n < N; n++) if (!cycIdx.has(attractor[n]) && depth[n] > depth[deepestSink]) deepestSink = n;
       const escNodes = walk(deepestSink, depth[deepestSink] + 1);
 
+      // The page traces user-entered numbers itself, so it gets the successor of every
+      // number (4 MB, transferred). In-range steps need nothing else - the next number
+      // IS the score - so only the 1,065 out-of-range scores ride along beside it.
+      const sinkEP = {};
+      for (const s of sinks) sinkEP[s.sink] = s.ep;
+
       self.postMessage({
-        type: 'done', size: S, image: rgba.buffer,
+        type: 'done', size: S, image: rgba.buffer, nextOf: nextOf.buffer, sinkEP,
         counts: {
           nodes: N, edges: N - sinkCount, sinks: sinkCount, maxDepth,
           inCycles: cycles.reduce((s, c) => s + c.basin, 0),
@@ -3275,7 +3281,7 @@ function chainsWorker() {
         deepestChain: { start: deepest, depth: depth[deepest], nodes: walk(deepest, depth[deepest] + 1) },
         // `ep` is the SINK's score - the out-of-range value that ends the chain.
         escapeChain: { start: deepestSink, depth: depth[deepestSink], nodes: escNodes, ep: EP[escNodes[escNodes.length - 1]] },
-      }, [rgba.buffer]);
+      }, [rgba.buffer, nextOf.buffer]);
     } catch (err) {
       self.postMessage({ type: 'error', message: String((err && err.message) || err) });
     }
@@ -3360,11 +3366,76 @@ function chainsClient(WORKER_SRC) {
     $('loops').addEventListener('focusin', show);
 
     // --- chains ------------------------------------------------------------
-    const chips = (el, nodes, terminal) => {
-      el.innerHTML = nodes.map((n, i) =>
-        (i ? '<span class="arrow">→</span>' : '') +
-        '<a class="chip mono' + (terminal && i === nodes.length - 1 ? ' terminal' : '') + '" href="/?n=' + n + '">' + fmt(n) + '</a>').join('');
+    const chips = (el, nodes, terminal, loopFrom, loopHue) => {
+      if (loopHue) el.style.setProperty('--loop-hue', loopHue);
+      el.innerHTML = nodes.map((n, i) => {
+        const inLoop = loopFrom != null && i >= loopFrom;
+        return (i ? '<span class="arrow">→</span>' : '') +
+          '<a class="chip mono' + (terminal && i === nodes.length - 1 ? ' terminal' : '') +
+          (inLoop ? ' in-loop' : '') + '" href="/?n=' + n + '">' + fmt(n) + '</a>';
+      }).join('');
     };
+
+    // --- trace any number ---------------------------------------------------
+    // The successor of every number is resident here, so a trace is a plain walk:
+    // follow the arrows until the chain ends or revisits something it has seen.
+    const nextOf = new Int32Array(D.nextOf);
+    const loopOf = new Map();                    // loop member -> its cycle
+    D.cycles.forEach(cy => cy.members.forEach(mm => loopOf.set(mm, cy)));
+    const form = $('trace-form'), input = $('trace-n'), msg = $('trace-msg'), out = $('trace-out');
+
+    function trace(raw, pushUrl) {
+      const n = Number(String(raw).replace(/[\s,]/g, ''));
+      if (!Number.isInteger(n) || n < 0 || n > 1000000) {
+        msg.textContent = 'Enter a whole number from 0 to 1,000,000.';
+        out.hidden = true;
+        return;
+      }
+      const path = [], seen = new Set();
+      let cur = n;
+      while (cur >= 0 && !seen.has(cur)) { seen.add(cur); path.push(cur); cur = nextOf[cur]; }
+
+      const endsAtSink = cur < 0;
+      const last = path[path.length - 1];
+      const loop = endsAtSink ? null : loopOf.get(cur);
+      const loopFrom = loop ? path.indexOf(cur) : null;
+      const steps = loop ? loopFrom : path.length - 1;   // steps taken before it settles
+      let v;
+      if (endsAtSink && path.length === 1) {
+        v = '<strong>' + fmt(n) + '</strong> scores <strong>' + fmt(D.sinkEP[last]) + '</strong>, which is past the top of the range — ' +
+            'so it is one of the ' + fmt(c.sinks) + ' numbers whose chain ends immediately.';
+      } else if (endsAtSink) {
+        v = '<strong>' + fmt(n) + '</strong> runs for <strong>' + steps + ' step' + (steps === 1 ? '' : 's') +
+            '</strong> and ends at <strong>' + fmt(last) + '</strong>, which scores ' + fmt(D.sinkEP[last]) + ' — ' +
+            fmt(D.sinkEP[last] - 1000000) + ' past the top of the range, so there is nowhere left to go.';
+      } else if (loop && loopFrom === 0) {
+        v = '<strong>' + fmt(n) + '</strong> is itself part of the <strong>' + loop.length + '-step loop</strong>, ' +
+            'so it returns to itself after ' + loop.length + ' steps and never escapes.';
+      } else if (loop) {
+        v = '<strong>' + fmt(n) + '</strong> runs for <strong>' + steps + ' step' + (steps === 1 ? '' : 's') +
+            '</strong>, then joins the <strong>' + loop.length + '-step loop</strong> at ' + fmt(cur) +
+            ' and repeats forever — ' + fmt(path.length) + ' distinct numbers in all.';
+      } else {
+        v = '<strong>' + fmt(n) + '</strong> returns to a number it has already visited after ' + steps + ' steps.';
+      }
+      const vEl = $('trace-verdict');
+      vEl.innerHTML = v;
+      vEl.className = 'verdict' + (endsAtSink ? ' is-sink' : '');
+      chips($('trace-chain'), path, endsAtSink, loopFrom, loop ? HUES[loop.slot % HUES.length] : null);
+      msg.textContent = endsAtSink
+        ? 'Highlighted: the number the chain stops at.'
+        : 'Highlighted: the ' + loop.length + ' numbers that belong to the loop.';
+      out.hidden = false;
+      input.value = String(n);
+      if (pushUrl) history.replaceState(null, '', '/chains?n=' + n);
+    }
+
+    form.addEventListener('submit', e => { e.preventDefault(); trace(input.value, true); });
+    $('trace-random').addEventListener('click', () => trace(Math.floor(Math.random() * 1000001), true));
+    // Seed with the deepest number so the section shows what it does; only a real
+    // trace rewrites the URL, so arriving at /chains doesn't silently gain a query.
+    const q = new URLSearchParams(location.search).get('n');
+    trace(q == null || q === '' ? D.deepestChain.start : q, q != null && q !== '');
     const deep = D.deepestChain;
     $('deep-title').textContent = fmt(deep.start) + ' takes ' + deep.depth + ' steps to reach a loop';
     chips($('deep-chain'), deep.nodes, false);
@@ -3474,11 +3545,27 @@ function renderChains() {
   .node:focus-visible circle{stroke:var(--ink);stroke-width:1.5}
   .readout{min-height:1.5em;margin-top:10px;font-size:.84rem;border-top:1px dashed var(--rule);padding-top:9px}
   .readout .dim{color:var(--muted)}
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  #trace-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  #trace-n{flex:1 1 200px;max-width:280px;padding:9px 12px;font-size:1rem;color:var(--ink);
+    background:var(--panel);border:1px solid var(--rule);border-radius:2px}
+  #trace-n:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+  #trace-form button{padding:9px 16px;font:inherit;font-size:.9rem;color:var(--ground);background:var(--accent);
+    border:1px solid var(--accent);border-radius:2px;cursor:pointer}
+  #trace-form button.ghost{color:var(--ink-dim);background:transparent;border-color:var(--rule)}
+  #trace-form button:hover{filter:brightness(1.08)}
+  #trace-form button.ghost:hover{border-color:var(--accent);color:var(--accent);filter:none}
+  #trace-form button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .verdict{margin-top:18px;padding:14px 16px;border-left:2px solid var(--accent);background:var(--panel);font-size:.95rem}
+  .verdict strong{color:var(--ink)}
+  .verdict.is-sink{border-left-color:var(--sink)}
   .chain{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:16px}
   .chip{display:inline-block;padding:3px 9px;border:1px solid var(--rule);border-radius:2px;
     background:var(--panel);font-size:.84rem;color:var(--ink);text-decoration:none}
   .chip:hover{border-color:var(--accent);color:var(--accent)}
   .chip.terminal{border-color:var(--sink);color:var(--sink);font-weight:600}
+  /* --loop-hue is set per trace, so the highlight matches the loop it lands in */
+  .chip.in-loop{border-color:var(--loop-hue,var(--c0));color:var(--loop-hue,var(--c0))}
   .arrow{color:var(--muted);font-size:.8rem}
   .escape{margin-top:16px;padding:13px 16px;border-left:2px solid var(--sink);background:var(--panel);font-size:.9rem}
   .profile{width:100%;height:auto;display:block;margin-top:8px;overflow:visible}
@@ -3527,6 +3614,23 @@ function renderChains() {
     <dl class="figures" id="figures"></dl>
     <p class="note">A number is a <strong>sink</strong> when its EP exceeds 1,000,000 and the chain simply stops.
       Mean EP sits around 21,500, comfortably inside the range, so the map points overwhelmingly inward.</p>
+  </section>
+
+  <section class="needs-data">
+    <div class="head"><p class="eyebrow">Trace</p><h2>Follow any number</h2>
+      <p>Enter a number and watch it score its way along until it either joins a loop or
+        runs off the end of the range.</p></div>
+    <form id="trace-form" autocomplete="off">
+      <label class="sr-only" for="trace-n">Number to trace</label>
+      <input id="trace-n" class="mono" type="text" inputmode="numeric" placeholder="e.g. 70076" aria-describedby="trace-msg">
+      <button type="submit">Trace</button>
+      <button type="button" id="trace-random" class="ghost">Random</button>
+    </form>
+    <p class="note" id="trace-msg"></p>
+    <div id="trace-out" hidden>
+      <div class="verdict" id="trace-verdict"></div>
+      <div class="chain" id="trace-chain"></div>
+    </div>
   </section>
 
   <section class="needs-data">
