@@ -3673,6 +3673,12 @@ function renderChains() {
     calculator. See also <a href="/grid">the grid</a> and <a href="/badges">every badge</a>.</p></footer>
 </div>
 <script type="module">
+// __name shim, page scope: when this Worker is bundled (esbuild keepNames), the source
+// returned by toString() carries __name(fn,"fn") calls for any nested function
+// declaration - and chainsClient has several. That helper only exists in the bundled
+// module scope, so without this the page dies on "__name is not defined". The worker
+// source below and engineModuleSource() each carry their own copy for the same reason.
+var __name = (f) => f;
 const __CHAINS_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + chainsWorker.toString() + ')()')};
 (${chainsClient.toString()})(__CHAINS_WORKER_SRC);
 </script>
