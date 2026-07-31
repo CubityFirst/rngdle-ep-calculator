@@ -3112,8 +3112,89 @@ const __GRID_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + gridWorker.to
 
 function chainsWorker() {
   const N = 1000001;
+  // Layout kept here after the build so the plate can be panned and zoomed: the page
+  // asks for a viewport and gets it rasterized at full resolution, rather than scaling
+  // up one fixed bitmap. Positions never cross to the page - picking happens here too.
+  let LAY = null;
+  const HUES = [[255, 90, 92], [255, 176, 64], [110, 225, 140], [120, 170, 255], [225, 125, 255]];
+  const SINK = [120, 145, 175];
+
+  // Rasterize the layout rectangle [x0,y0]..[x1,y1] into an S x S RGBA buffer. Nodes and
+  // edges are accumulated additively, then tone-mapped with a log rolloff, because the
+  // core is thousands of times denser than the rim and would otherwise clip to white.
+  function raster(x0, y0, x1, y1, S) {
+    const { X, Y, nextOf, depth, attractor, cycIdx, roots } = LAY;
+    const px = new Float32Array(S * S * 3);
+    const sx = S / (x1 - x0), sy = S / (y1 - y0);
+    const scale = Math.min(sx, sy);
+    // Edge weight is per-pixel, so zooming in spreads the same ink over more pixels;
+    // scale it down as we magnify or the zoomed view blows out to solid white.
+    const w = 0.14 / Math.max(1, scale / LAY.baseScale);
+    const nodeW = 0.5 / Math.max(1, scale / LAY.baseScale);
+    const add = (x, y, c, k) => {
+      if (x < 0 || y < 0 || x >= S || y >= S) return;
+      const i = ((y | 0) * S + (x | 0)) * 3;
+      px[i] += c[0] * k; px[i + 1] += c[1] * k; px[i + 2] += c[2] * k;
+    };
+    const pad = 40 / scale;                     // keep edges that cross the view
+    for (let n = 0; n < N; n++) {
+      const nx = X[n], ny = Y[n];
+      const p = nextOf[n], hasEdge = p >= 0 && depth[n] > 0;
+      const px2 = hasEdge ? X[p] : nx, py2 = hasEdge ? Y[p] : ny;
+      if (Math.max(nx, px2) < x0 - pad || Math.min(nx, px2) > x1 + pad ||
+          Math.max(ny, py2) < y0 - pad || Math.min(ny, py2) > y1 + pad) continue;
+      const a = attractor[n];
+      const c = cycIdx.has(a) ? HUES[cycIdx.get(a) % HUES.length] : SINK;
+      const ax = (nx - x0) * sx, ay = (ny - y0) * sy;
+      if (hasEdge) {
+        const bx = (px2 - x0) * sx, by = (py2 - y0) * sy;
+        const dx = bx - ax, dy = by - ay;
+        const steps = Math.min(4000, Math.max(1, Math.ceil(Math.sqrt(dx * dx + dy * dy))));
+        for (let s = 0; s <= steps; s++) add(ax + dx * s / steps, ay + dy * s / steps, c, w);
+      }
+      add(ax, ay, c, nodeW);
+    }
+    for (const r of roots) {
+      const c = cycIdx.has(attractor[r]) ? HUES[cycIdx.get(attractor[r]) % HUES.length] : SINK;
+      const ax = (X[r] - x0) * sx, ay = (Y[r] - y0) * sy;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) add(ax + dx, ay + dy, c, 2.2 * nodeW / 0.5);
+    }
+    const rgba = new Uint8ClampedArray(S * S * 4);
+    const denom = Math.log1p(255 * 0.05);
+    for (let i = 0, j = 0; i < px.length; i += 3, j += 4) {
+      for (let k = 0; k < 3; k++) rgba[j + k] = Math.pow(Math.log1p(px[i + k] * 0.05) / denom, 0.75) * 255;
+      rgba[j + 3] = 255;
+    }
+    return rgba;
+  }
+
+  // Nearest node to a layout point, searched through a uniform bucket grid.
+  function pick(x, y, radius) {
+    const { X, Y, grid, gw, gh, gx0, gy0, cell } = LAY;
+    const c0 = Math.max(0, Math.floor((x - radius - gx0) / cell)), c1 = Math.min(gw - 1, Math.floor((x + radius - gx0) / cell));
+    const r0 = Math.max(0, Math.floor((y - radius - gy0) / cell)), r1 = Math.min(gh - 1, Math.floor((y + radius - gy0) / cell));
+    let best = -1, bestD = radius * radius;
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+      for (const n of (grid[r * gw + c] || [])) {
+        const dx = X[n] - x, dy = Y[n] - y, d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = n; }
+      }
+    }
+    return best;
+  }
+
   self.onmessage = async (ev) => {
     const m = ev.data;
+    if (m.cmd === 'view' && LAY) {
+      const img = raster(m.x0, m.y0, m.x1, m.y1, m.size);
+      self.postMessage({ type: 'view', id: m.id, size: m.size, image: img.buffer }, [img.buffer]);
+      return;
+    }
+    if (m.cmd === 'pick' && LAY) {
+      const n = pick(m.x, m.y, m.radius);
+      self.postMessage({ type: 'pick', id: m.id, n, next: n >= 0 ? LAY.nextOf[n] : -1, depth: n >= 0 ? LAY.depth[n] : -1 });
+      return;
+    }
     if (m.cmd !== 'build') return;
     const say = (phase, pct) => self.postMessage({ type: 'progress', phase, pct });
     try {
@@ -3191,58 +3272,43 @@ function chainsWorker() {
         }
       }
 
-      // --- rasterize --------------------------------------------------------
-      // Drawn here rather than on the page: a million canvas line ops would block the
-      // UI for seconds, where an accumulation buffer is one pass and transfers free.
-      say('Drawing', 0);
-      const S = m.size || 1500;
-      const px = new Float32Array(S * S * 3);
-      const HUES = [[255, 90, 92], [255, 176, 64], [110, 225, 140], [120, 170, 255], [225, 125, 255]];
-      const SINK = [120, 145, 175];
+      // --- layout coordinates ------------------------------------------------
+      // Kept in worker-local units; raster() maps whatever rectangle the page asks for
+      // into pixels, so zooming re-renders at full resolution instead of magnifying.
+      say('Laying out', 0.5);
       const cycIdx = new Map();                     // attractor index -> colour slot
       attractors.forEach((a, i) => { if (a.kind === 'cycle') cycIdx.set(i, cycIdx.size); });
-      const R0 = (S / 2 - 20) / (maxDepth + 1.4);
       const X = new Float32Array(N), Y = new Float32Array(N);
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       for (let n = 0; n < N; n++) {
-        const ang = a0[n] + span[n] / 2, rad = (depth[n] + 0.7) * R0;
+        const ang = a0[n] + span[n] / 2, rad = depth[n] + 0.7;
         const x = Math.cos(ang) * rad, y = Math.sin(ang) * rad;
         X[n] = x; Y[n] = y;
         if (x < minX) minX = x; if (x > maxX) maxX = x;
         if (y < minY) minY = y; if (y > maxY) maxY = y;
       }
-      const fit = Math.min((S - 30) / (maxX - minX), (S - 30) / (maxY - minY));
-      const ox = (S - (maxX - minX) * fit) / 2 - minX * fit, oy = (S - (maxY - minY) * fit) / 2 - minY * fit;
-      for (let n = 0; n < N; n++) { X[n] = X[n] * fit + ox; Y[n] = Y[n] * fit + oy; }
-      const add = (x, y, c, w) => {
-        if (x < 0 || y < 0 || x >= S || y >= S) return;
-        const i = ((y | 0) * S + (x | 0)) * 3;
-        px[i] += c[0] * w; px[i + 1] += c[1] * w; px[i + 2] += c[2] * w;
-      };
+      // Square the extent so the page can map view rectangles without distortion.
+      const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+      const half = Math.max(maxX - minX, maxY - minY) / 2 * 1.02;
+      const bounds = { x0: cx - half, y0: cy - half, x1: cx + half, y1: cy + half };
+
+      // Uniform bucket grid for hit-testing, ~1,000 buckets across.
+      const cell = (half * 2) / 1000, gw = 1002, gh = 1002;
+      const grid = new Array(gw * gh);
       for (let n = 0; n < N; n++) {
-        const a = attractor[n];
-        const c = cycIdx.has(a) ? HUES[cycIdx.get(a) % HUES.length] : SINK;
-        const p = nextOf[n];
-        if (p >= 0 && depth[n] > 0) {
-          const dx = X[p] - X[n], dy = Y[p] - Y[n];
-          const steps = Math.max(1, Math.ceil(Math.sqrt(dx * dx + dy * dy)));
-          for (let s = 0; s <= steps; s++) add(X[n] + dx * s / steps, Y[n] + dy * s / steps, c, 0.14);
-        }
-        add(X[n], Y[n], c, 0.5);
-        if ((n & 0x3FFFF) === 0) say('Drawing', n / N);
+        const c = Math.floor((X[n] - bounds.x0) / cell), r = Math.floor((Y[n] - bounds.y0) / cell);
+        if (c < 0 || r < 0 || c >= gw || r >= gh) continue;
+        const k = r * gw + c;
+        (grid[k] || (grid[k] = [])).push(n);
       }
-      for (const r of roots) {
-        const c = cycIdx.has(attractor[r]) ? HUES[cycIdx.get(attractor[r]) % HUES.length] : SINK;
-        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) add(X[r] + dx, Y[r] + dy, c, 2.2);
-      }
-      // Log rolloff: the core is thousands of times denser than the rim, so a linear
-      // map would clip the middle to white and lose every isolated deep node.
-      const rgba = new Uint8ClampedArray(S * S * 4);
-      const denom = Math.log1p(255 * 0.05);
-      for (let i = 0, j = 0; i < px.length; i += 3, j += 4) {
-        for (let k = 0; k < 3; k++) rgba[j + k] = Math.pow(Math.log1p(px[i + k] * 0.05) / denom, 0.75) * 255;
-        rgba[j + 3] = 255;
-      }
+
+      const S = m.size || 1500;
+      LAY = { X, Y, nextOf, depth, attractor, cycIdx, roots, bounds,
+              grid, gw, gh, gx0: bounds.x0, gy0: bounds.y0, cell,
+              baseScale: S / (half * 2) };
+
+      say('Drawing', 0);
+      const rgba = raster(bounds.x0, bounds.y0, bounds.x1, bounds.y1, S);
 
       // --- structures for the page -----------------------------------------
       const basin = new Int32Array(attractors.length);
@@ -3265,13 +3331,16 @@ function chainsWorker() {
       const escNodes = walk(deepestSink, depth[deepestSink] + 1);
 
       // The page traces user-entered numbers itself, so it gets the successor of every
-      // number (4 MB, transferred). In-range steps need nothing else - the next number
-      // IS the score - so only the 1,065 out-of-range scores ride along beside it.
+      // number. In-range steps need nothing else - the next number IS the score - so only
+      // the 1,065 out-of-range scores ride along beside it. It's a COPY: the original
+      // stays here for the plate's re-renders and hit-testing, and transferring would
+      // detach it.
       const sinkEP = {};
       for (const s of sinks) sinkEP[s.sink] = s.ep;
+      const nextCopy = nextOf.slice();
 
       self.postMessage({
-        type: 'done', size: S, image: rgba.buffer, nextOf: nextOf.buffer, sinkEP,
+        type: 'done', size: S, image: rgba.buffer, nextOf: nextCopy.buffer, sinkEP, bounds,
         counts: {
           nodes: N, edges: N - sinkCount, sinks: sinkCount, maxDepth,
           inCycles: cycles.reduce((s, c) => s + c.basin, 0),
@@ -3281,7 +3350,7 @@ function chainsWorker() {
         deepestChain: { start: deepest, depth: depth[deepest], nodes: walk(deepest, depth[deepest] + 1) },
         // `ep` is the SINK's score - the out-of-range value that ends the chain.
         escapeChain: { start: deepestSink, depth: depth[deepestSink], nodes: escNodes, ep: EP[escNodes[escNodes.length - 1]] },
-      }, [rgba.buffer, nextOf.buffer]);
+      }, [rgba.buffer, nextCopy.buffer]);
     } catch (err) {
       self.postMessage({ type: 'error', message: String((err && err.message) || err) });
     }
@@ -3294,9 +3363,11 @@ function chainsClient(WORKER_SRC) {
   const HUES = ['var(--c0)', 'var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)'];
   const status = $('status'), bar = $('bar');
 
+  let viewHandlers = null;                     // set once the plate is interactive
   const w = new Worker(URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' })), { type: 'module' });
   w.onmessage = ev => {
     const m = ev.data;
+    if (viewHandlers && viewHandlers[m.type]) { viewHandlers[m.type](m); return; }
     if (m.type === 'progress') {
       status.textContent = m.phase + '…';
       bar.style.width = Math.round((m.pct || 0) * 100) + '%';
@@ -3315,10 +3386,117 @@ function chainsClient(WORKER_SRC) {
     $('loading').style.display = 'none';
     document.body.classList.add('ready');
 
-    // --- the plate ---------------------------------------------------------
-    const cv = $('plate');
-    cv.width = D.size; cv.height = D.size;
-    cv.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(D.image), D.size, D.size), 0, 0);
+    // --- the plate: pan, zoom, hover, click --------------------------------
+    // The worker owns the layout, so a new view is a fresh full-resolution raster
+    // rather than a magnified bitmap. While the view is moving we transform the last
+    // frame we have (fast but soft) and swap in the crisp one once it settles.
+    const cv = $('plate'), ctx = cv.getContext('2d');
+    const B = D.bounds;
+    let img = null, imgView = null;            // last raster + the rect it covers
+    let view = { x0: B.x0, y0: B.y0, x1: B.x1, y1: B.y1 };
+    let pending = 0, reqId = 0, hoverId = 0;
+
+    const bmp = document.createElement('canvas');
+    const setImg = (buf, size, rect) => {
+      bmp.width = size; bmp.height = size;
+      bmp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(buf), size, size), 0, 0);
+      img = bmp; imgView = rect;
+      paint();
+    };
+    function paint() {
+      const dpr = Math.min(2, self.devicePixelRatio || 1);
+      const w = cv.clientWidth || 700;
+      if (cv.width !== Math.round(w * dpr)) { cv.width = cv.height = Math.round(w * dpr); }
+      ctx.fillStyle = '#08090C';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      if (!img) return;
+      // Map the raster's rect into the current view.
+      const s = cv.width / (view.x1 - view.x0);
+      const dx = (imgView.x0 - view.x0) * s, dy = (imgView.y0 - view.y0) * s;
+      const dw = (imgView.x1 - imgView.x0) * s, dh = (imgView.y1 - imgView.y0) * s;
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(img, dx, dy, dw, dh);
+    }
+    function requestView() {
+      clearTimeout(pending);
+      pending = setTimeout(() => {
+        const id = ++reqId;
+        $('plate-wrap').classList.add('busy');
+        w.postMessage({ cmd: 'view', id, x0: view.x0, y0: view.y0, x1: view.x1, y1: view.y1, size: D.size });
+      }, 180);
+    }
+    viewHandlers = {
+      view: msg => {
+        if (msg.id !== reqId) return;            // a newer view already asked
+        $('plate-wrap').classList.remove('busy');
+        setImg(msg.image, msg.size, { x0: view.x0, y0: view.y0, x1: view.x1, y1: view.y1 });
+      },
+      pick: msg => {
+        if (msg.id !== hoverId) return;
+        const el = $('plate-readout');
+        if (msg.n < 0) { el.textContent = ''; cv.style.cursor = 'grab'; hoverN = -1; return; }
+        hoverN = msg.n;
+        cv.style.cursor = 'pointer';
+        el.innerHTML = '<strong>' + fmt(msg.n) + '</strong> → ' +
+          (msg.next < 0 ? 'ends here' : fmt(msg.next)) + ' · ' + msg.depth + ' step' + (msg.depth === 1 ? '' : 's') + ' from settling';
+      },
+    };
+    setImg(D.image, D.size, { x0: B.x0, y0: B.y0, x1: B.x1, y1: B.y1 });
+
+    const toLayout = e => {
+      const r = cv.getBoundingClientRect();
+      return { x: view.x0 + (e.clientX - r.left) / r.width * (view.x1 - view.x0),
+               y: view.y0 + (e.clientY - r.top) / r.height * (view.y1 - view.y0) };
+    };
+    function zoomAt(pt, factor) {
+      const w0 = (view.x1 - view.x0) * factor;
+      const full = B.x1 - B.x0;
+      if (w0 > full * 1.05 || w0 < full / 4000) return;
+      const fx = (pt.x - view.x0) / (view.x1 - view.x0), fy = (pt.y - view.y0) / (view.y1 - view.y0);
+      view = { x0: pt.x - w0 * fx, y0: pt.y - w0 * fy, x1: pt.x + w0 * (1 - fx), y1: pt.y + w0 * (1 - fy) };
+      paint(); requestView(); updateZoom();
+    }
+    cv.addEventListener('wheel', e => { e.preventDefault(); zoomAt(toLayout(e), e.deltaY > 0 ? 1.25 : 0.8); }, { passive: false });
+
+    let drag = null, hoverN = -1;
+    cv.addEventListener('pointerdown', e => {
+      drag = { ...toLayout(e), moved: false };
+      cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing';
+    });
+    cv.addEventListener('pointermove', e => {
+      if (drag) {
+        const p = toLayout(e);
+        const dx = drag.x - p.x, dy = drag.y - p.y;
+        if (Math.abs(dx) + Math.abs(dy) > 0) drag.moved = true;
+        view = { x0: view.x0 + dx, y0: view.y0 + dy, x1: view.x1 + dx, y1: view.y1 + dy };
+        paint(); requestView();
+        return;
+      }
+      const p = toLayout(e);
+      const id = ++hoverId;
+      w.postMessage({ cmd: 'pick', id, x: p.x, y: p.y, radius: (view.x1 - view.x0) / cv.clientWidth * 6 });
+    });
+    const endDrag = e => {
+      if (!drag) return;
+      const wasClick = !drag.moved;
+      drag = null; cv.style.cursor = 'grab';
+      if (wasClick && hoverN >= 0) { trace(hoverN, true); $('trace-form').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    };
+    cv.addEventListener('pointerup', endDrag);
+    cv.addEventListener('pointercancel', endDrag);
+    cv.addEventListener('pointerleave', () => { $('plate-readout').textContent = ''; hoverN = -1; });
+
+    function updateZoom() {
+      const z = (B.x1 - B.x0) / (view.x1 - view.x0);
+      $('plate-zoom').textContent = z < 1.05 ? 'whole graph' : z.toFixed(z < 10 ? 1 : 0) + '× zoom';
+      $('plate-reset').hidden = z < 1.05;
+    }
+    $('plate-reset').addEventListener('click', () => {
+      view = { x0: B.x0, y0: B.y0, x1: B.x1, y1: B.y1 };
+      paint(); requestView(); updateZoom();
+    });
+    addEventListener('resize', paint);
+    updateZoom();
 
     // --- figures -----------------------------------------------------------
     const c = D.counts;
@@ -3519,7 +3697,21 @@ function renderChains() {
   .head{display:flex;flex-direction:column;gap:4px;margin-bottom:26px}
   .hero{padding-top:clamp(36px,5vw,64px)}
   .plate{margin-top:30px;background:#08090C;border:1px solid var(--rule);border-radius:3px;overflow:hidden}
-  .plate canvas{display:block;width:100%;height:auto}
+  #plate-wrap{position:relative;line-height:0}
+  .plate canvas{display:block;width:100%;aspect-ratio:1;height:auto;cursor:grab;touch-action:none}
+  .plate canvas:active{cursor:grabbing}
+  .plate canvas:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  #plate-hud{position:absolute;top:10px;right:12px;display:flex;align-items:center;gap:8px;
+    line-height:1.4;font-size:.75rem;color:#8A93A6;pointer-events:none}
+  #plate-hud button{pointer-events:auto;padding:4px 10px;font:inherit;color:#C7CEDA;
+    background:rgba(12,14,22,.82);border:1px solid rgba(255,255,255,.16);border-radius:2px;cursor:pointer}
+  #plate-hud button:hover{border-color:var(--accent);color:var(--accent)}
+  #plate-readout{position:absolute;left:12px;bottom:10px;font-size:.78rem;color:#C7CEDA;
+    line-height:1.4;pointer-events:none;text-shadow:0 1px 3px #000}
+  #plate-readout strong{color:#fff}
+  #plate-wrap.busy::after{content:"";position:absolute;top:10px;left:12px;width:7px;height:7px;
+    border-radius:50%;background:var(--accent);opacity:.85;animation:plate-pulse 1s ease-in-out infinite}
+  @keyframes plate-pulse{0%,100%{opacity:.2}50%{opacity:.9}}
   .plate figcaption{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:baseline;padding:14px 18px;
     border-top:1px solid rgba(255,255,255,.09);font-size:.8rem;color:#8A93A6;background:#0B0D12}
   .key{display:flex;align-items:center;gap:7px;white-space:nowrap}
@@ -3594,10 +3786,16 @@ function renderChains() {
     <div id="loading">
       <p id="status" class="mono">Starting…</p>
       <div id="track"><div id="bar"></div></div>
-      <p class="note">One pass over all 1,000,001 numbers, spread across your cores.</p>
     </div>
     <figure class="plate needs-data">
-      <canvas id="plate" width="1500" height="1500" aria-label="Radial diagram of all 1,000,001 numbers, each joined to the number its EP points at."></canvas>
+      <div id="plate-wrap">
+        <canvas id="plate" width="1500" height="1500" aria-label="Radial diagram of all 1,000,001 numbers, each joined to the number its EP points at. Drag to pan, scroll to zoom, click a node to trace it."></canvas>
+        <div id="plate-hud">
+          <span id="plate-zoom" class="mono"></span>
+          <button type="button" id="plate-reset" hidden>Reset</button>
+        </div>
+        <div id="plate-readout" class="mono" aria-live="polite"></div>
+      </div>
       <figcaption>
         <span class="key"><span class="swatch" style="background:#FF5A5C"></span>largest loop basin</span>
         <span class="key"><span class="swatch" style="background:#FFB040"></span>2nd</span>
@@ -3605,7 +3803,7 @@ function renderChains() {
         <span class="key"><span class="swatch" style="background:#78AAFF"></span>4th</span>
         <span class="key"><span class="swatch" style="background:#E17DFF"></span>5th</span>
         <span class="key"><span class="swatch" style="background:#7891AF"></span>ends at a sink</span>
-        <span style="margin-left:auto">radius = steps remaining &middot; every node and edge drawn</span>
+        <span style="margin-left:auto">drag to pan &middot; scroll to zoom &middot; click a node to trace it</span>
       </figcaption>
     </figure>
   </section>
