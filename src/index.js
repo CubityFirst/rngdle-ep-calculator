@@ -3187,18 +3187,21 @@ function chainsWorker() {
   // UNDIRECTED graph, so it picks up both what `focus` scores its way toward and the
   // numbers that score their way into it. Capped, because a readable node-link diagram
   // tops out in the low hundreds - the whole million only reads as the radial plate.
-  function neighbourhood(focus, cap) {
+  function neighbourhood(focus, cap, hops) {
     const { nextOf, depth, attractor, cycIdx, inOff, inSrc } = LAY;
     const idx = new Map([[focus, 0]]);
     const order = [focus];
+    const hop = [0];
+    let reachedHopLimit = false;
     for (let head = 0; head < order.length && order.length < cap; head++) {
       const n = order[head];
-      const nbrs = [];
-      if (nextOf[n] >= 0) nbrs.push(nextOf[n]);
-      for (let i = inOff[n]; i < inOff[n + 1] && nbrs.length < 24; i++) nbrs.push(inSrc[i]);
-      for (const q of nbrs) {
-        if (idx.has(q) || order.length >= cap) continue;
-        idx.set(q, order.length); order.push(q);
+      if (hop[head] >= hops) { reachedHopLimit = true; continue; }
+      if (nextOf[n] >= 0 && !idx.has(nextOf[n])) { idx.set(nextOf[n], order.length); order.push(nextOf[n]); hop.push(hop[head] + 1); }
+      for (let i = inOff[n]; i < inOff[n + 1]; i++) {
+        if (order.length >= cap) break;
+        const q = inSrc[i];
+        if (idx.has(q)) continue;
+        idx.set(q, order.length); order.push(q); hop.push(hop[head] + 1);
       }
     }
     const edges = [];
@@ -3206,14 +3209,19 @@ function chainsWorker() {
       const p = nextOf[n];
       if (p >= 0 && idx.has(p)) edges.push(idx.get(n), idx.get(p));
     }
-    const nodes = order.map(n => ({
-      n, depth: depth[n],
-      slot: cycIdx.has(attractor[n]) ? cycIdx.get(attractor[n]) : -1,
-      loop: depth[n] === 0 && nextOf[n] >= 0,
-      sink: nextOf[n] < 0,
-      inDeg: inOff[n + 1] - inOff[n],
-    }));
-    return { focus, nodes, edges, truncated: order.length >= cap };
+    // Flat typed arrays rather than objects: at tens of thousands of nodes the object
+    // allocation and the structured clone both start to show.
+    const num = new Int32Array(order.length), dep = new Int32Array(order.length);
+    const slot = new Int8Array(order.length), flag = new Uint8Array(order.length), deg = new Int32Array(order.length);
+    order.forEach((n, i) => {
+      num[i] = n; dep[i] = depth[n];
+      slot[i] = cycIdx.has(attractor[n]) ? cycIdx.get(attractor[n]) : -1;
+      flag[i] = (depth[n] === 0 && nextOf[n] >= 0 ? 1 : 0) | (nextOf[n] < 0 ? 2 : 0);   // 1 loop, 2 sink
+      deg[i] = inOff[n + 1] - inOff[n];
+    });
+    const eArr = Int32Array.from(edges);
+    return { focus, count: order.length, num, dep, slot, flag, deg, edges: eArr,
+             truncated: order.length >= cap, hopLimited: reachedHopLimit };
   }
 
   self.onmessage = async (ev) => {
@@ -3229,7 +3237,9 @@ function chainsWorker() {
       return;
     }
     if (m.cmd === 'neigh' && LAY) {
-      self.postMessage({ type: 'neigh', id: m.id, ...neighbourhood(m.focus, m.cap || 220) });
+      const r = neighbourhood(m.focus, m.cap || 220, m.hops == null ? 99 : m.hops);
+      self.postMessage({ type: 'neigh', id: m.id, ...r },
+        [r.num.buffer, r.dep.buffer, r.slot.buffer, r.flag.buffer, r.deg.buffer, r.edges.buffer]);
       return;
     }
     if (m.cmd !== 'build') return;
@@ -3519,9 +3529,9 @@ function chainsClient(WORKER_SRC) {
       cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing';
       if (mode === 'network') {
         if (!net) return;
-        const pt = netAt(e), hit = netPick(pt);
+        const hit = netPick(netAt(e));
         drag = { sx: e.clientX, sy: e.clientY, ox: net.ox, oy: net.oy, node: hit, moved: false };
-        if (hit) { net.held = hit; net.alpha = Math.max(net.alpha, 0.35); tick(); }
+        if (hit >= 0) { net.held = hit; net.alpha = Math.max(net.alpha, 0.35); tick(); }
         return;
       }
       drag = { ...toLayout(e), moved: false };
@@ -3532,9 +3542,9 @@ function chainsClient(WORKER_SRC) {
         if (drag) {
           if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 2) drag.moved = true;
           net.autofit = false;
-          if (drag.node) {                                  // drag the node itself
+          if (drag.node >= 0) {                             // drag the node itself
             const pt = netAt(e);
-            drag.node.x = pt.x; drag.node.y = pt.y;
+            net.x[drag.node] = pt.x; net.y[drag.node] = pt.y;
             drawNet();
           } else {                                          // pan the whole graph
             net.ox = drag.ox + (e.clientX - drag.sx);
@@ -3546,10 +3556,13 @@ function chainsClient(WORKER_SRC) {
         const hit = netPick(netAt(e));
         if (hit !== netHover) {
           netHover = hit;
-          cv.style.cursor = hit ? 'pointer' : 'grab';
-          $('plate-readout').innerHTML = hit
-            ? '<strong>' + fmt(hit.n) + '</strong> · ' + (hit.sink ? 'ends here' : hit.loop ? 'in a loop' : hit.depth + ' step' + (hit.depth === 1 ? '' : 's') + ' from settling') +
-              ' · ' + fmt(hit.inDeg) + ' number' + (hit.inDeg === 1 ? '' : 's') + ' score it'
+          cv.style.cursor = hit >= 0 ? 'pointer' : 'grab';
+          const d = hit >= 0 ? net.deg[hit] : 0;
+          $('plate-readout').innerHTML = hit >= 0
+            ? '<strong>' + fmt(net.num[hit]) + '</strong> · ' +
+              ((net.flag[hit] & 2) ? 'ends here' : (net.flag[hit] & 1) ? 'in a loop'
+                : net.dep[hit] + ' step' + (net.dep[hit] === 1 ? '' : 's') + ' from settling') +
+              ' · ' + fmt(d) + (d === 1 ? ' number scores it' : ' numbers score it')
             : '';
           drawNet();
         }
@@ -3572,15 +3585,15 @@ function chainsClient(WORKER_SRC) {
       const wasClick = !drag.moved, node = drag.node;
       drag = null; cv.style.cursor = 'grab';
       if (mode === 'network') {
-        if (net) { net.held = null; }
-        if (wasClick && node) { trace(node.n, true); loadNet(node.n); }   // click re-centres
+        if (net) net.held = -1;
+        if (wasClick && node >= 0) { const n = net.num[node]; trace(n, true); loadNet(n); }  // click re-centres
         return;
       }
       if (wasClick && hoverN >= 0) { trace(hoverN, true); $('trace-form').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
     };
     cv.addEventListener('pointerup', endDrag);
     cv.addEventListener('pointercancel', endDrag);
-    cv.addEventListener('pointerleave', () => { $('plate-readout').textContent = ''; hoverN = -1; netHover = null; if (mode === 'network') drawNet(); });
+    cv.addEventListener('pointerleave', () => { $('plate-readout').textContent = ''; hoverN = -1; netHover = -1; if (mode === 'network') drawNet(); });
 
     function updateZoom() {
       const z = (B.x1 - B.x0) / (view.x1 - view.x0);
@@ -3607,56 +3620,100 @@ function chainsClient(WORKER_SRC) {
     viewHandlers.neigh = msg => {
       if (msg.id !== netReq) return;
       $('plate-wrap').classList.remove('busy');
-      const R = 260;
+      const C = msg.count;
+      const num = new Int32Array(msg.num), dep = new Int32Array(msg.dep);
+      const slot = new Int8Array(msg.slot), flag = new Uint8Array(msg.flag), deg = new Int32Array(msg.deg);
+      // Seed on a spiral sized to the node count, so a big neighbourhood does not start
+      // as one hopelessly overlapped ring and spend its whole budget untangling.
+      const R = 34 * Math.sqrt(C);
+      const x = new Float32Array(C), y = new Float32Array(C);
+      const vx = new Float32Array(C), vy = new Float32Array(C), rad = new Float32Array(C);
+      for (let i = 0; i < C; i++) {
+        const t = i / C, a = t * Math.PI * 2 * Math.ceil(Math.sqrt(C) / 2);
+        x[i] = Math.cos(a) * R * Math.sqrt(t); y[i] = Math.sin(a) * R * Math.sqrt(t);
+        const r = Math.min(9, 3.2 + Math.sqrt(deg[i]) * 1.1);
+        rad[i] = i === 0 ? Math.max(5.5, r) : r;
+      }
+      x[0] = y[0] = 0;
       net = {
-        focus: msg.focus, truncated: msg.truncated,
-        nodes: msg.nodes.map((d, i) => {
-          const a = i / msg.nodes.length * Math.PI * 2;
-          // Size by how many numbers score INTO it; the focus keeps a floor so it stays
-          // findable even when nothing scores it (a chain's starting number, typically).
-          const r = Math.min(9, 3.2 + Math.sqrt(d.inDeg) * 1.1);
-          return { ...d, x: Math.cos(a) * R * (i ? 1 : 0), y: Math.sin(a) * R * (i ? 1 : 0), vx: 0, vy: 0,
-                   r: d.n === msg.focus ? Math.max(5.5, r) : r };
-        }),
-        edges: [], scale: 1, ox: 0, oy: 0, alpha: 1, held: null, autofit: true,
+        focus: msg.focus, truncated: msg.truncated, hopLimited: msg.hopLimited, count: C,
+        num, dep, slot, flag, deg, x, y, vx, vy, rad, edges: new Int32Array(msg.edges),
+        scale: 1, ox: 0, oy: 0, alpha: 1, held: -1, autofit: true,
+        // Repulsion is short-range, so it only ever needs nearby nodes. Shrinking the
+        // cutoff as the graph grows keeps the per-cell neighbour count bounded, which is
+        // what turns this from O(n^2) into something that survives tens of thousands.
+        cut: Math.max(26, 300 / Math.sqrt(Math.max(1, C / 220))),
       };
-      for (let i = 0; i < msg.edges.length; i += 2) net.edges.push([msg.edges[i], msg.edges[i + 1]]);
-      if (matchMedia('(prefers-reduced-motion: reduce)').matches) { for (let i = 0; i < 260; i++) step(); net.alpha = 0; }
+      $('net-count').textContent = fmt(C) + ' node' + (C === 1 ? '' : 's') +
+        (msg.truncated ? ' (capped)' : msg.hopLimited ? '' : ' — whole basin');
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        for (let i = 0; i < Math.min(300, 90000 / Math.sqrt(C)); i++) step();
+        net.alpha = 0;
+      }
       tick();
     };
 
     function step() {
-      const ns = net.nodes, L = ns.length;
-      for (let i = 0; i < L; i++) {                       // repulsion
-        const a = ns[i];
-        for (let j = i + 1; j < L; j++) {
-          const bn = ns[j];
-          let dx = a.x - bn.x, dy = a.y - bn.y;
-          let d2 = dx * dx + dy * dy;
-          if (d2 < 1e-4) { dx = (i % 7) - 3; dy = (j % 7) - 3; d2 = dx * dx + dy * dy + 1e-4; }
-          if (d2 > 90000) continue;
-          // Clamped: 900/d2 goes to infinity as two nodes coincide, and one such kick
-          // flings a node clear of the cluster, which then wrecks the auto-framing.
-          const f = Math.min(3.5, 900 / d2);
-          const d = Math.sqrt(d2), ux = dx / d * f, uy = dy / d * f;
-          a.vx += ux; a.vy += uy; bn.vx -= ux; bn.vy -= uy;
+      const { x, y, vx, vy, count: L, edges, cut } = net;
+      // Bucket every node by cell, so repulsion only visits the 3x3 cells around it.
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let i = 0; i < L; i++) {
+        if (x[i] < x0) x0 = x[i]; if (x[i] > x1) x1 = x[i];
+        if (y[i] < y0) y0 = y[i]; if (y[i] > y1) y1 = y[i];
+      }
+      const gw = Math.max(1, Math.min(600, Math.ceil((x1 - x0) / cut) + 1));
+      const gh = Math.max(1, Math.min(600, Math.ceil((y1 - y0) / cut) + 1));
+      const cw = (x1 - x0) / gw || 1, ch = (y1 - y0) / gh || 1;
+      // Buffers are reused across frames - at a few hundred thousand nodes, allocating
+      // three typed arrays per step costs more than the forces do.
+      if (!net.buf || net.buf.head.length < gw * gh || net.buf.nxt.length < L)
+        net.buf = { head: new Int32Array(Math.max(gw * gh, 4096)), nxt: new Int32Array(L), cellOf: new Int32Array(L) };
+      const { nxt, cellOf } = net.buf;
+      const head = net.buf.head;
+      head.fill(-1, 0, gw * gh);
+      for (let i = 0; i < L; i++) {
+        const c = Math.min(gw - 1, Math.max(0, ((x[i] - x0) / cw) | 0));
+        const r = Math.min(gh - 1, Math.max(0, ((y[i] - y0) / ch) | 0));
+        const k = r * gw + c;
+        cellOf[i] = k; nxt[i] = head[k]; head[k] = i;
+      }
+      const cut2 = cut * cut, K = 900 * Math.min(1, cut / 300);
+      for (let i = 0; i < L; i++) {
+        const ci = cellOf[i], cr = (ci / gw) | 0, cc = ci - cr * gw;
+        for (let r = Math.max(0, cr - 1); r <= Math.min(gh - 1, cr + 1); r++) {
+          for (let c = Math.max(0, cc - 1); c <= Math.min(gw - 1, cc + 1); c++) {
+            for (let j = head[r * gw + c]; j >= 0; j = nxt[j]) {
+              if (j <= i) continue;
+              let dx = x[i] - x[j], dy = y[i] - y[j];
+              let d2 = dx * dx + dy * dy;
+              if (d2 > cut2) continue;
+              if (d2 < 1e-4) { dx = (i % 7) - 3; dy = (j % 7) - 3; d2 = dx * dx + dy * dy + 1e-4; }
+              // Clamped: K/d2 diverges as two nodes coincide, and one such kick flings a
+              // node clear of the cluster, which then wrecks the auto-framing.
+              const f = Math.min(3.5, K / d2), d = Math.sqrt(d2);
+              const ux = dx / d * f, uy = dy / d * f;
+              vx[i] += ux; vy[i] += uy; vx[j] -= ux; vy[j] -= uy;
+            }
+          }
         }
       }
-      for (const [s, t] of net.edges) {                    // springs
-        const a = ns[s], bn = ns[t];
-        const dx = bn.x - a.x, dy = bn.y - a.y;
-        const d = Math.hypot(dx, dy) || 1e-3;
-        const f = Math.max(-6, Math.min(6, (d - 46) * 0.045));
+      const rest = net.count > 4000 ? 26 : 46;
+      for (let e = 0; e < edges.length; e += 2) {           // springs
+        const s = edges[e], t = edges[e + 1];
+        const dx = x[t] - x[s], dy = y[t] - y[s];
+        const d = Math.sqrt(dx * dx + dy * dy) || 1e-3;
+        const f = Math.max(-6, Math.min(6, (d - rest) * 0.045));
         const ux = dx / d * f, uy = dy / d * f;
-        a.vx += ux; a.vy += uy; bn.vx -= ux; bn.vy -= uy;
+        vx[s] += ux; vy[s] += uy; vx[t] -= ux; vy[t] -= uy;
       }
-      for (const n of ns) {                                // centring + damping
-        n.vx -= n.x * 0.0025; n.vy -= n.y * 0.0025;
-        if (n === net.held) { n.vx = n.vy = 0; continue; }
-        n.vx *= 0.86; n.vy *= 0.86;
-        const sp = Math.hypot(n.vx, n.vy);                 // terminal velocity, same reason
-        if (sp > 14) { n.vx = n.vx / sp * 14; n.vy = n.vy / sp * 14; }
-        n.x += n.vx; n.y += n.vy;
+      const pull = 0.0025 * Math.min(1, 220 / Math.max(1, net.count)) + 0.0004;
+      for (let i = 0; i < L; i++) {                         // centring + damping
+        vx[i] -= x[i] * pull; vy[i] -= y[i] * pull;
+        if (i === net.held) { vx[i] = vy[i] = 0; continue; }
+        vx[i] *= 0.86; vy[i] *= 0.86;
+        const sp = Math.sqrt(vx[i] * vx[i] + vy[i] * vy[i]);  // terminal velocity, same reason
+        if (sp > 14) { vx[i] = vx[i] / sp * 14; vy[i] = vy[i] / sp * 14; }
+        x[i] += vx[i]; y[i] += vy[i];
       }
     }
 
@@ -3670,50 +3727,71 @@ function chainsClient(WORKER_SRC) {
       const S = cv.width;
       // Keep the whole neighbourhood framed while it settles; the moment the reader
       // pans, zooms or drags a node, the framing is theirs and we stop interfering.
+      const { x, y, rad, num, slot, flag, count: L, edges } = net;
       if (net.autofit) {
         let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-        for (const n of net.nodes) {
-          if (n.x - n.r < x0) x0 = n.x - n.r; if (n.x + n.r > x1) x1 = n.x + n.r;
-          if (n.y - n.r < y0) y0 = n.y - n.r; if (n.y + n.r > y1) y1 = n.y + n.r;
+        for (let i = 0; i < L; i++) {
+          if (x[i] - rad[i] < x0) x0 = x[i] - rad[i]; if (x[i] + rad[i] > x1) x1 = x[i] + rad[i];
+          if (y[i] - rad[i] < y0) y0 = y[i] - rad[i]; if (y[i] + rad[i] > y1) y1 = y[i] + rad[i];
         }
         const span = Math.max(x1 - x0, y1 - y0, 1);
-        net.scale = Math.max(0.25, Math.min(6, (cv.clientWidth || 700) * 0.86 / span * 1.6));
+        net.scale = Math.max(0.02, Math.min(6, (cv.clientWidth || 700) * 0.86 / span * 1.6));
         net.ox = -((x0 + x1) / 2) * (net.scale / 1.6);
         net.oy = -((y0 + y1) / 2) * (net.scale / 1.6);
       }
+      // Past a few thousand nodes, circles and per-node strokes stop being legible and
+      // stop being affordable, so the marks thin out: fainter links, flat dots, no labels.
+      const big = L > 3000, huge = L > 30000;
       ctx.save();
       ctx.translate(S / 2 + net.ox * dpr, S / 2 + net.oy * dpr);
       ctx.scale(net.scale * dpr / 1.6, net.scale * dpr / 1.6);
-      ctx.lineWidth = 1.1;
-      ctx.strokeStyle = 'rgba(190,200,220,.30)';
+      const k = 1.6 / net.scale;                            // keep strokes ~constant on screen
+      ctx.lineWidth = (huge ? 0.5 : big ? 0.8 : 1.1) * k;
+      // Alpha falls with node count: thousands of overlapping links at a fixed alpha
+      // accumulate to a solid white disc that says nothing.
+      const ea = Math.max(0.012, Math.min(0.30, 0.30 * Math.sqrt(1200 / Math.max(1, L))));
+      ctx.strokeStyle = 'rgba(188,198,220,' + ea.toFixed(3) + ')';
       ctx.beginPath();
-      for (const [s, t] of net.edges) {
-        const a = net.nodes[s], bn = net.nodes[t];
-        ctx.moveTo(a.x, a.y); ctx.lineTo(bn.x, bn.y);
+      for (let e = 0; e < edges.length; e += 2) {
+        ctx.moveTo(x[edges[e]], y[edges[e]]); ctx.lineTo(x[edges[e + 1]], y[edges[e + 1]]);
       }
       ctx.stroke();
-      for (const n of net.nodes) {
+      // One path per basin rather than a fill call per node. Swept by colour slot rather
+      // than bucketed into arrays first: at this size, building the buckets each frame
+      // costs more than the extra passes.
+      ctx.globalAlpha = huge ? .7 : .88;
+      for (let sl = -1; sl < NET_HUE.length; sl++) {
+        ctx.fillStyle = sl < 0 ? SINK_HUE : NET_HUE[sl];
         ctx.beginPath();
-        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-        ctx.fillStyle = netColour(n);
-        ctx.globalAlpha = n.n === net.focus ? 1 : .88;
-        ctx.fill();
-        if (n.n === net.focus || n.loop) {
-          ctx.globalAlpha = 1;
-          ctx.lineWidth = n.n === net.focus ? 2.4 : 1.4;
-          ctx.strokeStyle = n.n === net.focus ? '#fff' : netColour(n);
-          ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 3.4, 0, Math.PI * 2); ctx.stroke();
-          ctx.lineWidth = 1.1;
+        let any = false;
+        for (let i = 0; i < L; i++) {
+          const s = (flag[i] & 2) ? -1 : (slot[i] >= 0 ? slot[i] % NET_HUE.length : -1);
+          if (s !== sl) continue;
+          const r = huge ? Math.max(0.7, rad[i] * 0.35) : big ? Math.max(1.4, rad[i] * 0.6) : rad[i];
+          ctx.moveTo(x[i] + r, y[i]);
+          ctx.arc(x[i], y[i], r, 0, Math.PI * 2);
+          any = true;
         }
+        if (any) ctx.fill();
       }
       ctx.globalAlpha = 1;
-      // Label the focus and anything big enough to carry one.
-      ctx.font = '11px ui-monospace, monospace';
-      ctx.textAlign = 'center';
-      for (const n of net.nodes) {
-        if (n.n !== net.focus && n.r < 5.4 && n !== netHover) continue;
-        ctx.fillStyle = n.n === net.focus ? '#fff' : 'rgba(215,222,235,.9)';
-        ctx.fillText(n.n.toLocaleString('en-US'), n.x, n.y - n.r - 5);
+      // The focus always keeps its ring; loop members only while they are distinguishable.
+      for (let i = 0; i < L; i++) {
+        const isFocus = num[i] === net.focus;
+        if (!isFocus && (big || !(flag[i] & 1))) continue;
+        const col = (flag[i] & 2) ? SINK_HUE : (slot[i] >= 0 ? NET_HUE[slot[i] % NET_HUE.length] : SINK_HUE);
+        ctx.lineWidth = (isFocus ? 2.4 : 1.4) * k;
+        ctx.strokeStyle = isFocus ? '#fff' : col;
+        ctx.beginPath(); ctx.arc(x[i], y[i], rad[i] + 3.4 * k, 0, Math.PI * 2); ctx.stroke();
+      }
+      if (!big) {
+        ctx.font = (11 * k) + 'px ui-monospace, monospace';
+        ctx.textAlign = 'center';
+        for (let i = 0; i < L; i++) {
+          if (num[i] !== net.focus && rad[i] < 5.4 && i !== netHover) continue;
+          ctx.fillStyle = num[i] === net.focus ? '#fff' : 'rgba(215,222,235,.9)';
+          ctx.fillText(num[i].toLocaleString('en-US'), x[i], y[i] - rad[i] - 5 * k);
+        }
       }
       ctx.restore();
     }
@@ -3729,7 +3807,7 @@ function chainsClient(WORKER_SRC) {
       raf = requestAnimationFrame(run);
     }
 
-    let netHover = null;
+    let netHover = -1;
     const netAt = e => {                                   // screen -> sim coords
       const r = cv.getBoundingClientRect();
       return { x: (e.clientX - r.left - r.width / 2 - net.ox) / (net.scale / 1.6),
@@ -3737,25 +3815,30 @@ function chainsClient(WORKER_SRC) {
     };
     const netPick = pt => {
       const reach = 15 / (net.scale / 1.6);                // constant on screen, not in sim units
-      let best = null, bd = reach * reach;
-      for (const n of net.nodes) {
-        const dx = n.x - pt.x, dy = n.y - pt.y, d = dx * dx + dy * dy;
-        if (d < bd) { bd = d; best = n; }
+      let best = -1, bd = reach * reach;
+      for (let i = 0; i < net.count; i++) {
+        const dx = net.x[i] - pt.x, dy = net.y[i] - pt.y, d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = i; }
       }
       return best;
     };
 
     function loadNet(focus) {
+      const sel = $('net-depth');
+      const [hops, cap] = sel.value.split(':').map(Number);
       $('plate-wrap').classList.add('busy');
-      w.postMessage({ cmd: 'neigh', id: ++netReq, focus, cap: 220 });
+      $('net-count').textContent = 'expanding…';
+      w.postMessage({ cmd: 'neigh', id: ++netReq, focus, cap, hops });
     }
+    $('net-depth').addEventListener('change', () => { if (mode === 'network') loadNet(net ? net.focus : lastTraced); });
     function setMode(next, focus) {
       mode = next;
+      document.body.classList.toggle('net-mode', next === 'network');
       for (const btn of $('plate-modes').querySelectorAll('button')) btn.classList.toggle('on', btn.dataset.mode === next);
       $('plate-reset').hidden = next === 'network' ? false : (B.x1 - B.x0) / (view.x1 - view.x0) < 1.05;
       $('plate-readout').textContent = '';
       if (next === 'radial') { cancelAnimationFrame(raf); updateZoom(); paint(); return; }
-      $('plate-zoom').textContent = 'local graph';
+      $('plate-zoom').textContent = '';
       loadNet(focus != null ? focus : (lastTraced >= 0 ? lastTraced : D.deepestChain.start));
     }
     $('plate-modes').addEventListener('click', e => {
@@ -3976,6 +4059,12 @@ function renderChains() {
   #plate-hud button{pointer-events:auto;padding:4px 10px;font:inherit;color:#C7CEDA;
     background:rgba(12,14,22,.82);border:1px solid rgba(255,255,255,.16);border-radius:2px;cursor:pointer}
   #plate-hud button:hover{border-color:var(--accent);color:var(--accent)}
+  #net-depth-wrap,#net-count{display:none}
+  body.net-mode #net-depth-wrap,body.net-mode #net-count{display:inline-flex;align-items:center}
+  #net-depth{pointer-events:auto;padding:4px 6px;font:inherit;font-size:.75rem;color:#C7CEDA;
+    background:rgba(12,14,22,.9);border:1px solid rgba(255,255,255,.16);border-radius:2px;cursor:pointer}
+  #net-depth:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  #net-count{color:#8A93A6}
   #plate-modes{display:inline-flex;pointer-events:auto}
   #plate-modes button{border-radius:0;margin-left:-1px}
   #plate-modes button:first-child{border-radius:2px 0 0 2px;margin-left:0}
@@ -4069,6 +4158,18 @@ function renderChains() {
         <div id="plate-hud">
           <span id="plate-zoom" class="mono"></span>
           <button type="button" id="plate-reset" hidden>Reset</button>
+          <label id="net-depth-wrap"><span class="sr-only">Neighbourhood size</span>
+            <select id="net-depth">
+              <option value="2:220">2 hops</option>
+              <option value="3:600">3 hops</option>
+              <option value="4:2000">4 hops</option>
+              <option value="6:8000">6 hops</option>
+              <option value="10:40000">10 hops</option>
+              <option value="999999:40000">Whole basin &middot; 40k</option>
+              <option value="999999:150000">Whole basin &middot; 150k (dense)</option>
+            </select>
+          </label>
+          <span id="net-count" class="mono"></span>
           <span id="plate-modes" role="group" aria-label="Graph view">
             <button type="button" data-mode="radial" class="on">Radial</button>
             <button type="button" data-mode="network">Network</button>
