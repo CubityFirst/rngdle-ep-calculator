@@ -247,7 +247,20 @@ function pPairExact(s) {
   }
   return null;
 }
+// pTripleExact / pQuadExact are each asked for by TWO badges (in-order + scrambled) about
+// the same string, so every second call is a guaranteed repeat - a one-entry cache halves
+// the cost of the four most expensive badges in the full-range sweep. The cache lives on
+// the function object rather than in module scope because these helpers are shipped to the
+// browser engine via Function.prototype.toString(), which only carries the body.
 function pTripleExact(s) {
+  if (pTripleExact.k !== s) { pTripleExact.k = s; pTripleExact.v = pTripleExactScan(s); }
+  return pTripleExact.v;
+}
+function pQuadExact(s) {
+  if (pQuadExact.k !== s) { pQuadExact.k = s; pQuadExact.v = pQuadExactScan(s); }
+  return pQuadExact.v;
+}
+function pTripleExactScan(s) {
   for (let t = 1; t < s.length - 1; t++) for (let i = t + 1; i < s.length; i++) {
     const parts = [s.slice(0, t), s.slice(t, i), s.slice(i)];
     if (parts.some(pLeadingZero) || !pMultiPart(parts)) continue;
@@ -256,7 +269,7 @@ function pTripleExact(s) {
   }
   return null;
 }
-function pQuadExact(s) {
+function pQuadExactScan(s) {
   for (let t = 1; t < s.length - 2; t++) for (let i = t + 1; i < s.length - 1; i++) for (let r = i + 1; r < s.length; r++) {
     const parts = [s.slice(0, t), s.slice(t, i), s.slice(i, r), s.slice(r)];
     if (parts.some(pLeadingZero) || !pMultiPart(parts)) continue;
@@ -1096,6 +1109,104 @@ function compute(n) {
 // a `test` function above automatically flows into this engine - no second copy.
 // ---------------------------------------------------------------------------
 
+// The two functions below never run in the Cloudflare Worker: like analysisWorker /
+// gridClient, they are serialized into the generated engine module and only execute in
+// the browser, where computeLean / BADGE_META and the Worker API exist. Kept as real
+// source (rather than strings inside engineModuleSource) so they stay readable.
+
+// Sweep lo..hi inclusive in the CALLING thread, packing per-number results:
+//   ep[k]   total EP,   cnt[k]  number of badges earned,   bits[k*ROW..]  earned bitmask
+// exPerBadge > 0 also collects the first N [n, ep] earners per badge within the range.
+function sweepRange(lo, hi, ROW, exPerBadge) {
+  const N = hi - lo + 1;
+  const ep = new Float64Array(N), cnt = new Uint8Array(N), bits = new Uint8Array(N * ROW);
+  const examples = exPerBadge ? BADGE_META.map(() => []) : null;
+  for (let n = lo; n <= hi; n++) {
+    const r = computeLean(n), earned = r.earned, k = n - lo, base = k * ROW;
+    ep[k] = r.ep; cnt[k] = earned.length;
+    for (let j = 0; j < earned.length; j++) {
+      const bi = earned[j];
+      bits[base + (bi >> 3)] |= (1 << (bi & 7));
+      if (examples && examples[bi].length < exPerBadge) examples[bi].push([n, r.ep]);
+    }
+  }
+  return { ep, cnt, bits, examples };
+}
+
+// Parallel version of sweepRange: cuts the range into chunks and farms them out to shard
+// workers - this same engine module, loaded under the name 'rngdle-shard' (see the
+// epilogue in engineModuleSource) - so the badge engine exists in exactly one place.
+// More chunks than workers, handed out on demand, keeps every core busy to the end.
+// Falls back to sweeping in the calling thread when nested workers are unavailable
+// (older Safari) or a shard fails; the stitched result is identical either way.
+// onProgress(fraction) fires as chunks land.
+async function sweepAll(engineUrl, lo, hi, exPerBadge, onProgress) {
+  const ROW = (BADGE_META.length + 7) >> 3;
+  const N = hi - lo + 1, CHUNK = 25000;
+  const ep = new Float64Array(N), cnt = new Uint8Array(N), bits = new Uint8Array(N * ROW);
+  const chunks = [];
+  for (let s = lo; s <= hi; s += CHUNK) chunks.push([s, Math.min(s + CHUNK - 1, hi)]);
+  const chunkEx = new Array(chunks.length);
+  let done = 0;
+  const absorb = (ci, r) => {
+    const k = chunks[ci][0] - lo;
+    ep.set(r.ep, k); cnt.set(r.cnt, k); bits.set(r.bits, k * ROW);
+    chunkEx[ci] = r.examples;
+    if (onProgress) onProgress(++done / chunks.length);
+  };
+
+  let pool = [], shardUrl = null;
+  const hw = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 1;
+  const want = Math.min(chunks.length, Math.max(1, hw - 1));
+  try {
+    if (want > 1 && typeof Worker !== 'undefined') {
+      // Fetch the engine source ONCE and start every shard from a single blob. Pointing
+      // the shards at engineUrl directly would ask for it once per core - the shards are
+      // constructed together, so they would race the HTTP cache rather than share it -
+      // and this also guarantees every shard runs byte-identical code.
+      shardUrl = URL.createObjectURL(new Blob([await (await fetch(engineUrl)).text()], { type: 'text/javascript' }));
+      for (let i = 0; i < want; i++) pool.push(new Worker(shardUrl, { type: 'module', name: 'rngdle-shard' }));
+    }
+  } catch (e) { pool.forEach(w => w.terminate()); pool = []; }  // no nested workers here
+
+  if (pool.length) {
+    const pending = new Set(chunks.keys());
+    let next = 0;
+    try {
+      await new Promise((resolve, reject) => {
+        const feed = w => { if (next < chunks.length) { const ci = next++; w.postMessage({ ci, lo: chunks[ci][0], hi: chunks[ci][1], ROW, exPerBadge }); } };
+        for (const w of pool) {
+          w.onmessage = ev => {
+            const m = ev.data;
+            absorb(m.ci, { ep: new Float64Array(m.ep), cnt: new Uint8Array(m.cnt), bits: new Uint8Array(m.bits), examples: m.examples });
+            pending.delete(m.ci);
+            if (!pending.size) resolve(); else feed(w);
+          };
+          w.onerror = reject;
+          feed(w);
+        }
+      });
+    } catch (e) {
+      next = chunks.length;                      // stop feeding, finish what's left here
+    }
+    pool.forEach(w => w.terminate());
+    for (const ci of pending) absorb(ci, sweepRange(chunks[ci][0], chunks[ci][1], ROW, exPerBadge));
+  } else {
+    for (let ci = 0; ci < chunks.length; ci++) absorb(ci, sweepRange(chunks[ci][0], chunks[ci][1], ROW, exPerBadge));
+  }
+  if (shardUrl) URL.revokeObjectURL(shardUrl);
+
+  // Chunk examples are per-chunk firsts; stitch in range order for the overall firsts.
+  let examples = null;
+  if (exPerBadge) {
+    examples = BADGE_META.map(() => []);
+    for (const per of chunkEx)
+      for (let i = 0; i < examples.length; i++)
+        for (const e of per[i]) { if (examples[i].length >= exPerBadge) break; examples[i].push(e); }
+  }
+  return { ep, cnt, bits, ROW, examples };
+}
+
 function engineModuleSource() {
   // Named function declarations (hoisted) used by the badge tests.
   const named = [
@@ -1104,10 +1215,12 @@ function engineModuleSource() {
     runLengths, strobogrammatic,
     // prod-ported helpers (must ship to the browser engine too)
     pLeadingZero, pMultiPart, pConsecSet, pDigitCounts, pContig, pOrdered, pHasSequence,
-    pPairExact, pTripleExact, pQuadExact, pPairAdjacent, pPairNearby,
+    pPairExact, pTripleExact, pQuadExact, pTripleExactScan, pQuadExactScan, pPairAdjacent, pPairNearby,
     pNAdjacentBuild, pNAdjacentAt, pNAdjacent, pContigPairStarts,
     // 2026-07-16 batch helpers (Metronome / Crescendo / Equation / Pocket Mirror / Mini Scramble)
     pSplitParts, findArithmeticSplit, findGeometricSplit, findEquation, isPalindromeStr, isScrambledSeq,
+    // full-range sweep (used by /analyze and /grid, and by this module in shard mode)
+    sweepRange, sweepAll,
   ];
   const namedSrc = named.map(f => f.toString()).join('\n');
 
@@ -1145,44 +1258,73 @@ const SUP_INDEX = (() => {
   return FAMILIES.map(g => g.map(id => idToIdx.get(id)).filter(i => i !== undefined));
 })();
 
+// Flat lookup tables for the sweep hot loop: computeLean runs 1,000,001 times, so the
+// per-badge property loads (BADGES[i][3] / [4]) and the family lookup are hoisted out.
+const BADGE_EP = Float64Array.from(BADGES, b => b[3]);
+const BADGE_TEST = BADGES.map(b => b[4]);
+const FAM_OF = (() => {                       // badge index -> family index, -1 = standalone
+  const a = new Int16Array(BADGES.length).fill(-1);
+  SUP_INDEX.forEach((g, f) => g.forEach(i => { a[i] = f; }));
+  return a;
+})();
+// Scratch: winning (max-EP) earned member per family, or -1. Reused across calls -
+// computeLean is synchronous, so it is always refilled before it is read.
+const FAM_TOP = new Int32Array(SUP_INDEX.length);
+
 function computeLean(n) {
   const s = String(n);
-  const d = [...s].map(ch => ch.charCodeAt(0) - 48);
+  const len = s.length;
+  const d = new Array(len);
   const counts = {};
-  for (const x of d) counts[x] = (counts[x] || 0) + 1;
+  let sum = 0, prod = 1;
+  for (let i = 0; i < len; i++) {
+    const x = s.charCodeAt(i) - 48;
+    d[i] = x; sum += x; prod *= x;
+    counts[x] = (counts[x] || 0) + 1;
+  }
+  let distinct = 0, maxCount = 0;
+  for (const k in counts) { distinct++; if (counts[k] > maxCount) maxCount = counts[k]; }
   const c = {
-    n, s, len: s.length, d, counts,
-    distinct: Object.keys(counts).length,
-    sum: d.reduce((a, b) => a + b, 0),
-    prod: d.reduce((a, b) => a * b, 1),
-    maxCount: Math.max(...Object.values(counts)),
+    n, s, len, d, counts, distinct, sum, prod, maxCount,
     has: sub => s.includes(sub),
     cnt: digit => counts[digit] || 0,
     withCount: k => Object.values(counts).filter(v => v >= k).length,
     countExact: k => Object.values(counts).filter(v => v === k).length,
     runs: runLengths(s),
   };
+  // One pass: run every test, and fold supersession in as we go (per family, the
+  // max-EP earned member wins, first-on-tie - same rule as compute()).
   const earned = [];
-  const epOf = new Map();
-  for (let i = 0; i < BADGES.length; i++) {
-    let ok = false;
-    try { ok = BADGES[i][4](c); } catch (e) { ok = false; }
-    if (ok) { earned.push(i); epOf.set(i, BADGES[i][3]); }
-  }
-  const earnedSet = new Set(earned);
-  for (const g of SUP_INDEX) {
-    const members = g.filter(i => earnedSet.has(i));
-    if (members.length < 2) continue;
-    let top = members[0];
-    for (const i of members) if (epOf.get(i) > epOf.get(top)) top = i;
-    for (const i of members) if (i !== top) epOf.set(i, 0); // zero all but the max-EP member
-  }
   let total = 0;
-  for (const v of epOf.values()) total += v;
+  FAM_TOP.fill(-1);
+  for (let i = 0; i < BADGE_TEST.length; i++) {
+    let ok = false;
+    try { ok = BADGE_TEST[i](c); } catch (e) { ok = false; }
+    if (!ok) continue;
+    earned.push(i);
+    const f = FAM_OF[i];
+    if (f < 0) { total += BADGE_EP[i]; continue; } // standalone badges always score
+    const top = FAM_TOP[f];
+    if (top < 0 || BADGE_EP[i] > BADGE_EP[top]) FAM_TOP[f] = i; // strict > keeps first of a tie
+  }
+  for (let f = 0; f < FAM_TOP.length; f++) if (FAM_TOP[f] >= 0) total += BADGE_EP[FAM_TOP[f]];
   return { ep: total, earned };
 }
 
-export { computeLean, BADGE_META };
+export { computeLean, BADGE_META, sweepRange, sweepAll };
+
+// Shard mode: when this module is loaded as a Worker named 'rngdle-shard' (which is how
+// sweepAll fans a sweep across cores) it answers range requests instead of just being
+// imported for its exports. Loaded any other way - a plain import from /analyze, /grid,
+// or the page - self.name is '' and this does nothing.
+if (typeof self !== 'undefined' && self.name === 'rngdle-shard') {
+  self.onmessage = (ev) => {
+    const m = ev.data;
+    const r = sweepRange(m.lo, m.hi, m.ROW, m.exPerBadge);
+    self.postMessage({ ci: m.ci, ep: r.ep.buffer, cnt: r.cnt.buffer, bits: r.bits.buffer, examples: r.examples },
+      [r.ep.buffer, r.cnt.buffer, r.bits.buffer]);
+  };
+}
 `;
   // __name shim: when this Worker is bundled (esbuild keepNames), function source returned
   // by toString() contains __name(fn,"fn") calls. That helper only exists in the bundled
@@ -1281,33 +1423,23 @@ function analysisWorker() {
 
         // 2) Otherwise sweep every number 0..1,000,000 exactly (no sampling). Length 7 is the
         //    single 7-digit value 1,000,000 - the top of the live game's roll range.
+        //    sweepAll spreads the sweep over one shard worker per core; the ranges are
+        //    contiguous and ascending, so slot k is simply the number k.
         const lengths = [1, 2, 3, 4, 5, 6, 7];
-        const B = E.BADGE_META.length;
-        ROW = (B + 7) >> 3;                        // bytes of badge bitmask per number
         const cap = 1000001;
-        epArr = new Float64Array(cap);
+        const swept = await E.sweepAll(origin + '/engine.js', 0, cap - 1, EX_PER_BADGE,
+          pct => self.postMessage({ type: 'progress', pct }));
+        ROW = swept.ROW;                           // bytes of badge bitmask per number
+        epArr = swept.ep; bits = swept.bits; examples = swept.examples;
         lenArr = new Uint8Array(cap);
         idxArr = new Int32Array(cap);
-        bits = new Uint8Array(cap * ROW);
-        examples = []; for (let i = 0; i < B; i++) examples.push([]);
-        let maxEP = 0, k = 0, scanned = 0;
+        let maxEP = 0;
         for (const L of lengths) {
-          const lo = LRANGE[L][0], hi = LRANGE[L][1];
-          for (let n = lo; n <= hi; n++) {
-            const r = E.computeLean(n);
-            epArr[k] = r.ep; lenArr[k] = L; idxArr[k] = n;
-            if (r.ep > maxEP) maxEP = r.ep;
-            const base = k * ROW, earned = r.earned;
-            for (let j = 0; j < earned.length; j++) {
-              const bi = earned[j];
-              bits[base + (bi >> 3)] |= (1 << (bi & 7));
-              if (examples[bi].length < EX_PER_BADGE) examples[bi].push([n, r.ep]);
-            }
-            k++; scanned++;
-            if ((scanned % 25000) === 0) self.postMessage({ type: 'progress', pct: scanned / cap });
-          }
+          const hi = Math.min(LRANGE[L][1], cap - 1);
+          for (let n = LRANGE[L][0]; n <= hi; n++) { lenArr[n] = L; idxArr[n] = n; }
         }
-        count = k; computedMax = maxEP;
+        for (let k = 0; k < cap; k++) if (epArr[k] > maxEP) maxEP = epArr[k];
+        count = cap; computedMax = maxEP;
 
         // 3) Stash it for next time (best-effort - ignore quota/private-mode failures).
         await idbPut(CACHE_KEY, { ver, ts: Date.now(), ep: epArr, len: lenArr, idx: idxArr, bits, row: ROW, count, max: computedMax, examples }).catch(() => {});
@@ -2135,7 +2267,7 @@ function renderHTML(result) {
   <p class="tag">Click the box and type a number from 0 to 1,000,000 to see its EP and badges.</p>
   ${body}
 
-  <div class="an-bar"><button type="button" id="an-btn">Analyze all scores</button><a class="grid-btn" href="/grid">Explore all 1,000,000 numbers &rarr;</a><a class="grid-btn" href="/badges">Browse all ${BADGES.length} badges &rarr;</a><a class="grid-btn" href="/u">Player profiles &rarr;</a></div>
+  <div class="an-bar"><button type="button" id="an-btn">Analyze all scores</button><a class="grid-btn" href="/grid">Explore all 1,000,000 numbers &rarr;</a><a class="grid-btn" href="/badges">Browse all ${BADGES.length} badges &rarr;</a><a class="grid-btn" href="/chains">Follow the score chains &rarr;</a><a class="grid-btn" href="/u">Player profiles &rarr;</a></div>
 
   <section id="analysis" hidden>
     <h2>EP distribution across 0-1,000,000</h2>
@@ -2353,23 +2485,18 @@ function gridWorker() {
         cmin = hit.min; cmax = hit.max; emin = hit.emin; emax = hit.emax;
       } else {
         // Full 0..999,999 sweep: per-number badge count, total EP, and a packed
-        // earned-badge bitmask (for per-badge membership maps).
-        const N = 1000000, B = E.BADGE_META.length;
-        ROW = (B + 7) >> 3;
-        counts = new Uint8Array(N);
-        epArr = new Float64Array(N);
-        bits = new Uint8Array(N * ROW);
+        // earned-badge bitmask (for per-badge membership maps). sweepAll spreads it
+        // over one shard worker per core.
+        const N = 1000000;
+        const swept = await E.sweepAll(origin + '/engine.js', 0, N - 1, 0,
+          pct => self.postMessage({ type: 'progress', pct }));
+        counts = swept.cnt; epArr = swept.ep; bits = swept.bits; ROW = swept.ROW;
         let mn = 255, mx = 0, en = Infinity, ex = 0;
         for (let n = 0; n < N; n++) {
-          const r = E.computeLean(n), earned = r.earned, len = earned.length;
-          counts[n] = len; epArr[n] = r.ep;
-          if (len < mn) mn = len;
-          if (len > mx) mx = len;
-          if (r.ep < en) en = r.ep;
-          if (r.ep > ex) ex = r.ep;
-          const base = n * ROW;
-          for (let j = 0; j < len; j++) { const bi = earned[j]; bits[base + (bi >> 3)] |= (1 << (bi & 7)); }
-          if ((n & 0x7FFF) === 0) self.postMessage({ type: 'progress', pct: n / N });
+          if (counts[n] < mn) mn = counts[n];
+          if (counts[n] > mx) mx = counts[n];
+          if (epArr[n] < en) en = epArr[n];
+          if (epArr[n] > ex) ex = epArr[n];
         }
         cmin = mn; cmax = mx; emin = en; emax = ex;
         await idbPut(KEY, { ver, counts, ep: epArr, bits, row: ROW, min: mn, max: mx, emin: en, emax: ex });
@@ -2966,6 +3093,484 @@ function renderGrid() {
 var __name = (f) => f;
 const __GRID_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + gridWorker.toString() + ')()')};
 (${gridClient.toString()})(__GRID_WORKER_SRC, ${labels});
+</script>
+</body></html>`;
+}
+
+// ---------------------------------------------------------------------------
+// /chains - the graph of n -> EP(n).
+//
+// Every number is a node with one outgoing edge, to its own EP score; if that score
+// exceeds 1,000,000 it is not a legal input and the chain ends there (a "sink").
+// Out-degree 1 makes this a functional graph: disjoint basins, each draining into
+// either a sink or a cycle.
+//
+// Nothing here is precomputed or committed - the worker sweeps the live engine, so
+// the graph always reflects the current badge rules. Like /analyze and /grid it runs
+// client-side, and reuses the same sharded sweepAll.
+// ---------------------------------------------------------------------------
+
+function chainsWorker() {
+  const N = 1000001;
+  self.onmessage = async (ev) => {
+    const m = ev.data;
+    if (m.cmd !== 'build') return;
+    const say = (phase, pct) => self.postMessage({ type: 'progress', phase, pct });
+    try {
+      const E = await import(m.origin + '/engine.js');
+      say('Scoring every number', 0);
+      const swept = await E.sweepAll(m.origin + '/engine.js', 0, N - 1, 0, p => say('Scoring every number', p));
+      const EP = swept.ep;
+
+      // --- edges -----------------------------------------------------------
+      say('Building edges', 0);
+      const nextOf = new Int32Array(N);
+      let sinkCount = 0;
+      for (let n = 0; n < N; n++) {
+        const e = EP[n];
+        nextOf[n] = (Number.isInteger(e) && e >= 0 && e < N) ? e : -1;
+        if (nextOf[n] < 0) sinkCount++;
+      }
+
+      // --- attractors + depth ----------------------------------------------
+      // Walk each unvisited number until it meets a settled node, the end of a chain,
+      // or itself (a cycle), then unwind assigning depth outward from the attractor.
+      say('Finding loops', 0);
+      const depth = new Int32Array(N).fill(-1);
+      const attractor = new Int32Array(N).fill(-1);
+      const state = new Uint8Array(N);              // 0 unseen, 1 on current path, 2 settled
+      const attractors = [];                        // {kind, node|members}
+      const path = [];
+      for (let start = 0; start < N; start++) {
+        if (state[start]) continue;
+        if ((start & 0x3FFFF) === 0) say('Finding loops', start / N);
+        let n = start;
+        while (n >= 0 && state[n] === 0) { state[n] = 1; path.push(n); n = nextOf[n]; }
+        let attr, base = 0;
+        if (n < 0) {                                // ran off the end: last node is a sink
+          const sink = path.pop();
+          attr = attractors.push({ kind: 'sink', node: sink, ep: EP[sink] }) - 1;
+          attractor[sink] = attr; depth[sink] = 0; state[sink] = 2;
+        } else if (state[n] === 1) {                // closed a loop
+          const at = path.lastIndexOf(n);
+          const members = path.slice(at);
+          attr = attractors.push({ kind: 'cycle', members }) - 1;
+          for (const c of members) { attractor[c] = attr; depth[c] = 0; state[c] = 2; }
+          path.length = at;
+        } else { attr = attractor[n]; base = depth[n]; }
+        while (path.length) { const q = path.pop(); attractor[q] = attr; depth[q] = ++base; state[q] = 2; }
+      }
+
+      // --- radial layout ----------------------------------------------------
+      // Radius is depth; angle is a leaf-proportional sector, which spreads the
+      // outermost nodes evenly (sizing by subtree mass collapses long thin branches).
+      say('Laying out', 0);
+      let maxDepth = 0;
+      for (let n = 0; n < N; n++) if (depth[n] > maxDepth) maxDepth = depth[n];
+      const byDepth = [];
+      for (let d = 0; d <= maxDepth; d++) byDepth.push([]);
+      for (let n = 0; n < N; n++) byDepth[depth[n]].push(n);
+      const kids = new Int32Array(N);
+      for (let n = 0; n < N; n++) if (depth[n] > 0) kids[nextOf[n]]++;
+      const leaves = new Int32Array(N);
+      for (let n = 0; n < N; n++) if (kids[n] === 0) leaves[n] = 1;
+      for (let d = maxDepth; d >= 1; d--) for (const n of byDepth[d]) leaves[nextOf[n]] += leaves[n];
+
+      const a0 = new Float64Array(N), span = new Float64Array(N);
+      const roots = byDepth[0].slice().sort((x, y) => attractor[x] - attractor[y] || x - y);
+      let total = 0; for (const r of roots) total += leaves[r];
+      let cur = 0;
+      for (const r of roots) { a0[r] = cur / total * Math.PI * 2; span[r] = leaves[r] / total * Math.PI * 2; cur += leaves[r]; }
+      for (let d = 0; d < maxDepth; d++) {
+        const used = new Map();
+        for (const n of byDepth[d + 1]) {
+          const p = nextOf[n], u = used.get(p) || 0;
+          a0[n] = a0[p] + span[p] * (u / leaves[p]);
+          span[n] = span[p] * (leaves[n] / leaves[p]);
+          used.set(p, u + leaves[n]);
+        }
+      }
+
+      // --- rasterize --------------------------------------------------------
+      // Drawn here rather than on the page: a million canvas line ops would block the
+      // UI for seconds, where an accumulation buffer is one pass and transfers free.
+      say('Drawing', 0);
+      const S = m.size || 1500;
+      const px = new Float32Array(S * S * 3);
+      const HUES = [[255, 90, 92], [255, 176, 64], [110, 225, 140], [120, 170, 255], [225, 125, 255]];
+      const SINK = [120, 145, 175];
+      const cycIdx = new Map();                     // attractor index -> colour slot
+      attractors.forEach((a, i) => { if (a.kind === 'cycle') cycIdx.set(i, cycIdx.size); });
+      const R0 = (S / 2 - 20) / (maxDepth + 1.4);
+      const X = new Float32Array(N), Y = new Float32Array(N);
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (let n = 0; n < N; n++) {
+        const ang = a0[n] + span[n] / 2, rad = (depth[n] + 0.7) * R0;
+        const x = Math.cos(ang) * rad, y = Math.sin(ang) * rad;
+        X[n] = x; Y[n] = y;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+      const fit = Math.min((S - 30) / (maxX - minX), (S - 30) / (maxY - minY));
+      const ox = (S - (maxX - minX) * fit) / 2 - minX * fit, oy = (S - (maxY - minY) * fit) / 2 - minY * fit;
+      for (let n = 0; n < N; n++) { X[n] = X[n] * fit + ox; Y[n] = Y[n] * fit + oy; }
+      const add = (x, y, c, w) => {
+        if (x < 0 || y < 0 || x >= S || y >= S) return;
+        const i = ((y | 0) * S + (x | 0)) * 3;
+        px[i] += c[0] * w; px[i + 1] += c[1] * w; px[i + 2] += c[2] * w;
+      };
+      for (let n = 0; n < N; n++) {
+        const a = attractor[n];
+        const c = cycIdx.has(a) ? HUES[cycIdx.get(a) % HUES.length] : SINK;
+        const p = nextOf[n];
+        if (p >= 0 && depth[n] > 0) {
+          const dx = X[p] - X[n], dy = Y[p] - Y[n];
+          const steps = Math.max(1, Math.ceil(Math.sqrt(dx * dx + dy * dy)));
+          for (let s = 0; s <= steps; s++) add(X[n] + dx * s / steps, Y[n] + dy * s / steps, c, 0.14);
+        }
+        add(X[n], Y[n], c, 0.5);
+        if ((n & 0x3FFFF) === 0) say('Drawing', n / N);
+      }
+      for (const r of roots) {
+        const c = cycIdx.has(attractor[r]) ? HUES[cycIdx.get(attractor[r]) % HUES.length] : SINK;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) add(X[r] + dx, Y[r] + dy, c, 2.2);
+      }
+      // Log rolloff: the core is thousands of times denser than the rim, so a linear
+      // map would clip the middle to white and lose every isolated deep node.
+      const rgba = new Uint8ClampedArray(S * S * 4);
+      const denom = Math.log1p(255 * 0.05);
+      for (let i = 0, j = 0; i < px.length; i += 3, j += 4) {
+        for (let k = 0; k < 3; k++) rgba[j + k] = Math.pow(Math.log1p(px[i + k] * 0.05) / denom, 0.75) * 255;
+        rgba[j + 3] = 255;
+      }
+
+      // --- structures for the page -----------------------------------------
+      const basin = new Int32Array(attractors.length);
+      const hist = {};
+      let deepest = 0;
+      for (let n = 0; n < N; n++) {
+        basin[attractor[n]]++;
+        hist[depth[n]] = (hist[depth[n]] || 0) + 1;
+        if (depth[n] > depth[deepest]) deepest = n;
+      }
+      const walk = (from, cap) => { const out = [], seen = new Set(); for (let n = from; n >= 0 && !seen.has(n); n = nextOf[n]) { seen.add(n); out.push(n); if (out.length >= cap) break; } return out; };
+      const cycles = attractors.map((a, i) => ({ a, i })).filter(o => o.a.kind === 'cycle')
+        .map(o => ({ length: o.a.members.length, basin: basin[o.i], members: o.a.members, slot: cycIdx.get(o.i) }))
+        .sort((p, q) => q.basin - p.basin);
+      const sinks = attractors.map((a, i) => ({ a, i })).filter(o => o.a.kind === 'sink')
+        .map(o => ({ sink: o.a.node, ep: o.a.ep, basin: basin[o.i] }))
+        .sort((p, q) => q.basin - p.basin);
+      let deepestSink = 0;
+      for (let n = 0; n < N; n++) if (!cycIdx.has(attractor[n]) && depth[n] > depth[deepestSink]) deepestSink = n;
+      const escNodes = walk(deepestSink, depth[deepestSink] + 1);
+
+      self.postMessage({
+        type: 'done', size: S, image: rgba.buffer,
+        counts: {
+          nodes: N, edges: N - sinkCount, sinks: sinkCount, maxDepth,
+          inCycles: cycles.reduce((s, c) => s + c.basin, 0),
+          inSinks: sinks.reduce((s, c) => s + c.basin, 0),
+        },
+        cycles, topSinks: sinks.slice(0, 15), hist,
+        deepestChain: { start: deepest, depth: depth[deepest], nodes: walk(deepest, depth[deepest] + 1) },
+        // `ep` is the SINK's score - the out-of-range value that ends the chain.
+        escapeChain: { start: deepestSink, depth: depth[deepestSink], nodes: escNodes, ep: EP[escNodes[escNodes.length - 1]] },
+      }, [rgba.buffer]);
+    } catch (err) {
+      self.postMessage({ type: 'error', message: String((err && err.message) || err) });
+    }
+  };
+}
+
+function chainsClient(WORKER_SRC) {
+  const $ = id => document.getElementById(id);
+  const fmt = n => n.toLocaleString('en-US');
+  const HUES = ['var(--c0)', 'var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)'];
+  const status = $('status'), bar = $('bar');
+
+  const w = new Worker(URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' })), { type: 'module' });
+  w.onmessage = ev => {
+    const m = ev.data;
+    if (m.type === 'progress') {
+      status.textContent = m.phase + '…';
+      bar.style.width = Math.round((m.pct || 0) * 100) + '%';
+      return;
+    }
+    if (m.type === 'error') {
+      status.textContent = 'Could not build the graph: ' + m.message;
+      bar.parentElement.style.display = 'none';
+      return;
+    }
+    render(m);
+  };
+  w.postMessage({ cmd: 'build', origin: location.origin, size: 1500 });
+
+  function render(D) {
+    $('loading').style.display = 'none';
+    document.body.classList.add('ready');
+
+    // --- the plate ---------------------------------------------------------
+    const cv = $('plate');
+    cv.width = D.size; cv.height = D.size;
+    cv.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(D.image), D.size, D.size), 0, 0);
+
+    // --- figures -----------------------------------------------------------
+    const c = D.counts;
+    const figs = [
+      ['Numbers', fmt(c.nodes), 'every input 0–1,000,000'],
+      ['Arrows', fmt(c.edges), 'scores that stay in range'],
+      ['Sinks', fmt(c.sinks), 'chains that end'],
+      ['Loops', String(D.cycles.length), 'lengths ' + D.cycles.map(x => x.length).join(', ')],
+      ['Deepest', String(c.maxDepth), 'steps, from ' + fmt(D.deepestChain.start)],
+    ];
+    $('figures').innerHTML = figs.map(f =>
+      '<div class="fig"><dt>' + f[0] + '</dt><dd class="mono">' + f[1] + '<span class="sub">' + f[2] + '</span></dd></div>').join('');
+
+    $('loop-lede').textContent = 'Follow the arrows far enough and you almost never fall off the end — you land in a cycle and go round forever. There are exactly ' + D.cycles.length +
+      ', holding ' + fmt(c.inCycles) + ' numbers between them (' + (c.inCycles / c.nodes * 100).toFixed(1) + '% of the range). Hover a node to read its step.';
+
+    // --- loops as node-link rings -----------------------------------------
+    $('loops').innerHTML = D.cycles.map(cy => {
+      const n = cy.members.length, big = n > 24, S = 210, C = S / 2, R = S / 2 - (big ? 16 : 34);
+      const pt = i => { const a = -Math.PI / 2 + i / n * Math.PI * 2; return [C + Math.cos(a) * R, C + Math.sin(a) * R]; };
+      let g = '';
+      for (let i = 0; i < n; i++) {
+        const p = pt(i), q = pt((i + 1) % n);
+        g += '<line x1="' + p[0].toFixed(1) + '" y1="' + p[1].toFixed(1) + '" x2="' + q[0].toFixed(1) + '" y2="' + q[1].toFixed(1) +
+             '" stroke="' + HUES[cy.slot % HUES.length] + '" stroke-width="1" opacity=".45"/>';
+      }
+      for (let i = 0; i < n; i++) {
+        const p = pt(i);
+        g += '<g class="node" tabindex="0" role="button" data-n="' + cy.members[i] + '" data-next="' + cy.members[(i + 1) % n] + '">' +
+             '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="' + (big ? 2.6 : 4) + '" fill="' + HUES[cy.slot % HUES.length] + '"/></g>';
+        if (!big) g += '<text x="' + p[0].toFixed(1) + '" y="' + p[1].toFixed(1) + '" dy="-9" text-anchor="middle" font-size="9" ' +
+             'fill="currentColor" opacity=".72" font-family="ui-monospace,monospace">' + cy.members[i] + '</text>';
+      }
+      return '<div class="loop"><h3><span class="swatch" style="background:' + HUES[cy.slot % HUES.length] + '"></span>' +
+        cy.length + '-step loop</h3><p class="meta mono">' + fmt(cy.basin) + ' numbers drain into it · ' +
+        (cy.basin / c.nodes * 100).toFixed(1) + '%</p><svg viewBox="0 0 ' + S + ' ' + S + '" role="img" aria-label="Ring diagram of a ' +
+        cy.length + '-step loop">' + g + '</svg><div class="readout mono" data-readout><span class="dim">hover a node</span></div></div>';
+    }).join('');
+    const show = e => {
+      const g = e.target.closest && e.target.closest('.node'); if (!g) return;
+      g.closest('.loop').querySelector('[data-readout]').innerHTML =
+        '<a href="/?n=' + g.dataset.n + '">' + fmt(+g.dataset.n) + '</a> scores <a href="/?n=' + g.dataset.next + '">' + fmt(+g.dataset.next) + '</a>';
+    };
+    $('loops').addEventListener('pointerover', show);
+    $('loops').addEventListener('focusin', show);
+
+    // --- chains ------------------------------------------------------------
+    const chips = (el, nodes, terminal) => {
+      el.innerHTML = nodes.map((n, i) =>
+        (i ? '<span class="arrow">→</span>' : '') +
+        '<a class="chip mono' + (terminal && i === nodes.length - 1 ? ' terminal' : '') + '" href="/?n=' + n + '">' + fmt(n) + '</a>').join('');
+    };
+    const deep = D.deepestChain;
+    $('deep-title').textContent = fmt(deep.start) + ' takes ' + deep.depth + ' steps to reach a loop';
+    chips($('deep-chain'), deep.nodes, false);
+    const joined = deep.nodes[deep.nodes.length - 1];
+    const joinedLoop = D.cycles.find(x => x.members.indexOf(joined) >= 0);
+    $('deep-note').textContent = 'After ' + deep.depth + ' steps it arrives at ' + fmt(joined) +
+      ', already a member of the ' + (joinedLoop ? joinedLoop.length : '?') + '-step loop — from there it repeats forever, ' +
+      (joinedLoop ? deep.depth + ' + ' + joinedLoop.length + ' = ' + (deep.depth + joinedLoop.length) + ' distinct numbers in all.' : '');
+
+    const esc = D.escapeChain;
+    $('esc-title').textContent = fmt(esc.start) + ' is the longest chain that actually ends';
+    chips($('esc-chain'), esc.nodes, true);
+    const sinkNode = esc.nodes[esc.nodes.length - 1];
+    const sinkRow = D.topSinks.filter(s => s.sink === sinkNode)[0];
+    $('esc-note').innerHTML = '<span class="mono">' + fmt(sinkNode) + '</span> scores <span class="mono">' + fmt(esc.ep) +
+      '</span> — ' + fmt(esc.ep - 1000000) + ' past the top of the range, so there is nowhere left to go.' +
+      (sinkRow ? ' ' + fmt(sinkRow.basin) + ' numbers finish here, more than at any other sink.' : '');
+
+    // --- depth profile -----------------------------------------------------
+    const keys = Object.keys(D.hist).map(Number).sort((a, b) => a - b);
+    const max = Math.max.apply(null, keys.map(k => D.hist[k]));
+    const W = 1000, H = 220, PAD = 26, bw = (W - PAD * 2) / keys.length;
+    let s = '';
+    for (const k of keys) {
+      const h = D.hist[k] / max * (H - PAD * 2);
+      s += '<rect class="bar" x="' + (PAD + k * bw).toFixed(2) + '" y="' + (H - PAD - h).toFixed(2) + '" width="' +
+        Math.max(0.8, bw - 0.6).toFixed(2) + '" height="' + h.toFixed(2) + '"><title>depth ' + k + ' — ' + fmt(D.hist[k]) + ' numbers</title></rect>';
+    }
+    for (const k of [0, 20, 40, 60, 80, 100]) if (k <= c.maxDepth)
+      s += '<text x="' + (PAD + k * bw).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + k + '</text>';
+    s += '<text x="' + PAD + '" y="14">' + fmt(max) + ' numbers at the peak</text>';
+    $('profile').innerHTML = s;
+
+    // --- sinks -------------------------------------------------------------
+    $('sinks').innerHTML = D.topSinks.map(x =>
+      '<tr><td><a class="mono" href="/?n=' + x.sink + '">' + fmt(x.sink) + '</a></td><td class="mono">' + fmt(x.ep) +
+      '</td><td class="mono">+' + fmt(x.ep - 1000000) + '</td><td class="mono">' + fmt(x.basin) + '</td></tr>').join('');
+    $('sink-lede').textContent = 'The ' + fmt(c.sinks) + ' numbers whose EP lands outside the range, ranked by how many numbers eventually drain through them. ' +
+      fmt(c.inSinks) + ' numbers end at one — just ' + (c.inSinks / c.nodes * 100).toFixed(1) + '% of the range.';
+  }
+}
+
+function renderChains() {
+  return `<!doctype html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RNGdle - The EP Graph</title>
+<style>
+  :root{
+    --ground:#F5F6F8; --panel:#fff; --ink:#10131A; --ink-dim:#454C5D; --muted:#6E7789; --rule:#DFE3EA;
+    --c0:#E23F44; --c1:#C97800; --c2:#1E8F4E; --c3:#2E6BD8; --c4:#9B45C7; --sink:#5B7391; --accent:#2E6BD8;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ground:#08090C; --panel:#0F1218; --ink:#E9EBF1; --ink-dim:#AAB2C4; --muted:#7C859B; --rule:#1D222C;
+      --c0:#FF5A5C; --c1:#FFB040; --c2:#6EE18C; --c3:#78AAFF; --c4:#E17DFF; --sink:#7891AF; --accent:#78AAFF;
+    }
+  }
+  :root[data-theme="light"]{
+    --ground:#F5F6F8; --panel:#fff; --ink:#10131A; --ink-dim:#454C5D; --muted:#6E7789; --rule:#DFE3EA;
+    --c0:#E23F44; --c1:#C97800; --c2:#1E8F4E; --c3:#2E6BD8; --c4:#9B45C7; --sink:#5B7391; --accent:#2E6BD8;
+  }
+  :root[data-theme="dark"]{
+    --ground:#08090C; --panel:#0F1218; --ink:#E9EBF1; --ink-dim:#AAB2C4; --muted:#7C859B; --rule:#1D222C;
+    --c0:#FF5A5C; --c1:#FFB040; --c2:#6EE18C; --c3:#78AAFF; --c4:#E17DFF; --sink:#7891AF; --accent:#78AAFF;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);
+    font-family:ui-sans-serif,"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,"Cascadia Mono","SF Mono",Consolas,Menlo,monospace;font-variant-numeric:tabular-nums}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  section{padding-block:clamp(40px,6vw,72px);border-top:1px solid var(--rule)}
+  section:first-of-type{border-top:0}
+  h1{font-size:clamp(2.1rem,6vw,3.6rem);line-height:1.02;letter-spacing:-.035em;font-weight:680;margin:0;text-wrap:balance}
+  h2{font-size:clamp(1.15rem,2.4vw,1.5rem);letter-spacing:-.02em;font-weight:640;margin:0 0 6px;text-wrap:balance}
+  p{margin:0;max-width:66ch;color:var(--ink-dim)}
+  .eyebrow{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;font-weight:620;color:var(--muted);margin:0 0 14px}
+  .lede{font-size:1.06rem;margin-top:18px}
+  .note{font-size:.9rem;color:var(--muted);margin-top:14px}
+  .head{display:flex;flex-direction:column;gap:4px;margin-bottom:26px}
+  .hero{padding-top:clamp(36px,5vw,64px)}
+  .plate{margin-top:30px;background:#08090C;border:1px solid var(--rule);border-radius:3px;overflow:hidden}
+  .plate canvas{display:block;width:100%;height:auto}
+  .plate figcaption{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:baseline;padding:14px 18px;
+    border-top:1px solid rgba(255,255,255,.09);font-size:.8rem;color:#8A93A6;background:#0B0D12}
+  .key{display:flex;align-items:center;gap:7px;white-space:nowrap}
+  .swatch{width:9px;height:9px;border-radius:50%;flex:none}
+  #loading{margin-top:30px;padding:26px;border:1px solid var(--rule);border-radius:3px;background:var(--panel)}
+  #track{height:3px;background:var(--rule);border-radius:2px;overflow:hidden;margin-top:14px}
+  #bar{height:100%;width:0;background:var(--accent);transition:width .2s ease}
+  body:not(.ready) .needs-data{display:none}
+  .figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+  .fig{background:var(--panel);padding:18px 20px}
+  .fig dt{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .fig dd{margin:0;font-size:1.6rem;letter-spacing:-.03em;font-weight:600;line-height:1}
+  .fig .sub{display:block;font-size:.78rem;font-weight:400;color:var(--muted);letter-spacing:0;margin-top:7px}
+  .loops{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:18px}
+  .loop{background:var(--panel);border:1px solid var(--rule);border-radius:3px;padding:16px}
+  .loop h3{margin:0;font-size:.95rem;font-weight:620;display:flex;align-items:center;gap:8px}
+  .loop .meta{font-size:.8rem;color:var(--muted);margin:3px 0 10px}
+  .loop svg{display:block;width:100%;height:auto;overflow:visible}
+  .node{cursor:pointer}
+  .node circle{transition:r .12s ease}
+  .node:hover circle,.node:focus-visible circle{r:6}
+  .node:focus-visible{outline:none}
+  .node:focus-visible circle{stroke:var(--ink);stroke-width:1.5}
+  .readout{min-height:1.5em;margin-top:10px;font-size:.84rem;border-top:1px dashed var(--rule);padding-top:9px}
+  .readout .dim{color:var(--muted)}
+  .chain{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:16px}
+  .chip{display:inline-block;padding:3px 9px;border:1px solid var(--rule);border-radius:2px;
+    background:var(--panel);font-size:.84rem;color:var(--ink);text-decoration:none}
+  .chip:hover{border-color:var(--accent);color:var(--accent)}
+  .chip.terminal{border-color:var(--sink);color:var(--sink);font-weight:600}
+  .arrow{color:var(--muted);font-size:.8rem}
+  .escape{margin-top:16px;padding:13px 16px;border-left:2px solid var(--sink);background:var(--panel);font-size:.9rem}
+  .profile{width:100%;height:auto;display:block;margin-top:8px;overflow:visible}
+  .profile .bar{fill:var(--accent);opacity:.75}
+  .profile .bar:hover{opacity:1}
+  .profile text{fill:var(--muted);font-size:10px}
+  .scroll{overflow-x:auto;margin-top:8px}
+  table{border-collapse:collapse;width:100%;min-width:460px;font-size:.88rem}
+  th,td{text-align:right;padding:9px 12px;border-bottom:1px solid var(--rule);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  th{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  tbody tr:hover{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+  footer{padding:34px 0 56px;border-top:1px solid var(--rule)}
+  footer p{color:var(--muted);font-size:.84rem}
+  a{color:var(--accent)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style></head><body>
+<div class="wrap">
+  <section class="hero">
+    <p class="eyebrow">RNGdle &middot; every number 0&ndash;1,000,000</p>
+    <h1>Each number points at its own score.</h1>
+    <p class="lede">Take any number, work out the EP it earns, and treat that score as the next number.
+      Almost every number can do this, so the whole range becomes one graph with a single arrow leaving
+      every node. This is all of them &mdash; scored in your browser from the live badge rules, not from a
+      stored snapshot.</p>
+    <div id="loading">
+      <p id="status" class="mono">Starting…</p>
+      <div id="track"><div id="bar"></div></div>
+      <p class="note">One pass over all 1,000,001 numbers, spread across your cores.</p>
+    </div>
+    <figure class="plate needs-data">
+      <canvas id="plate" width="1500" height="1500" aria-label="Radial diagram of all 1,000,001 numbers, each joined to the number its EP points at."></canvas>
+      <figcaption>
+        <span class="key"><span class="swatch" style="background:#FF5A5C"></span>largest loop basin</span>
+        <span class="key"><span class="swatch" style="background:#FFB040"></span>2nd</span>
+        <span class="key"><span class="swatch" style="background:#6EE18C"></span>3rd</span>
+        <span class="key"><span class="swatch" style="background:#78AAFF"></span>4th</span>
+        <span class="key"><span class="swatch" style="background:#E17DFF"></span>5th</span>
+        <span class="key"><span class="swatch" style="background:#7891AF"></span>ends at a sink</span>
+        <span style="margin-left:auto">radius = steps remaining &middot; every node and edge drawn</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section class="needs-data">
+    <dl class="figures" id="figures"></dl>
+    <p class="note">A number is a <strong>sink</strong> when its EP exceeds 1,000,000 and the chain simply stops.
+      Mean EP sits around 21,500, comfortably inside the range, so the map points overwhelmingly inward.</p>
+  </section>
+
+  <section class="needs-data">
+    <div class="head"><p class="eyebrow">Attractors</p><h2>The loops</h2><p id="loop-lede"></p></div>
+    <div class="loops" id="loops"></div>
+  </section>
+
+  <section class="needs-data">
+    <div class="head"><p class="eyebrow">Longest run</p><h2 id="deep-title"></h2>
+      <p>The deepest number in the graph: the most steps any number takes before it stops making progress.</p></div>
+    <div class="chain" id="deep-chain"></div>
+    <p class="note" id="deep-note"></p>
+  </section>
+
+  <section class="needs-data">
+    <div class="head"><p class="eyebrow">Longest escape</p><h2 id="esc-title"></h2>
+      <p>Chains that terminate are the rare case. This is the longest of them &mdash; each number scoring the
+        next, until the final score overshoots the range.</p></div>
+    <div class="chain" id="esc-chain"></div>
+    <div class="escape" id="esc-note"></div>
+  </section>
+
+  <section class="needs-data">
+    <div class="head"><p class="eyebrow">Depth profile</p><h2>How far every number sits from its attractor</h2>
+      <p>Distance in steps to the loop or sink a number drains into.</p></div>
+    <svg class="profile" id="profile" viewBox="0 0 1000 220" role="img" aria-label="Histogram of how many numbers sit at each depth."></svg>
+  </section>
+
+  <section class="needs-data">
+    <div class="head"><p class="eyebrow">Sinks</p><h2>Where the terminating chains stop</h2><p id="sink-lede"></p></div>
+    <div class="scroll"><table>
+      <thead><tr><th>Sink</th><th>Its EP</th><th>Overshoot</th><th>Numbers draining through it</th></tr></thead>
+      <tbody id="sinks"></tbody>
+    </table></div>
+  </section>
+
+  <footer><p>Every number scored with the same engine as <a href="/">the calculator</a>; edges are
+    <span class="mono">n &rarr; EP(n)</span>, kept only where the score is itself a legal input. Loops are
+    found by walking each number until it meets a settled node or itself. Any number here opens in the
+    calculator. See also <a href="/grid">the grid</a> and <a href="/badges">every badge</a>.</p></footer>
+</div>
+<script type="module">
+const __CHAINS_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + chainsWorker.toString() + ')()')};
+(${chainsClient.toString()})(__CHAINS_WORKER_SRC);
 </script>
 </body></html>`;
 }
@@ -3620,7 +4225,7 @@ function renderProfile(username, sum) {
 </body></html>`;
 }
 
-export { compute, BADGES, FAMILIES, engineModuleSource };
+export { compute, BADGES, FAMILIES, engineModuleSource, CARD_TIERS, cardTier };
 
 export default {
   async fetch(request) {
@@ -3629,10 +4234,16 @@ export default {
 
     // Browser engine for the client-side "Analyze all scores" Web Worker.
     if (url.pathname === '/engine.js') {
+      // Short browser cache: one page load fetches this up to three times (the worker's
+      // module import, the version hash, and sweepAll's shard blob), and 15 min is long
+      // enough that they collapse to one origin hit while a scoring change still reaches
+      // everyone within the quarter hour. Both worker caches are keyed by a hash of this
+      // file, so a stale copy self-corrects as soon as the entry expires - keep max-age
+      // well under the analysis cache's 1-day TTL.
       return new Response(engineModuleSource(), {
         headers: {
           'content-type': 'text/javascript; charset=utf-8',
-          'cache-control': 'no-store',
+          'cache-control': 'public, max-age=900',
           'access-control-allow-origin': '*',
         },
       });
@@ -3666,6 +4277,13 @@ export default {
     // Hidden interactive 1,000,000-number map; click a cell to open it on /.
     if (url.pathname === '/grid') {
       return new Response(renderGrid(), {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    }
+
+    // The n -> EP(n) graph: every number linked to its own score, computed in-browser.
+    if (url.pathname === '/chains') {
+      return new Response(renderChains(), {
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
     }

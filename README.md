@@ -30,7 +30,10 @@ npm test             # run the badge-logic test harness
 
 The **📊 Analyze all scores** button sweeps the whole 0–999,999 range in a client-side
 Web Worker (the work is far past a single Worker request's CPU budget) and plots the
-**EP distribution** as a log/log histogram.
+**EP distribution** as a log/log histogram. The sweep fans out over one shard worker per
+core — `engine.js` loaded under the name `rngdle-shard` serves range requests — so it
+finishes in a few seconds; where nested workers are unavailable it falls back to a
+single-threaded sweep with an identical result.
 
 - **Filter by number length** (1–6 digits). This drives *what gets computed*: lengths 1–5
   are only 100k numbers total, so they are always computed **exactly**. Only the 6-digit
@@ -47,7 +50,8 @@ Web Worker (the work is far past a single Worker request's CPU budget) and plots
 ## Generated snapshot files (`npm run gen`)
 
 `research/gen-snapshot.mjs` scans **all 1,000,001 inputs** through the badge engine
-once (~25 s) and writes three committed artifacts:
+once and writes three committed artifacts. The scan is split over worker threads
+(~5 s on 16 cores; `GEN_WORKERS=1` forces a serial run):
 
 - `src/examples.gen.js` - the first 3 numbers that earn each badge (the `/badges`
   page's clickable examples).
