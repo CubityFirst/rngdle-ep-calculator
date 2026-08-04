@@ -2556,6 +2556,7 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
   let view = 'count';              // 'count' | 'ep' | a badge label
   const memCache = new Map();      // label -> Uint8Array, so re-selecting a badge is instant
   let supHide = false;             // "Hide superseded" toggle (off by default)
+  let supMode = 'grey';            // 'grey' darkens superseded cells, 'black' hides them entirely
   let sup = null;                  // Uint8Array superseded-mask applied to the current view (or null)
   const supCache = new Map();      // label -> Uint8Array superseded mask
   let scale = 1, ox = 0, oy = 0, minScale = 1;
@@ -2611,8 +2612,10 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
   function buildMember(m, s) {
     const hi = cmap(1), hr = hi[0] | 0, hg = hi[1] | 0, hb = hi[2] | 0;   // members: colormap's hot end
     const lo = cmap(0), lr = lo[0] | 0, lg = lo[1] | 0, lb = lo[2] | 0;   // non-members: colormap's dark end (black for Grayscale)
-    // Superseded members ("Hide superseded" on): darkened to 30% of the way up the scale.
-    const dr = (lr + (hr - lr) * 0.3) | 0, dg = (lg + (hg - lg) * 0.3) | 0, db = (lb + (hb - lb) * 0.3) | 0;
+    // Superseded members ("Hide superseded" on): grey mode darkens to 30% of the way
+    // up the scale; black mode drops them to the dark end, same as non-members.
+    const df = supMode === 'black' ? 0 : 0.3;
+    const dr = (lr + (hr - lr) * df) | 0, dg = (lg + (hg - lg) * df) | 0, db = (lb + (hb - lb) * df) | 0;
     return grayCanvas(sctx => {
       const img = sctx.createImageData(SIZE, SIZE), d = img.data;
       for (let i = 0; i < m.length; i++) {
@@ -2710,9 +2713,11 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
       const hi = cmap(1), lo = cmap(0);
       const hc = 'rgb(' + (hi[0] | 0) + ',' + (hi[1] | 0) + ',' + (hi[2] | 0) + ')';
       const lc = 'rgb(' + (lo[0] | 0) + ',' + (lo[1] | 0) + ',' + (lo[2] | 0) + ')';
-      if (sup) {
+      if (sup && supMode === 'grey') {
         const dc = 'rgb(' + ((lo[0] + (hi[0] - lo[0]) * 0.3) | 0) + ',' + ((lo[1] + (hi[1] - lo[1]) * 0.3) | 0) + ',' + ((lo[2] + (hi[2] - lo[2]) * 0.3) | 0) + ')';
         legendEl.innerHTML = '<span class="lab">none / superseded</span>' + scaleSpan(lc + ' 0 33%, ' + dc + ' 33% 67%, ' + hc + ' 67% 100%') + '<span class="lab">scores ' + view + '</span>';
+      } else if (sup) {
+        legendEl.innerHTML = '<span class="lab">none / superseded</span>' + scaleSpan(lc + ' 0 50%, ' + hc + ' 50% 100%') + '<span class="lab">scores ' + view + '</span>';
       } else {
         legendEl.innerHTML = '<span class="lab">none</span>' + scaleSpan(lc + ' 0 50%, ' + hc + ' 50% 100%') + '<span class="lab">earns ' + view + '</span>';
       }
@@ -2910,20 +2915,34 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
 
   // "Hide superseded" toggle: darken members where a dominating family badge is also
   // earned. Only meaningful for badges in a family with a higher tier above them.
+  // The grey/black pair picks how hard superseded cells are knocked back: grey keeps
+  // them faintly visible, black paints them like non-members.
   const supBtn = document.getElementById('supbtn');
+  const supGrey = document.getElementById('supgrey');
+  const supBlack = document.getElementById('supblack');
   function updateSupBtn() {
     const idx = labelIdx.get(view);
-    supBtn.disabled = idx === undefined || !DOMS[idx].length;
+    const off = idx === undefined || !DOMS[idx].length;
+    supBtn.disabled = off;
+    supGrey.disabled = off;
+    supBlack.disabled = off;
     supBtn.classList.toggle('on', supHide);
+    supGrey.classList.toggle('on', supMode === 'grey');
+    supBlack.classList.toggle('on', supMode === 'black');
   }
-  supBtn.onclick = () => {
-    supHide = !supHide;
-    updateSupBtn();
+  function supRepaint() {
     const idx = labelIdx.get(view);
     if (idx === undefined || !DOMS[idx].length || !member) return;
     ensureSup(view, idx);
     applyMember(view);          // repaints without the mask until 'supersede' arrives
+  }
+  supBtn.onclick = () => {
+    supHide = !supHide;
+    updateSupBtn();
+    supRepaint();
   };
+  supGrey.onclick = () => { supMode = 'grey'; updateSupBtn(); if (supHide) supRepaint(); };
+  supBlack.onclick = () => { supMode = 'black'; updateSupBtn(); if (supHide) supRepaint(); };
 
   // --- Konami code: Conway's Game of Life seeded from the current view ------
   // ↑↑↓↓←→←→BA turns the visible map into a torus-wrapped Game of Life. Alive
@@ -3084,6 +3103,7 @@ function renderGrid() {
     #side { left: 10px; right: 10px; width: auto; max-width: none; top: 10px; bottom: 10px; padding: 14px; gap: 12px; }
     #search { padding: 11px 12px; font-size: 15px; }
     #supbtn { padding: 10px 12px; font-size: 14px; }
+    #supmode button { padding: 0 10px; font-size: 13px; }
     .item { padding: 11px 10px; font-size: 14px; }
     #ctrls { gap: 8px; padding: 7px; }
     #ctrls button { width: 42px; height: 42px; font-size: 20px; }
@@ -3099,7 +3119,8 @@ function renderGrid() {
   #side .nav a { color: var(--accent); text-decoration: none; }
   #side .nav a:hover { text-decoration: underline; }
   #vtitle { font-size: 12px; color: #cfd3df; min-height: 16px; }
-  #supbtn { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  #suprow { display: flex; gap: 6px; align-items: stretch; }
+  #supbtn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 10px;
     font-size: 12.5px; font-family: inherit; text-align: left; color: #c8ccd8; cursor: pointer;
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; }
   #supbtn:hover:not(:disabled) { background: rgba(255,255,255,.12); }
@@ -3109,6 +3130,14 @@ function renderGrid() {
   #supbtn.on { background: color-mix(in srgb, var(--hl) 18%, transparent); color: #f6dcc0;
     border-color: color-mix(in srgb, var(--hl) 45%, transparent); }
   #supbtn.on .dot { background: var(--hl); border-color: var(--hl); }
+  #supmode { flex: 0 0 auto; display: flex; align-items: stretch;
+    border: 1px solid rgba(255,255,255,.14); border-radius: 8px; overflow: hidden; }
+  #supmode button { padding: 0 8px; font-size: 11.5px; font-family: inherit; color: #c8ccd8;
+    background: transparent; border: 0; cursor: pointer; }
+  #supmode button + button { border-left: 1px solid rgba(255,255,255,.14); }
+  #supmode button:hover:not(:disabled) { background: rgba(255,255,255,.12); }
+  #supmode button:disabled { opacity: .38; cursor: default; }
+  #supmode button.on { background: color-mix(in srgb, var(--hl) 18%, transparent); color: #f6dcc0; }
   #search { width: 100%; padding: 8px 10px; font-size: 13px; line-height: 1.4; color: var(--text);
     -webkit-appearance: none; appearance: none; font-family: inherit;
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; }
@@ -3153,7 +3182,10 @@ function renderGrid() {
   <div class="credit">Heavily inspired by <b>basiliotornado</b></div>
   <div class="nav"><a href="/">&larr; calculator</a> &nbsp;·&nbsp; <a href="/badges">badge index</a></div>
   <div id="vtitle">All numbers - badge count</div>
-  <button id="supbtn" disabled title="Darken numbers where a higher badge in the same family supersedes the selected badge (it still shows as earned but scores 0 there)"><span class="dot"></span>Hide superseded badges</button>
+  <div id="suprow">
+    <button id="supbtn" disabled title="Darken numbers where a higher badge in the same family supersedes the selected badge (it still shows as earned but scores 0 there)"><span class="dot"></span>Hide superseded badges</button>
+    <div id="supmode" title="Grey keeps superseded numbers faintly visible; black hides them entirely"><button id="supgrey" class="on" disabled>grey</button><button id="supblack" disabled>black</button></div>
+  </div>
   <input id="search" type="search" placeholder="Filter 230 badges…" autocomplete="off">
   <div id="list"></div>
   <div class="nav">Pick a badge to highlight which numbers earn it. Click any cell to open it.</div>
