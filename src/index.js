@@ -2463,6 +2463,18 @@ function gridWorker() {
     for (let n = 0; n < N; n++) if (bits[n * ROW + byte] & bit) m[n] = 1;
     return m;
   }
+  // Numbers that earn badge idx but where some dominator badge (a same-family member
+  // that would win supersession) is ALSO earned, so idx scores 0 there.
+  function supersededMask(idx, doms) {
+    const N = counts.length, m = new Uint8Array(N), byte = idx >> 3, bit = 1 << (idx & 7);
+    const db = doms.map(d => d >> 3), dm = doms.map(d => 1 << (d & 7));
+    for (let n = 0; n < N; n++) {
+      const row = n * ROW;
+      if (!(bits[row + byte] & bit)) continue;
+      for (let k = 0; k < doms.length; k++) if (bits[row + db[k]] & dm[k]) { m[n] = 1; break; }
+    }
+    return m;
+  }
 
   self.onmessage = async (ev) => {
     const msg = ev.data;
@@ -2471,6 +2483,11 @@ function gridWorker() {
       if (msg.cmd === 'membership') {
         const m = membership(msg.idx);
         self.postMessage({ type: 'membership', idx: msg.idx, member: m.buffer }, [m.buffer]);
+        return;
+      }
+      if (msg.cmd === 'supersede') {
+        const m = supersededMask(msg.idx, msg.doms);
+        self.postMessage({ type: 'supersede', idx: msg.idx, mask: m.buffer }, [m.buffer]);
         return;
       }
       if (msg.cmd !== 'compute') return;
@@ -2510,7 +2527,7 @@ function gridWorker() {
   };
 }
 
-function gridClient(WORKER_SRC, LABELS) {
+function gridClient(WORKER_SRC, LABELS, DOMS) {
   const SIZE = 1000;
   const cv = document.getElementById('grid');
   const ctx = cv.getContext('2d');
@@ -2538,6 +2555,9 @@ function gridClient(WORKER_SRC, LABELS) {
   let member = null;               // Uint8Array membership for the active badge (or null in count/ep mode)
   let view = 'count';              // 'count' | 'ep' | a badge label
   const memCache = new Map();      // label -> Uint8Array, so re-selecting a badge is instant
+  let supHide = false;             // "Hide superseded" toggle (off by default)
+  let sup = null;                  // Uint8Array superseded-mask applied to the current view (or null)
+  const supCache = new Map();      // label -> Uint8Array superseded mask
   let scale = 1, ox = 0, oy = 0, minScale = 1;
   const maxScale = 80;
   let cw = 0, ch = 0, dpr = 1;
@@ -2588,14 +2608,19 @@ function gridClient(WORKER_SRC, LABELS) {
       sctx.putImageData(img, 0, 0);
     });
   }
-  function buildMember(m) {
+  function buildMember(m, s) {
     const hi = cmap(1), hr = hi[0] | 0, hg = hi[1] | 0, hb = hi[2] | 0;   // members: colormap's hot end
     const lo = cmap(0), lr = lo[0] | 0, lg = lo[1] | 0, lb = lo[2] | 0;   // non-members: colormap's dark end (black for Grayscale)
+    // Superseded members ("Hide superseded" on): darkened to 30% of the way up the scale.
+    const dr = (lr + (hr - lr) * 0.3) | 0, dg = (lg + (hg - lg) * 0.3) | 0, db = (lb + (hb - lb) * 0.3) | 0;
     return grayCanvas(sctx => {
       const img = sctx.createImageData(SIZE, SIZE), d = img.data;
       for (let i = 0; i < m.length; i++) {
         const p = i << 2;
-        if (m[i]) { d[p] = hr; d[p + 1] = hg; d[p + 2] = hb; } else { d[p] = lr; d[p + 1] = lg; d[p + 2] = lb; }
+        if (m[i]) {
+          if (s && s[i]) { d[p] = dr; d[p + 1] = dg; d[p + 2] = db; }
+          else { d[p] = hr; d[p + 1] = hg; d[p + 2] = hb; }
+        } else { d[p] = lr; d[p + 1] = lg; d[p + 2] = lb; }
         d[p + 3] = 255;
       }
       sctx.putImageData(img, 0, 0);
@@ -2678,15 +2703,24 @@ function gridClient(WORKER_SRC, LABELS) {
       legendEl.innerHTML = '<span class="lab">' + fmtEP(emin) + '</span>' + scaleSpan(cmapCSS()) + '<span class="lab">' + fmtEP(emax) + ' EP</span>';
     } else {
       let cnt = 0; if (member) for (let i = 0; i < member.length; i++) cnt += member[i];
-      titleEl.textContent = member ? (view + ' - ' + cnt.toLocaleString() + ' / 1,000,000 (' + fmtPct(cnt / 1e6 * 100) + ')') : (view + ' …');
+      let sc = 0; if (sup) for (let i = 0; i < sup.length; i++) sc += sup[i];
+      titleEl.textContent = member
+        ? (view + ' - ' + cnt.toLocaleString() + ' / 1,000,000 (' + fmtPct(cnt / 1e6 * 100) + ')' + (sup ? ' · ' + sc.toLocaleString() + ' superseded' : ''))
+        : (view + ' …');
       const hi = cmap(1), lo = cmap(0);
       const hc = 'rgb(' + (hi[0] | 0) + ',' + (hi[1] | 0) + ',' + (hi[2] | 0) + ')';
       const lc = 'rgb(' + (lo[0] | 0) + ',' + (lo[1] | 0) + ',' + (lo[2] | 0) + ')';
-      legendEl.innerHTML = '<span class="lab">none</span>' + scaleSpan(lc + ' 0 50%, ' + hc + ' 50% 100%') + '<span class="lab">earns ' + view + '</span>';
+      if (sup) {
+        const dc = 'rgb(' + ((lo[0] + (hi[0] - lo[0]) * 0.3) | 0) + ',' + ((lo[1] + (hi[1] - lo[1]) * 0.3) | 0) + ',' + ((lo[2] + (hi[2] - lo[2]) * 0.3) | 0) + ')';
+        legendEl.innerHTML = '<span class="lab">none / superseded</span>' + scaleSpan(lc + ' 0 33%, ' + dc + ' 33% 67%, ' + hc + ' 67% 100%') + '<span class="lab">scores ' + view + '</span>';
+      } else {
+        legendEl.innerHTML = '<span class="lab">none</span>' + scaleSpan(lc + ' 0 50%, ' + hc + ' 50% 100%') + '<span class="lab">earns ' + view + '</span>';
+      }
     }
   }
   function highlight() {
     for (const b of listEl.children) b.classList.toggle('on', b.dataset.v === view);
+    updateSupBtn();
   }
   // Each view has a shareable URL via the hash: /grid (count), /grid#ep, or
   // /grid#<badge label>. The address bar tracks the active view, loading such a
@@ -2706,14 +2740,14 @@ function gridClient(WORKER_SRC, LABELS) {
   }
   function selectCount() {
     haltLife();
-    view = 'count'; member = null;
+    view = 'count'; member = null; sup = null;
     if (!countCanvas) buildCount();
     src = countCanvas;
     highlight(); updateLegend(); render(); setHash('count');
   }
   function selectEP() {
     haltLife();
-    view = 'ep'; member = null;
+    view = 'ep'; member = null; sup = null;
     if (!epCanvas) buildEP();
     src = epCanvas;
     highlight(); updateLegend(); render(); setHash('ep');
@@ -2728,14 +2762,21 @@ function gridClient(WORKER_SRC, LABELS) {
   }
   function applyMember(label) {
     member = memCache.get(label);
-    src = buildMember(member);
+    sup = (supHide && supCache.get(label)) || null;
+    src = buildMember(member, sup);
     highlight(); updateLegend(); render();
+  }
+  // Fetch the superseded mask for a badge when the toggle needs it and it isn't cached.
+  function ensureSup(label, idx) {
+    if (!supHide || idx === undefined || !DOMS[idx].length || supCache.has(label)) return;
+    worker.postMessage({ cmd: 'supersede', idx: idx, doms: DOMS[idx] });
   }
   function selectBadge(label, idx) {
     haltLife();
     view = label;
     setHash(label);
     highlight(); updateLegend();
+    ensureSup(label, idx);
     if (memCache.has(label)) applyMember(label);
     else worker.postMessage({ cmd: 'membership', idx: idx });
   }
@@ -2809,7 +2850,8 @@ function gridClient(WORKER_SRC, LABELS) {
         let detail;
         if (view === 'count') { const c = counts[hit.n]; detail = c + ' badge' + (c === 1 ? '' : 's'); }
         else if (view === 'ep') { detail = Math.round(epArr[hit.n]).toLocaleString() + ' EP'; }
-        else { detail = (member && member[hit.n]) ? 'earns ' + view : 'no ' + view; }
+        else if (member && member[hit.n]) { detail = 'earns ' + view + (sup && sup[hit.n] ? ' (superseded)' : ''); }
+        else { detail = 'no ' + view; }
         tip.style.display = 'block';
         tip.innerHTML = '<b>' + hit.n.toLocaleString() + '</b><span>' + detail + ' - click to open</span>';
         tip.style.left = Math.min(cw - 160, x + 16) + 'px';
@@ -2865,6 +2907,23 @@ function gridClient(WORKER_SRC, LABELS) {
   };
   document.getElementById('sideshow').onclick = () => document.body.classList.remove('nav-collapsed');
   cmapSel.addEventListener('change', () => { currentCmap = cmapSel.value; recolor(); });
+
+  // "Hide superseded" toggle: darken members where a dominating family badge is also
+  // earned. Only meaningful for badges in a family with a higher tier above them.
+  const supBtn = document.getElementById('supbtn');
+  function updateSupBtn() {
+    const idx = labelIdx.get(view);
+    supBtn.disabled = idx === undefined || !DOMS[idx].length;
+    supBtn.classList.toggle('on', supHide);
+  }
+  supBtn.onclick = () => {
+    supHide = !supHide;
+    updateSupBtn();
+    const idx = labelIdx.get(view);
+    if (idx === undefined || !DOMS[idx].length || !member) return;
+    ensureSup(view, idx);
+    applyMember(view);          // repaints without the mask until 'supersede' arrives
+  };
 
   // --- Konami code: Conway's Game of Life seeded from the current view ------
   // ↑↑↓↓←→←→BA turns the visible map into a torus-wrapped Game of Life. Alive
@@ -2959,6 +3018,12 @@ function gridClient(WORKER_SRC, LABELS) {
       const label = LABELS[m.idx];
       memCache.set(label, new Uint8Array(m.member));
       if (view === label) applyMember(label);
+    } else if (m.type === 'supersede') {
+      const label = LABELS[m.idx];
+      supCache.set(label, new Uint8Array(m.mask));
+      // Repaint only if the membership map is already in; otherwise the pending
+      // 'membership' reply will pick this mask up when it applies.
+      if (view === label && supHide && memCache.has(label)) applyMember(label);
     } else if (m.type === 'error') {
       ov.style.display = 'flex';
       ovtext.textContent = 'Error: ' + m.message;
@@ -2970,6 +3035,17 @@ function gridClient(WORKER_SRC, LABELS) {
 
 function renderGrid() {
   const labels = JSON.stringify(BADGES.map(b => b[1]));
+  // Per-badge dominator lists for the "Hide superseded" toggle: doms[i] = badge indices
+  // in i's family that win supersession over i when co-earned (higher EP, or equal EP
+  // and earlier in BADGES order - the same first-of-a-tie rule the scorer uses).
+  const idToIdx = new Map(BADGES.map((b, i) => [b[0], i]));
+  const doms = BADGES.map(() => []);
+  for (const fam of FAMILIES) {
+    const idxs = fam.map(id => idToIdx.get(id)).filter(i => i !== undefined);
+    for (const a of idxs) for (const b of idxs) {
+      if (b !== a && (BADGES[b][3] > BADGES[a][3] || (BADGES[b][3] === BADGES[a][3] && b < a))) doms[a].push(b);
+    }
+  }
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
@@ -3007,6 +3083,7 @@ function renderGrid() {
   @media (max-width: 640px) {
     #side { left: 10px; right: 10px; width: auto; max-width: none; top: 10px; bottom: 10px; padding: 14px; gap: 12px; }
     #search { padding: 11px 12px; font-size: 15px; }
+    #supbtn { padding: 10px 12px; font-size: 14px; }
     .item { padding: 11px 10px; font-size: 14px; }
     #ctrls { gap: 8px; padding: 7px; }
     #ctrls button { width: 42px; height: 42px; font-size: 20px; }
@@ -3022,6 +3099,16 @@ function renderGrid() {
   #side .nav a { color: var(--accent); text-decoration: none; }
   #side .nav a:hover { text-decoration: underline; }
   #vtitle { font-size: 12px; color: #cfd3df; min-height: 16px; }
+  #supbtn { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+    font-size: 12.5px; font-family: inherit; text-align: left; color: #c8ccd8; cursor: pointer;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; }
+  #supbtn:hover:not(:disabled) { background: rgba(255,255,255,.12); }
+  #supbtn:disabled { opacity: .38; cursor: default; }
+  #supbtn .dot { flex: 0 0 auto; width: 12px; height: 12px; border-radius: 3px;
+    border: 1px solid rgba(255,255,255,.35); }
+  #supbtn.on { background: color-mix(in srgb, var(--hl) 18%, transparent); color: #f6dcc0;
+    border-color: color-mix(in srgb, var(--hl) 45%, transparent); }
+  #supbtn.on .dot { background: var(--hl); border-color: var(--hl); }
   #search { width: 100%; padding: 8px 10px; font-size: 13px; line-height: 1.4; color: var(--text);
     -webkit-appearance: none; appearance: none; font-family: inherit;
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; }
@@ -3066,6 +3153,7 @@ function renderGrid() {
   <div class="credit">Heavily inspired by <b>basiliotornado</b></div>
   <div class="nav"><a href="/">&larr; calculator</a> &nbsp;·&nbsp; <a href="/badges">badge index</a></div>
   <div id="vtitle">All numbers - badge count</div>
+  <button id="supbtn" disabled title="Darken numbers where a higher badge in the same family supersedes the selected badge (it still shows as earned but scores 0 there)"><span class="dot"></span>Hide superseded badges</button>
   <input id="search" type="search" placeholder="Filter 230 badges…" autocomplete="off">
   <div id="list"></div>
   <div class="nav">Pick a badge to highlight which numbers earn it. Click any cell to open it.</div>
@@ -3092,7 +3180,7 @@ function renderGrid() {
 <script type="module">
 var __name = (f) => f;
 const __GRID_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + gridWorker.toString() + ')()')};
-(${gridClient.toString()})(__GRID_WORKER_SRC, ${labels});
+(${gridClient.toString()})(__GRID_WORKER_SRC, ${labels}, ${JSON.stringify(doms)});
 </script>
 </body></html>`;
 }
