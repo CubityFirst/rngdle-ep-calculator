@@ -1248,7 +1248,12 @@ function engineModuleSource() {
   const supSrc = `const FAMILIES = ${JSON.stringify(FAMILIES)};`;
 
   // Lean compute: post-supersession total EP + earned badge indices, no UI metadata.
+  // CARD_TIERS/cardTier are serialized from the server constants (not re-declared) so the
+  // browser's rarity breakdown uses the exact same cutoffs as the /beta card renderer.
   const rest = `
+const CARD_TIERS = ${JSON.stringify(CARD_TIERS)};
+const CARD_TIER_NAMES = [${CARD_TIERS.map(t => JSON.stringify(t[1])).join(',')},"mythic"];
+function cardTier(ep) { for (const [t, name] of CARD_TIERS) if (ep < t) return name; return 'mythic'; }
 const BADGE_RARITY_THRESHOLDS = { common: 1e3, uncommon: 1e4, rare: 1e5, epic: 1e6, anomaly: 1e7 };
 function tierFromScore(ep){const t=BADGE_RARITY_THRESHOLDS;return ep<t.common?'common':ep<t.uncommon?'uncommon':ep<t.rare?'rare':ep<t.epic?'epic':ep<t.anomaly?'anomaly':'mythic';}
 function rarityFromScore(ep){const t=tierFromScore(ep);return t.charAt(0).toUpperCase()+t.slice(1);}
@@ -1311,7 +1316,7 @@ function computeLean(n) {
   return { ep: total, earned };
 }
 
-export { computeLean, BADGE_META, sweepRange, sweepAll };
+export { computeLean, BADGE_META, sweepRange, sweepAll, CARD_TIERS, CARD_TIER_NAMES, cardTier };
 
 // Shard mode: when this module is loaded as a Worker named 'rngdle-shard' (which is how
 // sweepAll fans a sweep across cores) it answers range requests instead of just being
@@ -1349,7 +1354,25 @@ function analysisWorker() {
   const EX_PER_BADGE = 12;                       // examples[badgeIdx] = [[n, ep], ...], capped
   const LRANGE = { 1: [0, 9], 2: [10, 99], 3: [100, 999], 4: [1000, 9999], 5: [10000, 99999], 6: [100000, 999999], 7: [1000000, 1000000] };
   const LSIZE = { 1: 10, 2: 90, 3: 900, 4: 9000, 5: 90000, 6: 900000, 7: 1 };
-  async function engine() { if (!E) E = await import(origin + '/engine.js'); return E; }
+  // Card-rarity cutoffs, lifted from the engine module so the breakdown uses the same
+  // tiers as the number card. TCUT[i] is the exclusive EP ceiling of tier i; anything at
+  // or above the last cutoff is the top tier (mythic), hence NT = TCUT.length + 1 tiers.
+  let TCUT = null, TNAMES = null, NT = 0;
+  async function engine() {
+    if (!E) {
+      E = await import(origin + '/engine.js');
+      TCUT = E.CARD_TIERS.map(t => t[0]); TNAMES = E.CARD_TIER_NAMES; NT = TNAMES.length;
+    }
+    return E;
+  }
+  // Tier index (0 = trash … NT-1 = mythic) for a total-EP value. Inlined cutoff scan
+  // rather than E.cardTier() since this runs once per number in the filter loop.
+  function tierOf(v) { for (let i = 0; i < TCUT.length; i++) if (v < TCUT[i]) return i; return TCUT.length; }
+  // Bitmask of tiers to keep. Empty/missing means "all tiers".
+  function tierMaskOf(tiers) {
+    if (!tiers || !tiers.length) return -1 >>> 0;
+    let m = 0; for (const t of tiers) m |= (1 << t); return m;
+  }
   // `badges` (DO): number must earn every one of them. `exclude` (DON'T): number must earn
   // none of them. Both are applied together, so you can require some badges while excluding
   // others (e.g. HAS Equilibrium but NOT Sandwich). Empty lists impose no constraint.
@@ -1452,28 +1475,53 @@ function analysisWorker() {
         const lenMask = lengthMask(m.lengths);     // which digit-lengths to include (bitmask over 1..7)
         const epMin = (m.epMin == null) ? -Infinity : m.epMin;   // "scores more than" (exclusive)
         const epMax = (m.epMax == null) ? Infinity : m.epMax;    // "and less than" (exclusive)
+        const tierMask = tierMaskOf(m.tiers);      // which rarity tiers to include
         const STEP = 0.25;                         // histogram resolution, in decades (dex)
         const MAXB = 2 + Math.ceil(Math.log10(Math.max(10, computedMax)) / STEP);
-        const counts = new Float64Array(MAXB);
-        let total = 0, raw = 0, sum = 0, mn = Infinity, mx = 0;
+        // counts[bucket * NT + tier]: a quarter-decade bucket can straddle a tier cutoff
+        // (the uncommon band is narrower than one bucket), so the bucket is tallied per
+        // tier and drawn as a stacked bar rather than being assigned a single colour.
+        const counts = new Float64Array(MAXB * NT);
+        // Per-tier rollup. `tierAll` deliberately ignores the tier filter itself (facet
+        // counts): with only "mythic" selected you still see how many of the numbers
+        // matching the OTHER filters landed in each tier, so the breakdown stays useful
+        // as a picker. tierSum/tierMin/tierMax describe the same (unfiltered-by-tier) set.
+        const tierAll = new Float64Array(NT), tierSum = new Float64Array(NT);
+        const tierMin = new Float64Array(NT).fill(Infinity), tierMax = new Float64Array(NT);
+        let total = 0, raw = 0, sum = 0, mn = Infinity, mx = 0, domain = 0;
         for (let k = 0; k < count; k++) {
           if (!(lenMask & (1 << lenArr[k]))) continue;
           const v = epArr[k];
           if (v <= epMin || v >= epMax) continue;
           if (!matches(k, badges, exclude)) continue;
+          const t = tierOf(v);
+          domain++;
+          tierAll[t]++; tierSum[t] += v;
+          if (v < tierMin[t]) tierMin[t] = v;
+          if (v > tierMax[t]) tierMax[t] = v;
+          if (!(tierMask & (1 << t))) continue;
           const w = 1;                             // exhaustive sweep - every number counts once
           raw++; total += w; sum += v * w; if (v < mn) mn = v; if (v > mx) mx = v;
           let bidx = v <= 0 ? 0 : 1 + Math.floor(Math.log10(v) / STEP);
           if (bidx >= MAXB) bidx = MAXB - 1; if (bidx < 0) bidx = 0;
-          counts[bidx] += w;
+          counts[bidx * NT + t] += w;
         }
         const buckets = [];
         for (let i = 0; i < MAXB; i++) {
           const lo = i === 0 ? 0 : Math.pow(10, (i - 1) * STEP);
           const hi = i === 0 ? 0 : Math.pow(10, i * STEP);
-          buckets.push({ i, lo, hi, count: counts[i] });
+          const byTier = Array.from(counts.subarray(i * NT, i * NT + NT));
+          buckets.push({ i, lo, hi, count: byTier.reduce((a, b) => a + b, 0), byTier });
         }
-        self.postMessage({ type: 'histogram', buckets, stats: { total: Math.round(total), raw, mean: total ? sum / total : 0, min: raw ? mn : 0, max: mx, estimated: lastSampled6 } });
+        const tiers = [];
+        for (let t = 0; t < NT; t++) tiers.push({
+          tier: t, name: TNAMES[t], count: tierAll[t],
+          share: domain ? tierAll[t] / domain : 0,
+          mean: tierAll[t] ? tierSum[t] / tierAll[t] : 0,
+          min: tierAll[t] ? tierMin[t] : 0, max: tierMax[t],
+        });
+        self.postMessage({ type: 'histogram', buckets, tiers, domain,
+          stats: { total: Math.round(total), raw, mean: total ? sum / total : 0, min: raw ? mn : 0, max: mx, estimated: lastSampled6 } });
         return;
       }
 
@@ -1488,13 +1536,16 @@ function analysisWorker() {
         const lenMask = lengthMask(m.lengths);
         const epMin = (m.epMin == null) ? -Infinity : m.epMin;
         const epMax = (m.epMax == null) ? Infinity : m.epMax;
+        const tierMask = tierMaskOf(m.tiers);
         const rows = [];
         for (let k = 0; k < count; k++) {
           if (!(lenMask & (1 << lenArr[k]))) continue;
           const v = epArr[k];
           if (v <= epMin || v >= epMax) continue;
           if (!matches(k, badges, exclude)) continue;
-          rows.push([idxArr[k], v]);
+          const t = tierOf(v);
+          if (!(tierMask & (1 << t))) continue;
+          rows.push([idxArr[k], v, TNAMES[t]]);
         }
         rows.sort((a, b) => a[0] - b[0]);
         self.postMessage({ type: 'filterRows', rows, capped: false, stride: lastStride, lengths: lastLengths });
@@ -1506,16 +1557,20 @@ function analysisWorker() {
   };
 }
 
-function analysisClient(WORKER_SRC) {
+// TIERS: card-rarity tiers low->high, injected from the server's CARD_TIERS/TIER_PALETTE
+// as [{ key, label, accent, hl, lo, hi }] so the panel colours match the number card.
+function analysisClient(WORKER_SRC, TIERS) {
   const $ = id => document.getElementById(id);
   const panel = $('analysis'), btn = $('an-btn'), statusEl = $('an-status');
   const chartEl = $('an-chart'), statsEl = $('an-stats'), lenWrap = $('an-lengths');
   const badgeList = $('an-badge-list'), badgeSearch = $('an-badge-search'), purgeBtn = $('an-purge');
   const epMinEl = $('an-ep-min'), epMaxEl = $('an-ep-max');
+  const tierWrap = $('an-tiers'), tierOut = $('an-tier-breakdown');
 
   let worker = null, meta = [], computed = false, computing = false;
   const selectedBadges = new Set();   // require: matching numbers must earn these
   const excludedBadges = new Set();   // exclude: matching numbers must NOT earn these
+  const offTiers = new Set();         // rarity tiers toggled OFF (empty = all tiers shown)
 
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const fmt = n => {
@@ -1555,6 +1610,55 @@ function analysisClient(WORKER_SRC) {
     b.setAttribute('aria-pressed', b.classList.contains('on') ? 'true' : 'false');
     scheduleFilter();
   });
+
+  // Rarity tier chips (trash..mythic, all on by default). Like lengths, tier is a pure
+  // post-compute filter on the already-swept EP values - toggling never recomputes.
+  TIERS.forEach((t, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'an-tier on';
+    b.dataset.tier = i;
+    b.textContent = t.label;
+    b.title = t.label + ' - ' + tierRangeText(i);
+    b.style.setProperty('--tc', t.accent);
+    b.setAttribute('aria-pressed', 'true');
+    tierWrap.appendChild(b);
+  });
+  tierWrap.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('.an-tier');
+    if (b) toggleTier(+b.dataset.tier);
+  });
+  // The breakdown rows under the chart are the same toggles, so a tier can be isolated
+  // straight from the number it shows.
+  tierOut.addEventListener('click', e => {
+    const row = e.target.closest && e.target.closest('.an-tb-row');
+    if (!row) return;
+    // Shift-click isolates the tier; a plain click just includes/excludes it.
+    const i = +row.dataset.tier;
+    if (e.shiftKey) { offTiers.clear(); TIERS.forEach((_, j) => { if (j !== i) offTiers.add(j); }); syncTierChips(); scheduleFilter(); }
+    else toggleTier(i);
+  });
+  function toggleTier(i) {
+    if (offTiers.has(i)) offTiers.delete(i); else offTiers.add(i);
+    if (offTiers.size === TIERS.length) offTiers.clear();   // never filter everything away
+    syncTierChips();
+    scheduleFilter();
+  }
+  function syncTierChips() {
+    tierWrap.querySelectorAll('.an-tier').forEach(b => {
+      const on = !offTiers.has(+b.dataset.tier);
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    tierOut.querySelectorAll('.an-tb-row').forEach(r => r.classList.toggle('off', offTiers.has(+r.dataset.tier)));
+  }
+  function selectedTiers() { const out = []; TIERS.forEach((_, i) => { if (!offTiers.has(i)) out.push(i); }); return out; }
+  function tierRangeText(i) {
+    const t = TIERS[i];
+    if (t.lo == null) return 'under ' + t.hi.toLocaleString() + ' EP';
+    if (t.hi == null) return t.lo.toLocaleString() + ' EP and up';
+    return t.lo.toLocaleString() + '-' + (t.hi - 1).toLocaleString() + ' EP';
+  }
 
   // EP score range: keep only numbers whose total EP is more than min and/or less than max.
   // Blank or non-numeric means that bound is open. Re-filters instantly (no recompute).
@@ -1636,7 +1740,7 @@ function analysisClient(WORKER_SRC) {
   });
 
   $('an-export-examples').addEventListener('click', () => { if (computed) worker.postMessage({ cmd: 'exportExamples' }); });
-  $('an-export-csv').addEventListener('click', () => { if (computed) { const ep = epBounds(); worker.postMessage({ cmd: 'exportFilter', badges: [...selectedBadges], exclude: [...excludedBadges], lengths: selectedLengths(), epMin: ep.min, epMax: ep.max }); } });
+  $('an-export-csv').addEventListener('click', () => { if (computed) { const ep = epBounds(); worker.postMessage({ cmd: 'exportFilter', badges: [...selectedBadges], exclude: [...excludedBadges], lengths: selectedLengths(), tiers: selectedTiers(), epMin: ep.min, epMax: ep.max }); } });
 
   function setExportEnabled(on) { $('an-export-examples').disabled = !on; $('an-export-csv').disabled = !on; }
   setExportEnabled(false);
@@ -1672,7 +1776,7 @@ function analysisClient(WORKER_SRC) {
   let filterTimer = null;
   function scheduleFilter() { if (!computed) return; clearTimeout(filterTimer); filterTimer = setTimeout(runFilter, 60); }
   function selectedLengths() { const out = []; for (let L = 1; L <= 7; L++) { const b = $('an-len-' + L); if (b && b.classList.contains('on')) out.push(L); } return out; }
-  function runFilter() { const ep = epBounds(); worker.postMessage({ cmd: 'filter', badges: [...selectedBadges], exclude: [...excludedBadges], lengths: selectedLengths(), epMin: ep.min, epMax: ep.max }); }
+  function runFilter() { const ep = epBounds(); worker.postMessage({ cmd: 'filter', badges: [...selectedBadges], exclude: [...excludedBadges], lengths: selectedLengths(), tiers: selectedTiers(), epMin: ep.min, epMax: ep.max }); }
 
   function computedStatus(m) {
     let s = 'Analyzed all ' + m.domainTrue.toLocaleString() + ' numbers (every number, all lengths)';
@@ -1694,7 +1798,7 @@ function analysisClient(WORKER_SRC) {
       runFilter();
     }
     else if (m.type === 'purged') { runCompute(true); }
-    else if (m.type === 'histogram') { renderChart(m.buckets, m.stats); }
+    else if (m.type === 'histogram') { renderChart(m.buckets, m.stats); renderTiers(m.tiers, m.domain); }
     else if (m.type === 'examples') { exportExamplesFile(m); }
     else if (m.type === 'filterRows') { exportCsvFile(m); }
     else if (m.type === 'error') { setStatus('Error: ' + m.message); computing = false; purgeBtn.disabled = false; }
@@ -1718,8 +1822,8 @@ function analysisClient(WORKER_SRC) {
   function exportCsvFile(m) {
     const picked = [...selectedBadges].map(i => meta[i].label);
     const banned = [...excludedBadges].map(i => meta[i].label);
-    const head = ['number,totalEP'];
-    const body = m.rows.map(r => r[0] + ',' + Math.round(r[1]));
+    const head = ['number,totalEP,rarity'];
+    const body = m.rows.map(r => r[0] + ',' + Math.round(r[1]) + ',' + r[2]);
     const note = m.capped ? '\n# (truncated to ' + m.rows.length.toLocaleString() + ' rows)' : '';
     const slug = picked.concat(banned.map(l => 'no-' + l)).join('+').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
     const fname = 'rngdle-' + (slug || 'numbers') + '.csv';
@@ -1735,7 +1839,8 @@ function analysisClient(WORKER_SRC) {
     if (ep.min != null && ep.max != null) epDesc = ' with EP between ' + ep.min.toLocaleString() + ' and ' + ep.max.toLocaleString();
     else if (ep.min != null) epDesc = ' with EP > ' + ep.min.toLocaleString();
     else if (ep.max != null) epDesc = ' with EP < ' + ep.max.toLocaleString();
-    download(fname, '# ' + desc + epDesc + note + '\n' + head.concat(body).join('\n'), 'text/csv');
+    const tierDesc = offTiers.size ? '\n# rarity tiers: ' + selectedTiers().map(i => TIERS[i].key).join(', ') : '';
+    download(fname, '# ' + desc + epDesc + tierDesc + note + '\n' + head.concat(body).join('\n'), 'text/csv');
   }
 
   function renderChart(buckets, stats) {
@@ -1770,17 +1875,37 @@ function analysisClient(WORKER_SRC) {
       const x = padL + i * bw, y = yOf(b.count), h = padT + plotH - y;
       const label = b.i === 0 ? '0 EP' : fmt(b.lo) + '-' + fmt(b.hi) + ' EP';
       const pct = (b.count / stats.total * 100);
-      const fill = b.i === 0 ? '#4a4d55' : '#5b93d6';
-      svg += '<rect x="' + (x + 1).toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + Math.max(0, bw - 2).toFixed(1) +
-        '" height="' + Math.max(0, h).toFixed(1) + '" fill="' + fill + '" rx="1">' +
-        '<title>' + esc(label) + ': ' + Math.round(b.count).toLocaleString() + ' numbers (' + pct.toFixed(pct < 1 ? 2 : 1) + '%)</title></rect>';
+      // Each bar is stacked by rarity tier (lowest at the bottom), so the histogram reads
+      // as a rarity breakdown even where a quarter-decade bucket straddles a tier cutoff -
+      // which it always does for uncommon, a band narrower than one bucket. Bar HEIGHT is
+      // log-scaled by the bucket total; the segments split that height by share of the
+      // bucket, so a segment shows composition, not an absolute count. The tooltip has
+      // the exact numbers.
+      const rw = Math.max(0, bw - 2).toFixed(1), rx = (x + 1).toFixed(1);
+      const parts = [];
+      let off = 0;
+      for (let t = 0; t < b.byTier.length; t++) {
+        const c = b.byTier[t];
+        if (!c) continue;
+        const frac = c / b.count, segH = h * frac;
+        // Stack upward from the baseline: lowest tier at the bottom of the bar.
+        const segY = padT + plotH - off - segH;
+        parts.push('<rect x="' + rx + '" y="' + segY.toFixed(1) + '" width="' + rw +
+          '" height="' + Math.max(0, segH).toFixed(1) + '" fill="' + TIERS[t].accent + '"/>');
+        off += segH;
+      }
+      if (!parts.length) parts.push('<rect x="' + rx + '" y="' + y.toFixed(1) + '" width="' + rw + '" height="0" fill="#4a4d55"/>');
+      const mix = b.byTier.map((c, t) => c ? TIERS[t].label + ' ' + Math.round(c).toLocaleString() : null)
+        .filter(Boolean).reverse().join(', ');
+      svg += '<g><title>' + esc(label) + ': ' + Math.round(b.count).toLocaleString() + ' numbers (' +
+        pct.toFixed(pct < 1 ? 2 : 1) + '%)\n' + esc(mix) + '</title>' + parts.join('') + '</g>';
       if (i % tickEvery === 0) {
         const lx = x + bw / 2, ly = padT + plotH + 12;
         const lab = b.i === 0 ? '0' : fmt(b.lo);
         svg += '<text x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '" fill="#8b8e97" font-size="10" text-anchor="end" transform="rotate(-45 ' + lx.toFixed(1) + ' ' + ly.toFixed(1) + ')">' + lab + '</text>';
       }
     });
-    svg += '<text x="' + (padL + plotW / 2) + '" y="' + (H - 4) + '" fill="#8b8e97" font-size="11" text-anchor="middle">Total EP (log scale) - bar height = count (log scale)</text>';
+    svg += '<text x="' + (padL + plotW / 2) + '" y="' + (H - 4) + '" fill="#8b8e97" font-size="11" text-anchor="middle">Total EP (log scale) - bar height = count (log scale), stacked by rarity tier</text>';
     svg += '</svg>';
     chartEl.innerHTML = svg;
 
@@ -1792,6 +1917,53 @@ function analysisClient(WORKER_SRC) {
       (stats.estimated ? '<p class="an-note">≈ counts scaled to the full 0-999,999 range from the 6-digit sample (' + stats.raw.toLocaleString() + ' numbers actually scanned).</p>' : '');
   }
   function stat(k, v) { return '<div class="an-stat"><span>' + k + '</span><strong>' + v + '</strong></div>'; }
+
+  // Rarity breakdown: how the numbers matching the length / EP / badge filters split
+  // across the seven card tiers. Counts deliberately ignore the tier toggles themselves
+  // (see the worker) so the breakdown keeps working as a picker once a tier is isolated.
+  function renderTiers(tiers, domain) {
+    if (!tiers) { tierOut.innerHTML = ''; return; }
+    const pct = s => (s * 100 < 0.01 && s > 0) ? '<0.01%' : (s * 100).toFixed(s * 100 >= 10 ? 1 : 2) + '%';
+    // Stacked share bar, highest tier first so the rare slivers sit on the readable end.
+    const seg = [...tiers].reverse().filter(t => t.count > 0).map(t =>
+      '<i style="width:' + (t.share * 100).toFixed(4) + '%;background:' + TIERS[t.tier].accent + '"' +
+      ' title="' + esc(TIERS[t.tier].label + ': ' + t.count.toLocaleString() + ' (' + pct(t.share) + ')') + '"></i>').join('');
+
+    const rows = [...tiers].reverse().map(t => {
+      const T = TIERS[t.tier];
+      const on = !offTiers.has(t.tier);
+      // Tooltip: the tier's own EP window, then the EP actually spanned by the matching
+      // numbers inside it (which can be much narrower than the window).
+      const tip = T.label + ' - ' + tierRangeText(t.tier) +
+        (t.count ? '\nmatching: ' + Math.round(t.min).toLocaleString() + ' - ' + Math.round(t.max).toLocaleString() + ' EP' : '\nno matching numbers') +
+        (on ? '' : '\n(excluded from the chart and exports)');
+      return '<div class="an-tb-row' + (on ? '' : ' off') + (t.count ? '' : ' empty') + '" data-tier="' + t.tier + '"' +
+        ' role="button" tabindex="0" aria-pressed="' + (on ? 'true' : 'false') + '"' +
+        ' title="' + esc(tip) + '">' +
+        '<span class="an-tb-sw" style="background:' + T.accent + '"></span>' +
+        '<span class="an-tb-name">' + esc(T.label) + '</span>' +
+        '<span class="an-tb-n">' + Math.round(t.count).toLocaleString() + '</span>' +
+        '<span class="an-tb-p">' + (t.count ? pct(t.share) : '-') + '</span>' +
+        '<span class="an-tb-track"><i style="width:' + (t.share * 100).toFixed(4) + '%;background:' + T.accent + '"></i></span>' +
+        '<span class="an-tb-ep">' + (t.count ? 'mean ' + Math.round(t.mean).toLocaleString() + ' EP' : '&mdash;') + '</span>' +
+        '</div>';
+    }).join('');
+
+    tierOut.innerHTML =
+      '<div class="an-tb-head">Rarity breakdown' +
+        '<span>' + Math.round(domain || 0).toLocaleString() + ' numbers match the other filters</span></div>' +
+      '<div class="an-tb-bar">' + seg + '</div>' +
+      '<div class="an-tb-rows">' + rows + '</div>' +
+      '<p class="an-tb-note">Click a tier to include or exclude it; shift-click to show only that tier. ' +
+        'Counts cover every number passing the length, EP and badge filters, whether or not its tier is currently shown.</p>';
+  }
+  // Keyboard parity with the chips for the breakdown rows.
+  tierOut.addEventListener('keydown', e => {
+    const row = e.target.closest && e.target.closest('.an-tb-row');
+    if (!row || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    row.click();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1817,6 +1989,8 @@ const CARD_TIERS = [
   [23077, 'rare'], [35744, 'epic'], [164953, 'anomaly'],
 ]; // >= 164953 -> mythic
 function cardTier(ep) { for (const [t, name] of CARD_TIERS) if (ep < t) return name; return 'mythic'; }
+// Tier names low -> high; the top tier has no cutoff row, hence the extra entry.
+const CARD_TIER_NAMES = [...CARD_TIERS.map(t => t[1]), 'mythic'];
 // accent = RARITY_PALETTE.highlight.border (saturated); hl = highlight.primary
 // (lighter fill used to light up digits). Both lifted verbatim from rngdle.com.
 const TIER_PALETTE = {
@@ -1828,6 +2002,20 @@ const TIER_PALETTE = {
   anomaly:  { accent: '#EA580C', hl: '#FDBA74', glow: 'rgba(234,88,12,.50)',  label: 'ANOMALY' },
   mythic:   { accent: '#DB2777', hl: '#F9A8D4', glow: 'rgba(219,39,119,.55)', label: 'MYTHIC' },
 };
+
+// Tier descriptors handed to the analysis panel (as JSON) so its rarity chips, stacked
+// bar and histogram colours come from the same CARD_TIERS/TIER_PALETTE the card uses.
+// lo is null for the bottom tier and hi is null for mythic - both ends are open.
+function tierMeta() {
+  return CARD_TIER_NAMES.map((key, i) => ({
+    key,
+    label: TIER_PALETTE[key].label,
+    accent: TIER_PALETTE[key].accent,
+    hl: TIER_PALETTE[key].hl,
+    lo: i === 0 ? null : CARD_TIERS[i - 1][0],
+    hi: i < CARD_TIERS.length ? CARD_TIERS[i][0] : null,
+  }));
+}
 
 // Escape text for safe insertion into HTML (attribute values and text content).
 function esc(s) {
@@ -2190,6 +2378,44 @@ function renderHTML(result) {
   @keyframes an-spin { to { transform:rotate(360deg); } }
   #an-chart svg { background:var(--bg); border:1px solid var(--border); border-radius:8px; }
   .an-empty { color:var(--muted); text-align:center; padding:1.5rem; }
+
+  /* --- Rarity: filter chips + breakdown --- */
+  .an-controls .an-tier-fs { flex:1 1 100%; min-width:0; }
+  #an-tiers { display:flex; flex-wrap:wrap; gap:.35rem; }
+  .an-tier { font-size:.7rem; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+    padding:.28rem .6rem; border-radius:999px; cursor:pointer; line-height:1;
+    border:1px solid var(--tc); background:transparent; color:var(--tc);
+    transition:opacity .15s, background .15s, box-shadow .15s; }
+  .an-tier.on { background:color-mix(in srgb, var(--tc) 22%, transparent); box-shadow:0 0 10px -2px var(--tc); color:#fff; }
+  .an-tier:not(.on) { opacity:.34; border-style:dashed; }
+  .an-tier:hover { opacity:1; }
+  #an-tier-breakdown:empty { display:none; }
+  #an-tier-breakdown { margin-top:.9rem; border:1px solid var(--border); border-radius:8px; padding:.7rem .8rem .5rem; }
+  .an-tb-head { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:.5rem;
+    font-size:.72rem; text-transform:uppercase; letter-spacing:.07em; color:var(--faint); font-weight:600; margin-bottom:.55rem; }
+  .an-tb-head span { text-transform:none; letter-spacing:0; font-weight:400; font-size:.76rem; color:var(--muted); }
+  .an-tb-bar { display:flex; height:.55rem; border-radius:999px; overflow:hidden; background:var(--surface-2); margin-bottom:.6rem; }
+  .an-tb-bar i { display:block; min-width:1px; }
+  .an-tb-rows { display:flex; flex-direction:column; gap:.05rem; }
+  .an-tb-row { display:grid; grid-template-columns:.7rem 5.5rem 5rem 4rem 1fr 8rem; align-items:center; gap:.5rem;
+    padding:.22rem .3rem; border-radius:5px; cursor:pointer; font-size:.8rem;
+    transition:background .12s, opacity .12s; }
+  .an-tb-row:hover { background:var(--surface-2); }
+  .an-tb-row.off { opacity:.36; }
+  .an-tb-row.empty { opacity:.3; cursor:default; }
+  .an-tb-row.off.empty { opacity:.2; }
+  .an-tb-sw { width:.7rem; height:.7rem; border-radius:3px; }
+  .an-tb-name { font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; font-weight:600; color:var(--text); }
+  .an-tb-n, .an-tb-p { font-family:var(--mono); font-variant-numeric:tabular-nums; text-align:right; }
+  .an-tb-p { color:var(--muted); }
+  .an-tb-track { height:.4rem; border-radius:999px; background:var(--surface-2); overflow:hidden; }
+  .an-tb-track i { display:block; height:100%; min-width:1px; opacity:.85; }
+  .an-tb-ep { font-size:.72rem; color:var(--faint); font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
+  .an-tb-note { color:var(--faint); font-size:.72rem; margin:.5rem 0 .1rem; }
+  @media (max-width:640px) {
+    .an-tb-row { grid-template-columns:.7rem 4.6rem 4.4rem 3.4rem; }
+    .an-tb-track, .an-tb-ep { display:none; }
+  }
   #an-stats { display:flex; flex-wrap:wrap; gap:.6rem; margin-top:.9rem; }
   .an-stat { border:1px solid var(--border); border-radius:8px; padding:.5rem .7rem; flex:1; min-width:110px; }
   .an-stat span { display:block; color:var(--faint); font-size:.66rem; text-transform:uppercase; letter-spacing:.06em; margin-bottom:.15rem; }
@@ -2291,9 +2517,14 @@ function renderHTML(result) {
         <div id="an-badge-list" class="an-badge-list"></div>
         <div id="an-badge-sel" class="an-badge-sel"></div>
       </fieldset>
+      <fieldset class="an-tier-fs">
+        <legend>Rarity tier</legend>
+        <div id="an-tiers"></div>
+      </fieldset>
     </div>
     <div id="an-status"></div>
     <div id="an-chart"></div>
+    <div id="an-tier-breakdown"></div>
     <div id="an-stats"></div>
     <div class="an-actions">
       <button type="button" id="an-export-csv">Matching numbers (.csv)</button>
@@ -2419,7 +2650,7 @@ function renderHTML(result) {
 // it here (page context) and inside the worker blob so the source runs standalone.
 var __name = (f) => f;
 const __WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + analysisWorker.toString() + ')()')};
-(${analysisClient.toString()})(__WORKER_SRC);
+(${analysisClient.toString()})(__WORKER_SRC, ${JSON.stringify(tierMeta())});
 </script>
 </body></html>`;
 }

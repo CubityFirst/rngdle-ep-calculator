@@ -21,10 +21,11 @@ npm test             # run the badge-logic test harness
   rarity / name.
 - **JSON API:** `GET /api?n=696969` →
   `{ number, totalEP, count, badges: [{ id, label, emoji, ep, rarity }] }`
-- **Browser engine:** `GET /engine.js` - an ES module (`computeLean`, `BADGE_META`)
-  *generated from the live badge table* via `Function.prototype.toString()`, used by the
-  analysis Web Worker. There is no second copy of the rules: edit a `test` once and it
-  flows into both the server calculator and the client analysis.
+- **Browser engine:** `GET /engine.js` - an ES module (`computeLean`, `BADGE_META`,
+  `CARD_TIERS` / `cardTier`) *generated from the live badge table* via
+  `Function.prototype.toString()`, used by the analysis Web Worker. There is no second
+  copy of the rules or of the rarity cutoffs: edit a `test` once and it flows into both
+  the server calculator and the client analysis.
 
 ## Analyze all scores
 
@@ -42,8 +43,21 @@ single-threaded sweep with an identical result.
   stride** so the histogram still reflects the true full range.
 - **Filter by badge(s)** - restrict to numbers that earn *all* selected badges (instant
   re-filter; no recompute).
+- **Break down by rarity** - every matching number is bucketed into its card tier
+  (trash / common / uncommon / rare / epic / anomaly / mythic, the percentile-derived
+  `CARD_TIERS` cutoffs the number card uses) and reported as a **rarity breakdown**:
+  count, share, mean EP and a share bar per tier. The histogram bars are **stacked by
+  tier** too, so the EP distribution reads as a rarity composition — a quarter-decade
+  bucket can straddle a cutoff (the uncommon band is narrower than one bucket), so
+  buckets are tallied per tier rather than given a single colour.
+- **Filter by rarity tier** - the tier chips (and the breakdown rows) include/exclude a
+  tier; shift-clicking a row isolates it. Tier is a pure post-compute filter on the
+  already-swept EP values, so it never recomputes. Breakdown counts deliberately
+  **ignore the tier filter itself** (facet counts), so the breakdown still works as a
+  picker once a tier is isolated.
 - **Resolution** - Full (every number) or a sample; only affects the 6-digit bucket.
-- **Exports:** *Matching numbers (.csv)* dumps the current filter as `number,totalEP`;
+- **Exports:** *Matching numbers (.csv)* dumps the current filter as
+  `number,totalEP,rarity`;
   *Examples per badge (.txt)* lists example numbers for every badge. Use **Full** resolution
   for complete examples (6-digit-only badges are missed by sampling).
 
