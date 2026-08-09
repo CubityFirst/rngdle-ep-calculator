@@ -1918,16 +1918,45 @@ function analysisClient(WORKER_SRC, TIERS) {
   }
   function stat(k, v) { return '<div class="an-stat"><span>' + k + '</span><strong>' + v + '</strong></div>'; }
 
+  // Largest-remainder (Hamilton) apportionment of the tier shares into hundredths of a
+  // percent: floor each tier's exact share, then hand the leftover units to the largest
+  // fractional parts. Guarantees the displayed shares sum to exactly 100.00% while every
+  // tier stays within one unit (0.01pp) of its true share. Empty tiers are excluded, so
+  // a tier with no numbers can never be handed a leftover unit.
+  function apportionShares(tiers, domain) {
+    const units = tiers.map(() => 0), rem = tiers.map(() => -1);
+    if (!domain) return units;
+    let used = 0;
+    for (const t of tiers) {
+      if (!t.count) continue;
+      const exact = t.count / domain * 10000;
+      units[t.tier] = Math.floor(exact);
+      rem[t.tier] = exact - units[t.tier];
+      used += units[t.tier];
+    }
+    const order = rem.map((_, i) => i).filter(i => rem[i] >= 0)
+      .sort((a, b) => rem[b] - rem[a] || a - b);   // ties: lower tier first, for stability
+    for (let k = 0, left = 10000 - used; k < left && order.length; k++) units[order[k % order.length]]++;
+    return units;
+  }
+
   // Rarity breakdown: how the numbers matching the length / EP / badge filters split
   // across the seven card tiers. Counts deliberately ignore the tier toggles themselves
   // (see the worker) so the breakdown keeps working as a picker once a tier is isolated.
   function renderTiers(tiers, domain) {
     if (!tiers) { tierOut.innerHTML = ''; return; }
-    const pct = s => (s * 100 < 0.01 && s > 0) ? '<0.01%' : (s * 100).toFixed(s * 100 >= 10 ? 1 : 2) + '%';
+    // Shares are apportioned by largest remainder so the column sums to exactly 100.00%.
+    // Rounding each row on its own overshoots: over the full range common is 48.969% and
+    // uncommon 24.989%, which at one decimal read as 49.0 + 25.0 and push the total to
+    // 100.04. Units below are hundredths of a percent, so 10,000 units == 100%.
+    const units = apportionShares(tiers, domain);
+    // A tier with numbers in it but under half a unit shows "<0.01%" rather than "0.00%";
+    // it was apportioned 0 either way, so the visible column still totals 100.00%.
+    const pct = t => !t.count ? '-' : (units[t.tier] ? (units[t.tier] / 100).toFixed(2) + '%' : '<0.01%');
     // Stacked share bar, highest tier first so the rare slivers sit on the readable end.
     const seg = [...tiers].reverse().filter(t => t.count > 0).map(t =>
       '<i style="width:' + (t.share * 100).toFixed(4) + '%;background:' + TIERS[t.tier].accent + '"' +
-      ' title="' + esc(TIERS[t.tier].label + ': ' + t.count.toLocaleString() + ' (' + pct(t.share) + ')') + '"></i>').join('');
+      ' title="' + esc(TIERS[t.tier].label + ': ' + t.count.toLocaleString() + ' (' + pct(t) + ')') + '"></i>').join('');
 
     const rows = [...tiers].reverse().map(t => {
       const T = TIERS[t.tier];
@@ -1943,7 +1972,7 @@ function analysisClient(WORKER_SRC, TIERS) {
         '<span class="an-tb-sw" style="background:' + T.accent + '"></span>' +
         '<span class="an-tb-name">' + esc(T.label) + '</span>' +
         '<span class="an-tb-n">' + Math.round(t.count).toLocaleString() + '</span>' +
-        '<span class="an-tb-p">' + (t.count ? pct(t.share) : '-') + '</span>' +
+        '<span class="an-tb-p">' + pct(t) + '</span>' +
         '<span class="an-tb-track"><i style="width:' + (t.share * 100).toFixed(4) + '%;background:' + T.accent + '"></i></span>' +
         '<span class="an-tb-ep">' + (t.count ? 'mean ' + Math.round(t.mean).toLocaleString() + ' EP' : '&mdash;') + '</span>' +
         '</div>';
