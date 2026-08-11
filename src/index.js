@@ -4609,7 +4609,13 @@ const __CHAINS_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + chainsWorke
 // filtering / sorting on the DOM.
 // ---------------------------------------------------------------------------
 
+// The badge index is fully static per deploy (every input is a generated file or
+// the badge table), but it's also the biggest page (~260KB / 230 cards), so render
+// it once per isolate instead of per request.
+let badgeIndexHTML = null;
+
 function renderBadgeIndex() {
+  if (badgeIndexHTML) return badgeIndexHTML;
   const idToFam = new Map();
   FAMILIES.forEach((fam, fi) => { for (const id of fam) idToFam.set(id, fi); });
   const byId = new Map(BADGES.map(b => [b[0], b]));
@@ -4686,7 +4692,11 @@ function renderBadgeIndex() {
   #cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:.7rem; }
   .bd { border:1px solid var(--border); border-left:3px solid var(--tc); border-radius:var(--r-card);
     background:var(--surface); padding:.75rem .9rem .8rem; display:flex; flex-direction:column; gap:.4rem;
-    scroll-margin-top:4rem; }
+    scroll-margin-top:4rem;
+    /* Only lay out / paint the cards in view: with 230 server-rendered cards this is
+       most of the page's first-paint cost (and the flash on navigating here). The
+       intrinsic size is a rough card height so the scrollbar stays stable. */
+    content-visibility:auto; contain-intrinsic-size:auto 180px; }
   .bd:target { border-color:var(--tc); box-shadow:0 0 0 3px color-mix(in srgb, var(--tc) 25%, transparent); }
   .bd header { display:flex; align-items:center; gap:.5rem; }
   .bd-emoji { font-size:1.25rem; flex:0 0 auto; }
@@ -4823,9 +4833,10 @@ ${cards}
   reveal();
 })();`;
 
-  return pageShell({
+  badgeIndexHTML = pageShell({
     title: 'RNGdle - Badge Index', nav: 'badges', width: '1100px', noindex: true, css, body, script,
   });
+  return badgeIndexHTML;
 }
 
 // ---------------------------------------------------------------------------
