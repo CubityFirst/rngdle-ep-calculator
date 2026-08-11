@@ -4855,6 +4855,27 @@ const PROFILE_TIERS = [
   ['trash', 'Trash', 'Bottom 1%', '🟫'],
 ];
 const VALID_USERNAME = /^[A-Za-z0-9_-]{1,40}$/;
+// How many players a single combined view may merge. Each player costs one subrequest
+// per 100 rolls, and a Worker invocation is capped at 50 subrequests, so this leaves
+// room for ~500 rolls each before we'd hit the ceiling.
+const MAX_COMBINE = 10;
+
+/**
+ * Split a free-form list of usernames ("a\nb, c", one per line from the textarea)
+ * into unique valid names, in the order given. Usernames are [A-Za-z0-9_-], so every
+ * other character is a separator - which also means a pasted "@name" loses its @.
+ */
+function parseUsernames(str) {
+  const out = [], seen = new Set();
+  for (const name of String(str || '').split(/[^A-Za-z0-9_-]+/)) {
+    if (!name || !VALID_USERNAME.test(name)) continue;
+    const key = name.toLowerCase(); // don't count the same player twice
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
 
 async function fetchUserRolls(username) {
   const rolls = [];
@@ -4880,10 +4901,10 @@ function profileSummary(rolls) {
     const tier = cardTier(ep);
     tierCounts[tier]++;
     totalEP += ep;
-    if (!best || ep > best.ep) best = { number: roll.number, ep, at: roll.rolledAt };
+    if (!best || ep > best.ep) best = { number: roll.number, ep, at: roll.rolledAt, owner: roll.owner };
     // Distinct badges ever earned (compute keeps superseded badges in the list too).
     for (const b of compute(roll.number).badges) badgeSet.add(b.id);
-    return { number: roll.number, ep, tier, badgeCount: roll.badgeCount, at: roll.rolledAt };
+    return { number: roll.number, ep, tier, badgeCount: roll.badgeCount, at: roll.rolledAt, owner: roll.owner };
   });
   // Max streak: longest run of consecutive UTC days with at least one roll.
   const days = [...new Set(rolls.map(r => (r.rolledAt || '').slice(0, 10)).filter(Boolean))].sort();
@@ -4895,6 +4916,40 @@ function profileSummary(rolls) {
     if (streak > maxStreak) maxStreak = streak;
   }
   return { totalRolls: rolls.length, tierCounts, distinctBadges: badgeSet.size, totalEP, best, maxStreak, scored };
+}
+
+/**
+ * Fetch several players at once. One bad name shouldn't sink the whole combined view,
+ * so a failed player comes back as { username, error: <status> } and the caller decides
+ * whether enough of them loaded to render something.
+ */
+async function fetchProfiles(names) {
+  return Promise.all(names.map(async username => {
+    try { return { username, rolls: await fetchUserRolls(username) }; } catch (e) { return { username, error: e.status || 502 }; }
+  }));
+}
+
+/**
+ * Merge several players into one summary, as if their rolls were a single collection.
+ *
+ * Every stat falls out of running profileSummary() over the concatenated rolls, which
+ * gives the right thing for each kind: counts and EP add up, badges become the union
+ * (the group's shared collection), best roll is the group's best, and the streak
+ * becomes the longest run of days on which *someone* rolled. Each roll is tagged with
+ * its owner so the rolls table can attribute it. `members` keeps the per-player
+ * summaries for the breakdown table.
+ */
+function combinedSummary(loaded) {
+  const all = [];
+  for (const m of loaded) for (const r of m.rolls) all.push({ ...r, owner: m.username });
+  const sum = profileSummary(all);
+  // Per-player scored lists would just duplicate sum.scored (which carries `owner`), so
+  // drop them - they'd double the JSON on /api/profile for nothing.
+  sum.members = loaded.map(m => {
+    const { scored, ...rest } = profileSummary(m.rolls);
+    return { username: m.username, ...rest };
+  });
+  return sum;
 }
 
 function fmtDate(iso) {
@@ -4918,18 +4973,27 @@ const TIER_EXPECTED_RATE = { mythic: .01, anomaly: .04, epic: .05, rare: .15, un
 function profileCopyData(sum) {
   const share = n => sum.totalRolls ? `${(n / sum.totalRolls * 100).toFixed(1)}%` : '0%';
   const b = sum.best;
+  const combined = !!sum.members;
+  const bestWho = b && b.owner ? ` by @${b.owner}` : '';
+  const stats = [
+    ['totalRolls', `🧮 ${sum.totalRolls.toLocaleString()} Total Rolls`],
+    ['streak', `🔥 ${sum.maxStreak.toLocaleString()} Day ${combined ? 'Combined' : 'Max'} Streak`],
+    ['badges', `🏅 ${sum.distinctBadges} Badges`],
+    ['ep', `📈 ${sum.totalEP.toLocaleString()} (Total) EP`],
+    ['bestRoll', `🎲 Best Roll: ${b ? `${b.number} (${b.ep.toLocaleString()} EP)${bestWho} on ${fmtDateNumeric(b.at)}` : '-'}`],
+  ];
+  // Combined views name the players they merged; the checkbox for this line is only
+  // rendered there, so on a single profile the setting has nothing to switch on.
+  if (combined) {
+    stats.unshift(['players', `👥 ${sum.members.length} Player${sum.members.length === 1 ? '' : 's'}: ` +
+      sum.members.map(m => '@' + m.username).join(', ')]);
+  }
   return {
     tiers: PROFILE_TIERS.map(([key, label, pct, emoji]) => ({
       emoji, label, pct, n: sum.tierCounts[key], share: share(sum.tierCounts[key]),
       exp: sum.totalRolls * TIER_EXPECTED_RATE[key],
     })),
-    stats: [
-      ['totalRolls', `🧮 ${sum.totalRolls.toLocaleString()} Total Rolls`],
-      ['streak', `🔥 ${sum.maxStreak.toLocaleString()} Day Max Streak`],
-      ['badges', `🏅 ${sum.distinctBadges} Badges`],
-      ['ep', `📈 ${sum.totalEP.toLocaleString()} (Total) EP`],
-      ['bestRoll', `🎲 Best Roll: ${b ? `${b.number} (${b.ep.toLocaleString()} EP) on ${fmtDateNumeric(b.at)}` : '-'}`],
-    ],
+    stats,
   };
 }
 
@@ -4971,7 +5035,26 @@ const PROFILE_CSS = `
   p.tag { margin:.1rem 0 1.5rem; }
   .uform { display:flex; gap:.5rem; max-width:420px; margin:1rem 0; }
   .uform input { flex:1; font-size:.95rem; }
+  .mform { max-width:420px; margin:.6rem 0 0; }
+  .mform textarea { display:block; width:100%; font-size:.95rem; font-family:var(--mono); line-height:1.6;
+    min-height:6.5rem; resize:vertical; }
+  .mform button { margin-top:.5rem; }
+  .or { display:flex; align-items:center; gap:.7rem; max-width:420px; margin:1.4rem 0 .2rem;
+    font-size:.7rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
+  .or::before, .or::after { content:''; flex:1; height:1px; background:var(--border); }
+  .edit-list { margin:0 0 1.3rem; }
+  .edit-list summary { cursor:pointer; color:var(--muted); font-size:.85rem; width:max-content; }
+  .edit-list summary:hover { color:var(--text); }
+  .sect { font-size:.78rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--muted); margin:0 0 .55rem; }
+  .rolls + .sect { margin-top:1.5rem; }
+  .who { font-family:var(--mono); font-size:.82rem; text-decoration:none; }
+  .who:hover { text-decoration:underline; }
+  .who .at { color:var(--faint); }
   .grid2 { display:grid; grid-template-columns:1.1fr 1fr; gap:1rem; margin-bottom:1.3rem; }
+  /* On a combined view the best-roll value also carries the player, so let the value
+     wrap rather than squeezing the label onto two lines. */
+  .grid2 .kv .k { white-space:nowrap; }
   @media (max-width:680px) { .grid2 { grid-template-columns:1fr; } }
   .tier-row { display:flex; align-items:center; gap:.6rem; padding:.28rem 0; font-size:.92rem; }
   .tier-dot { width:.62rem; height:.62rem; border-radius:50%; flex:0 0 auto; background:var(--tc); box-shadow:0 0 8px var(--tc); }
@@ -5007,12 +5090,27 @@ function profileForm(value) {
   </form>`;
 }
 
+// The multi-username form: one name per line, merged into a single combined summary.
+// Submitting is handled here rather than by the GET action so the result gets a clean,
+// shareable /u/a,b,c URL; the action= is the no-JS fallback (the route reads `us` too).
+function profileMultiForm(names, label) {
+  return `<form class="mform" action="/u" method="get" onsubmit="var ns=this.us.value.split(/[^A-Za-z0-9_-]+/).filter(Boolean);if(ns.length){location.href='/u/'+ns.map(encodeURIComponent).join(',');}return false;">
+    <textarea name="us" rows="4" spellcheck="false" autocomplete="off"
+      placeholder="one username per line, e.g.&#10;cubityfirst&#10;someone-else">${esc((names || []).join('\n'))}</textarea>
+    <button type="submit" class="btn-primary">${label || 'Combine'}</button>
+  </form>`;
+}
+
 function renderProfileForm(prefill) {
   return profilePage('RNGdle - Player Profile', `<div class="wrap">
   <h1>Player Profile</h1>
   <p class="tag">Enter a rngdle.com username to compute their collection summary - tier spread, badges collected,
     total EP and best roll - scored locally with this tool.</p>
   ${profileForm(prefill)}
+  <div class="or">or combine players</div>
+  <p class="tag" style="margin-bottom:0">List up to ${MAX_COMBINE} usernames, one per line, to pool their rolls into a
+    single summary.</p>
+  ${profileMultiForm(null, 'Combine')}
 </div>`);
 }
 
@@ -5025,7 +5123,24 @@ function renderProfileError(username, status) {
 </div>`);
 }
 
-function renderProfile(username, sum) {
+// "@name", linking to that player's own profile.
+const userLink = name => `<a class="who" href="/u/${encodeURIComponent(name)}"><span class="at">@</span>${esc(name)}</a>`;
+
+/**
+ * The profile page, rendered from a summary. One player and several combined players
+ * are the same page - header with the copy-text button, rarity/collection cards, rolls
+ * table - so both go through here; `o` carries only what differs:
+ *
+ *   o.title      <title> text            o.head    heading markup (h1 contents)
+ *   o.tag        tagline markup          o.sum     summary from profileSummary/combinedSummary
+ *   o.top        markup above the cards (edit form, failed-player warning)
+ *
+ * A summary with `members` is a combined one: rolls get an owner column, the collection
+ * card gains a player count, and a per-player breakdown table appears above the rolls.
+ */
+function renderProfileView(o) {
+  const sum = o.sum;
+  const members = sum.members || null;
   const share = n => sum.totalRolls ? `${(n / sum.totalRolls * 100).toFixed(1)}%` : '0%';
   const tierRows = PROFILE_TIERS.map(([key, label, pct]) => {
     const n = sum.tierCounts[key];
@@ -5040,12 +5155,13 @@ function renderProfile(username, sum) {
       <span class="tier-share">100%</span></div>`;
 
   const b = sum.best;
-  const bestHTML = b ? `<a href="/?n=${b.number}">${b.number.toLocaleString()}</a> <small>(${b.ep.toLocaleString()} EP)</small> · ${fmtDate(b.at)}` : '-';
+  const bestHTML = b ? `<a href="/?n=${b.number}">${b.number.toLocaleString()}</a> <small>(${b.ep.toLocaleString()} EP)</small>` +
+    `${b.owner ? ` · ${userLink(b.owner)}` : ''} · ${fmtDate(b.at)}` : '-';
 
   const rows = sum.scored.slice().sort((a, c) => new Date(c.at) - new Date(a.at)).map(r => {
     const acc = TIER_PALETTE[r.tier].accent;
     return `<tr>
-      <td class="muted">${fmtDate(r.at)}</td>
+      <td class="muted">${fmtDate(r.at)}</td>${members ? `<td>${userLink(r.owner)}</td>` : ''}
       <td class="num"><a href="/?n=${r.number}">${r.number.toLocaleString()}</a></td>
       <td><span class="pill" style="--tc:${acc}">${TIER_PALETTE[r.tier].label}</span></td>
       <td class="ep">${r.ep.toLocaleString()}</td>
@@ -5053,13 +5169,29 @@ function renderProfile(username, sum) {
     </tr>`;
   }).join('');
 
+  // Per-player breakdown, best collection first - a mini leaderboard for the group.
+  const memberRows = !members ? '' : members.slice().sort((x, y) => y.totalEP - x.totalEP).map(m => `<tr>
+      <td>${userLink(m.username)}</td>
+      <td class="ep">${m.totalRolls.toLocaleString()}</td>
+      <td class="ep">${m.totalEP.toLocaleString()}</td>
+      <td class="muted">${m.distinctBadges}</td>
+      <td class="muted">${m.maxStreak.toLocaleString()}</td>
+      <td class="num">${m.best ? `<a href="/?n=${m.best.number}">${m.best.number.toLocaleString()}</a> <span class="muted">(${m.best.ep.toLocaleString()} EP)</span>` : '-'}</td>
+    </tr>`).join('');
+  const membersHTML = !members ? '' : `<h2 class="sect">Players</h2>
+  <div class="rolls"><table>
+    <thead><tr><th>Player</th><th>Rolls</th><th>EP</th><th>Badges</th><th>Streak</th><th>Best roll</th></tr></thead>
+    <tbody>${memberRows}</tbody>
+  </table></div>
+  <h2 class="sect">All rolls</h2>
+  `;
+
   const copyData = profileCopyData(sum);
   const body = `<div class="wrap">
   <div class="phead">
     <div>
-      <h1><span class="at">@</span>${esc(username)}</h1>
-      <p class="tag">${sum.totalRolls.toLocaleString()} roll${sum.totalRolls === 1 ? '' : 's'} · scored with this tool
-        · <a href="https://www.rngdle.com/u/${encodeURIComponent(username)}" target="_blank" rel="noopener">on rngdle &rarr;</a></p>
+      <h1>${o.head}</h1>
+      <p class="tag">${o.tag}</p>
     </div>
     <div class="pbtns">
       <button type="button" id="copy-btn" class="copy-btn" title="Copy the summary as text">📋 Copy text</button>
@@ -5084,9 +5216,10 @@ function renderProfile(username, sum) {
               <label class="cfg-row"><input type="checkbox" id="cfg-expected-count">
                 <span>Expected counts
                   <small>Append the expected number of rolls per tier, e.g. &quot;(Expected: 3)&quot;.</small></span></label>
-              <h4 class="cfg-sub">Stat lines</h4>
+              <h4 class="cfg-sub">Stat lines</h4>${members ? `
+              <label class="cfg-row cfg-mini"><input type="checkbox" id="cfg-stat-players"><span>👥 Players</span></label>` : ''}
               <label class="cfg-row cfg-mini"><input type="checkbox" id="cfg-stat-totalRolls"><span>🧮 Total Rolls</span></label>
-              <label class="cfg-row cfg-mini"><input type="checkbox" id="cfg-stat-streak"><span>🔥 Day Max Streak</span></label>
+              <label class="cfg-row cfg-mini"><input type="checkbox" id="cfg-stat-streak"><span>🔥 Day ${members ? 'Combined' : 'Max'} Streak</span></label>
               <label class="cfg-row cfg-mini"><input type="checkbox" id="cfg-stat-badges"><span>🏅 Badges</span></label>
               <label class="cfg-row cfg-mini"><input type="checkbox" id="cfg-stat-ep"><span>📈 Total EP</span></label>
               <label class="cfg-row cfg-mini"><input type="checkbox" id="cfg-stat-bestRoll"><span>🎲 Best Roll</span></label>
@@ -5102,18 +5235,19 @@ function renderProfile(username, sum) {
     </div>
   </div>
   <script type="application/json" id="copy-data">${JSON.stringify(copyData).replace(/</g, '\\u003c')}</script>
-  <div class="grid2">
+  ${o.top || ''}<div class="grid2">
     <div class="card"><h2>Rarity spread</h2>${tierRows}</div>
-    <div class="card"><h2>Collection</h2>
+    <div class="card"><h2>Collection</h2>${members ? `
+      <div class="kv"><span class="k">Players</span><span class="v">${members.length}</span></div>` : ''}
       <div class="kv"><span class="k">Total Rolls</span><span class="v">${sum.totalRolls.toLocaleString()}</span></div>
       <div class="kv"><span class="k">Badges collected</span><span class="v">${sum.distinctBadges} <small>/ ${BADGES.length}</small></span></div>
       <div class="kv"><span class="k">Total EP</span><span class="v">${sum.totalEP.toLocaleString()}</span></div>
-      <div class="kv"><span class="k">Max streak</span><span class="v">${sum.maxStreak.toLocaleString()} <small>day${sum.maxStreak === 1 ? '' : 's'}</small></span></div>
+      <div class="kv"><span class="k" title="${members ? 'Longest run of days on which at least one of these players rolled' : 'Longest run of days with at least one roll'}">${members ? 'Combined streak' : 'Max streak'}</span><span class="v">${sum.maxStreak.toLocaleString()} <small>day${sum.maxStreak === 1 ? '' : 's'}</small></span></div>
       <div class="kv"><span class="k">Best roll</span><span class="v" style="font-weight:500">${bestHTML}</span></div>
     </div>
   </div>
-  <div class="rolls"><table>
-    <thead><tr><th>Date</th><th>Number</th><th>Tier</th><th>EP</th><th>Badges</th></tr></thead>
+  ${membersHTML}<div class="rolls"><table>
+    <thead><tr><th>Date</th>${members ? '<th>Player</th>' : ''}<th>Number</th><th>Tier</th><th>EP</th><th>Badges</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
 </div>`;
@@ -5126,8 +5260,10 @@ function renderProfile(username, sum) {
 
   // Settings live in localStorage; unknown keys are ignored so old stores stay valid.
   var KEY = 'rngdle-profile-copy-settings';
+  // 'players' only appears on a combined view; on a single profile there is no such
+  // stat line and no checkbox for it, so the setting simply sits unused.
   var DEFAULTS = { pct: true, share: true, expected: false, expectedCount: false,
-    totalRolls: true, streak: true, badges: true, ep: true, bestRoll: true };
+    players: true, totalRolls: true, streak: true, badges: true, ep: true, bestRoll: true };
   var cfg = {};
   for (var dk in DEFAULTS) cfg[dk] = DEFAULTS[dk];
   try {
@@ -5155,6 +5291,7 @@ function renderProfile(username, sum) {
   var preview = document.getElementById('cfg-preview-text');
   function updatePreview() { if (preview) preview.textContent = buildText(); }
   var MAP = [['cfg-pct', 'pct'], ['cfg-share', 'share'], ['cfg-expected', 'expected'], ['cfg-expected-count', 'expectedCount'],
+    ['cfg-stat-players', 'players'],
     ['cfg-stat-totalRolls', 'totalRolls'], ['cfg-stat-streak', 'streak'], ['cfg-stat-badges', 'badges'],
     ['cfg-stat-ep', 'ep'], ['cfg-stat-bestRoll', 'bestRoll']];
   function syncBoxes() { MAP.forEach(function (m) { var cb = document.getElementById(m[0]); if (cb) cb.checked = cfg[m[1]]; }); }
@@ -5198,7 +5335,55 @@ function renderProfile(username, sum) {
   bindCopy(document.getElementById('cfg-copy'));
 })();`;
 
-  return profilePage('RNGdle - ' + username, body, script);
+  return profilePage(o.title, body, script);
+}
+
+// Every name in a combined list failed to load: show the list back with the reasons.
+function renderCombinedError(names, failed) {
+  const why = f => f.error === 404 ? 'no such profile' : 'status ' + f.error;
+  return profilePage('RNGdle - Profiles not found', `<div class="wrap">
+  <h1>Combined Profile</h1>
+  <div class="err" style="margin-bottom:1.2rem">Couldn't load
+    ${failed.map(f => `<b>${esc(f.username)}</b> (${why(f)})`).join(', ')}.</div>
+  ${profileMultiForm(names, 'Try again')}
+</div>`);
+}
+
+function renderProfile(username, sum) {
+  return renderProfileView({
+    title: 'RNGdle - ' + username,
+    head: `<span class="at">@</span>${esc(username)}`,
+    tag: `${sum.totalRolls.toLocaleString()} roll${sum.totalRolls === 1 ? '' : 's'}
+      · <a href="https://www.rngdle.com/u/${encodeURIComponent(username)}" target="_blank" rel="noopener">on rngdle &rarr;</a>`,
+    sum,
+  });
+}
+
+/**
+ * Several players pooled into one collection. `failed` holds the names that couldn't be
+ * loaded ([{username, error}]) - they're reported in a banner rather than failing the
+ * whole page, so one typo in a list of six still gives you the other five.
+ */
+function renderCombined(names, sum, failed, dropped) {
+  const head = names.map(n => `<span class="at">@</span>${esc(n)}`).join(' <span class="at">+</span> ');
+  const notes = [];
+  if (failed.length) {
+    notes.push(`Couldn't load ${failed.map(f => `<b>${esc(f.username)}</b> (${f.error === 404 ? 'no such profile' : 'status ' + f.error})`).join(', ')} -
+      combined from the other ${names.length} player${names.length === 1 ? '' : 's'}.`);
+  }
+  if (dropped && dropped.length) {
+    notes.push(`At most ${MAX_COMBINE} players can be combined at once, so
+      ${dropped.map(n => `<b>${esc(n)}</b>`).join(', ')} ${dropped.length === 1 ? 'was' : 'were'} left out.`);
+  }
+  const warn = !notes.length ? '' : `<div class="err" style="margin-bottom:1.3rem">${notes.join('<br>')}</div>`;
+  return renderProfileView({
+    title: 'RNGdle - ' + names.join(' + '),
+    head,
+    tag: `${names.length} player${names.length === 1 ? '' : 's'} · ${sum.totalRolls.toLocaleString()} roll${sum.totalRolls === 1 ? '' : 's'} pooled`,
+    top: `${warn}<details class="edit-list"><summary>Edit this list</summary>${profileMultiForm(names, 'Recombine')}</details>
+  `,
+    sum,
+  });
 }
 
 export { compute, BADGES, FAMILIES, engineModuleSource, CARD_TIERS, cardTier };
@@ -5277,6 +5462,22 @@ export default {
     // stat is computed locally with compute(). Cached at the edge to be polite.
     if (url.pathname === '/api/profile') {
       const u = (url.searchParams.get('u') || '').trim();
+      // Comma/newline-separated `u` (or `us`) merges several players into one summary,
+      // the same as /u/a,b,c. A single name keeps the original response shape.
+      const list = parseUsernames(`${u}\n${url.searchParams.get('us') || ''}`);
+      if (list.length > 1) {
+        const names = list.slice(0, MAX_COMBINE);
+        const loaded = await fetchProfiles(names);
+        const ok = loaded.filter(m => m.rolls);
+        if (!ok.length) {
+          return new Response(JSON.stringify({ error: 'no users could be loaded', users: loaded.map(m => ({ username: m.username, error: m.error })) }),
+            { status: 502, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } });
+        }
+        const sum = combinedSummary(ok);
+        return new Response(JSON.stringify({ usernames: ok.map(m => m.username), failed: loaded.filter(m => !m.rolls), ...sum }), {
+          headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=300' },
+        });
+      }
       if (!VALID_USERNAME.test(u)) {
         return new Response(JSON.stringify({ error: 'Provide u as a valid username.' }),
           { status: 400, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } });
@@ -5292,9 +5493,37 @@ export default {
       }
     }
     if (url.pathname === '/u' || url.pathname === '/u/') {
+      // `u` is the single-name field, `us` the multi-line textarea (no-JS fallback);
+      // either way we normalise to the canonical /u/<name>[,<name>...] URL.
       const u = (url.searchParams.get('u') || '').trim();
-      if (u && VALID_USERNAME.test(u)) return Response.redirect(`${url.origin}/u/${encodeURIComponent(u)}`, 302);
+      const names = parseUsernames(`${u}\n${url.searchParams.get('us') || ''}`);
+      // Over-long lists are trimmed at render time, not here, so the page can say so.
+      if (names.length) return Response.redirect(`${url.origin}/u/${names.map(encodeURIComponent).join(',')}`, 302);
       return new Response(renderProfileForm(u), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    }
+    // /u/<a>,<b>,<c> pools several players into one combined summary.
+    if (url.pathname.startsWith('/u/') && decodeURIComponent(url.pathname.slice(3)).includes(',')) {
+      const seg = decodeURIComponent(url.pathname.slice(3));
+      const asked = parseUsernames(seg);
+      if (!asked.length) return new Response(renderProfileForm(''), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+      // "a," or "a,,": nothing to combine, so it's just a normal profile.
+      if (asked.length === 1) return Response.redirect(`${url.origin}/u/${encodeURIComponent(asked[0])}`, 302);
+      // Normalise first (repeats, stray separators, "@name"): one player listed twice
+      // must not be counted twice, and the shared URL should be the canonical one.
+      const canon = asked.map(encodeURIComponent).join(',');
+      if (canon !== seg) return Response.redirect(`${url.origin}/u/${canon}`, 302);
+      const names = asked.slice(0, MAX_COMBINE);
+      const loaded = await fetchProfiles(names);
+      const ok = loaded.filter(m => m.rolls);
+      const failed = loaded.filter(m => !m.rolls);
+      if (!ok.length) {
+        return new Response(renderCombinedError(names, failed), {
+          status: failed.every(f => f.error === 404) ? 404 : 502, headers: { 'content-type': 'text/html; charset=utf-8' },
+        });
+      }
+      return new Response(renderCombined(ok.map(m => m.username), combinedSummary(ok), failed, asked.slice(MAX_COMBINE)), {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=300' },
+      });
     }
     if (url.pathname.startsWith('/u/')) {
       const u = decodeURIComponent(url.pathname.slice(3)).trim();
