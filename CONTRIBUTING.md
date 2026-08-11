@@ -10,7 +10,7 @@ npm test             # badge-logic test harness
 npm run deploy       # publish to Cloudflare (runs the generator via predeploy)
 ```
 
-Wrangler is always invoked through npm scripts / `npx wrangler` — never a global
+Wrangler is always invoked through npm scripts / `npx wrangler` - never a global
 install.
 
 ## Before any commit or deploy
@@ -19,9 +19,9 @@ If a badge `test`, EP value, `FAMILIES` entry, or the badge list changed, run
 `npm run gen` (full 1,000,001-number scan, ~5 s on 16 cores) and commit the regenerated files
 **in the same commit** as the change:
 
-- `src/examples.gen.js` — per-badge example numbers, used by `/badges`
-- `src/probabilities.gen.js` — "% of numbers earn this", used in tooltips + `/badges`
-- `research/badge-tally.json` — diffable per-badge earn/score tally of the whole range
+- `src/examples.gen.js` - per-badge example numbers, used by `/badges`
+- `src/probabilities.gen.js` - "% of numbers earn this", used in tooltips + `/badges`
+- `research/badge-tally.json` - diffable per-badge earn/score tally of the whole range
 
 Never hand-edit `*.gen.js` files.
 
@@ -32,7 +32,7 @@ Never hand-edit `*.gen.js` files.
 - There is no second copy of the rules: `/engine.js` is generated from the badge
   table via `Function.prototype.toString()`, so badge `test`s must stay
   self-contained (no closing over module-level helpers that aren't shipped).
-- `FAMILY_NAMES` in `src/index.js` is index-aligned with `FAMILIES` — keep them in
+- `FAMILY_NAMES` in `src/index.js` is index-aligned with `FAMILIES` - keep them in
   sync.
 
 ## Commit messages
@@ -58,7 +58,7 @@ chore(gen): regenerate snapshots after EP rebalance
 docs: add contributing guide
 ```
 
-Regenerated `*.gen.js` / tally diffs ride along in the commit that caused them —
+Regenerated `*.gen.js` / tally diffs ride along in the commit that caused them -
 they don't get their own commit.
 
 History before 2026-07-21 predates this convention ("Beta card: …"-style

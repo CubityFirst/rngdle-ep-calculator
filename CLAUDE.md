@@ -15,7 +15,7 @@ diff still has to be committed. Never hand-edit `*.gen.js` files.
 
 ## Commit messages
 
-Conventional Commits (`type(scope): summary`) — types, scopes, and examples are in
+Conventional Commits (`type(scope): summary`) - types, scopes, and examples are in
 CONTRIBUTING.md. Pre-2026-07-21 history uses an older style; don't rewrite it.
 
 ## Other invariants

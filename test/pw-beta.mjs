@@ -14,7 +14,7 @@ await page.click('#beta-toggle');
 await page.waitForTimeout(400);
 await page.screenshot({ path: 'test/pw-beta-on.png', fullPage: true });
 
-// Hover the bookends badge (highlights [0,1,4,5]) — find a badge whose label includes "Bookends"
+// Hover the bookends badge (highlights [0,1,4,5]) - find a badge whose label includes "Bookends"
 const handle = await page.evaluateHandle(() => {
   return [...document.querySelectorAll('.bn-b')].find(b => /bookends/i.test(b.textContent)) || document.querySelector('.bn-b');
 });

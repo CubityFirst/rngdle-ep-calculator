@@ -32,7 +32,7 @@ npm test             # run the badge-logic test harness
 The **📊 Analyze all scores** button sweeps the whole 0–999,999 range in a client-side
 Web Worker (the work is far past a single Worker request's CPU budget) and plots the
 **EP distribution** as a log/log histogram. The sweep fans out over one shard worker per
-core — `engine.js` loaded under the name `rngdle-shard` serves range requests — so it
+core - `engine.js` loaded under the name `rngdle-shard` serves range requests - so it
 finishes in a few seconds; where nested workers are unavailable it falls back to a
 single-threaded sweep with an identical result.
 
@@ -47,7 +47,7 @@ single-threaded sweep with an identical result.
   (trash / common / uncommon / rare / epic / anomaly / mythic, the percentile-derived
   `CARD_TIERS` cutoffs the number card uses) and reported as a **rarity breakdown**:
   count, share, mean EP and a share bar per tier. The histogram bars are **stacked by
-  tier** too, so the EP distribution reads as a rarity composition — a quarter-decade
+  tier** too, so the EP distribution reads as a rarity composition - a quarter-decade
   bucket can straddle a cutoff (the uncommon band is narrower than one bucket), so
   buckets are tallied per tier rather than given a single colour.
 - **Filter by rarity tier** - the tier chips (and the breakdown rows) include/exclude a
