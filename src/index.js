@@ -19,6 +19,9 @@ import { exactPercentile } from './percentiles.gen.js';
 // 1,000,001 inputs. Regenerate + commit whenever a badge test / EP / family changes.
 import { EXAMPLES } from './examples.gen.js';
 import { PROBABILITIES } from './probabilities.gen.js';
+// Shared design system: one token set, one set of primitives (.btn/.field/.pill/.card/
+// .stat/.kv/.progress) and one site nav, used by every page below. See src/ui.js.
+import { pageShell } from './ui.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -425,7 +428,7 @@ function isScrambledSeq(s, minLen) {
 // Rarity is NOT stored per-badge. Like rngdle.com, it is derived from the badge's
 // EP score via the BADGE_RARITY_THRESHOLDS cutoffs (reverse-engineered from the
 // shipped chunk_6d375db2482ce7e8.js: getBadgeRarityTier). Any future EP change
-// therefore keeps rarity self-correcting — no second value to forget.
+// therefore keeps rarity self-correcting - no second value to forget.
 // ---------------------------------------------------------------------------
 
 const BADGE_RARITY_THRESHOLDS = { common: 1e3, uncommon: 1e4, rare: 1e5, epic: 1e6, anomaly: 1e7 };
@@ -1207,6 +1210,84 @@ async function sweepAll(engineUrl, lo, hi, exPerBadge, onProgress) {
   return { ep, cnt, bits, ROW, examples };
 }
 
+// The one full-range sweep that /, /grid and /chains all share. Lives in the engine
+// module (every worker already imports it), so the three pages hit one IndexedDB entry
+// instead of sweeping separately into two of their own.
+//
+// It always sweeps the SUPERSET of what the three need - 0..1,000,000 inclusive, with
+// per-badge examples - because /analyze needs exactly that and the other two are strict
+// subsets (they take .subarray(0, 1e6) and ignore `examples`). Anything a page can
+// recompute from these arrays in a 1M-element loop (digit lengths, min/max, n -> EP
+// edges) is derived on load rather than stored; at single-digit milliseconds it is far
+// cheaper than the megabytes it would add.
+function sweepCacheSource() {
+  return `
+const SWEEP_DB = 'rngdle', SWEEP_STORE = 'ds', SWEEP_KEY = 'sweep-v1';
+const SWEEP_CAP = 1000001;              // 0..1,000,000 inclusive - the live roll range
+const SWEEP_EX_PER_BADGE = 12;          // examples[badgeIdx] = [[n, ep], ...], capped
+const SWEEP_TTL_MS = 7 * 86400000;      // belt-and-braces; VER is what guarantees freshness
+// Superseded by SWEEP_KEY - drop them so a returning visitor gets ~26MB back.
+const SWEEP_LEGACY_DBS = ['rngdle-analysis', 'rngdle-grid'];
+
+function sweepIdbReq(r) { return new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+function sweepIdbStore(mode) {
+  return new Promise((res, rej) => {
+    const o = indexedDB.open(SWEEP_DB, 1);
+    o.onupgradeneeded = () => o.result.createObjectStore(SWEEP_STORE);
+    o.onsuccess = () => res(o.result.transaction(SWEEP_STORE, mode).objectStore(SWEEP_STORE));
+    o.onerror = () => rej(o.error);
+  });
+}
+async function sweepCacheGet() { try { return await sweepIdbReq((await sweepIdbStore('readonly')).get(SWEEP_KEY)); } catch (e) { return null; } }
+async function sweepCachePut(v) { try { await sweepIdbReq((await sweepIdbStore('readwrite')).put(v, SWEEP_KEY)); } catch (e) {} }
+async function sweepCachePurge() { try { await sweepIdbReq((await sweepIdbStore('readwrite')).delete(SWEEP_KEY)); } catch (e) {} }
+function sweepDropLegacy() { for (const n of SWEEP_LEGACY_DBS) { try { indexedDB.deleteDatabase(n); } catch (e) {} } }
+
+// Cache key: a hash of engine.js, so any scoring edit invalidates every page at once.
+async function sweepVersion(origin) {
+  try {
+    const t = await (await fetch(origin + '/engine.js')).text();
+    let h = 5381; for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
+    return h.toString(36) + '.' + t.length;
+  } catch (e) { return 'na'; }
+}
+
+function sweepFresh(hit, ver) {
+  return !!hit && hit.ver === ver && hit.ep && hit.ep.length === SWEEP_CAP &&
+    (Date.now() - hit.ts) < SWEEP_TTL_MS;
+}
+
+// { ep, cnt, bits, ROW, examples, ver, ts, cached }.
+// onProgress(pct) fires only when an actual sweep runs.
+async function sweepShared(origin, onProgress, force) {
+  const ver = await sweepVersion(origin);
+  if (!force) {
+    const hit = await sweepCacheGet();
+    if (sweepFresh(hit, ver)) { sweepDropLegacy(); return { ...hit, cached: true }; }
+  }
+
+  // Two tabs opened cold (say /grid and /chains) would otherwise each run the full
+  // sweep. Hold a lock across it so the second waits and then reads the cache.
+  const run = async () => {
+    if (!force) {
+      const hit = await sweepCacheGet();          // the lock holder may have just written it
+      if (sweepFresh(hit, ver)) return { ...hit, cached: true };
+    }
+    const swept = await sweepAll(origin + '/engine.js', 0, SWEEP_CAP - 1, SWEEP_EX_PER_BADGE, onProgress);
+    const rec = { ver, ts: Date.now(), ep: swept.ep, cnt: swept.cnt, bits: swept.bits,
+                  ROW: swept.ROW, examples: swept.examples };
+    await sweepCachePut(rec);
+    sweepDropLegacy();
+    return { ...rec, cached: false };
+  };
+  if (typeof navigator !== 'undefined' && navigator.locks) {
+    return navigator.locks.request('rngdle-sweep', run);
+  }
+  return run();
+}
+`;
+}
+
 function engineModuleSource() {
   // Named function declarations (hoisted) used by the badge tests.
   const named = [
@@ -1316,7 +1397,8 @@ function computeLean(n) {
   return { ep: total, earned };
 }
 
-export { computeLean, BADGE_META, sweepRange, sweepAll, CARD_TIERS, CARD_TIER_NAMES, cardTier };
+export { computeLean, BADGE_META, sweepRange, sweepAll, CARD_TIERS, CARD_TIER_NAMES, cardTier,
+         sweepShared, sweepCachePurge, SWEEP_CAP, SWEEP_EX_PER_BADGE };
 
 // Shard mode: when this module is loaded as a Worker named 'rngdle-shard' (which is how
 // sweepAll fans a sweep across cores) it answers range requests instead of just being
@@ -1334,7 +1416,8 @@ if (typeof self !== 'undefined' && self.name === 'rngdle-shard') {
   // __name shim: when this Worker is bundled (esbuild keepNames), function source returned
   // by toString() contains __name(fn,"fn") calls. That helper only exists in the bundled
   // scope, so we redefine a no-op here for the browser module context. Harmless unbundled.
-  return ['var __name = (f) => f;', namedSrc, constSrc, dataSrc, badgesSrc, supSrc, rest].join('\n');
+  return ['var __name = (f) => f;', namedSrc, constSrc, dataSrc, badgesSrc, supSrc,
+    sweepCacheSource(), rest].join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -1351,7 +1434,6 @@ function analysisWorker() {
   let E = null, origin = '';
   let epArr = null, lenArr = null, idxArr = null, bits = null, count = 0, ROW = 0, computedMax = 0;
   let examples = null, lastStride = 1, lastLengths = [1, 2, 3, 4, 5, 6], lastSampled6 = false;
-  const EX_PER_BADGE = 12;                       // examples[badgeIdx] = [[n, ep], ...], capped
   const LRANGE = { 1: [0, 9], 2: [10, 99], 3: [100, 999], 4: [1000, 9999], 5: [10000, 99999], 6: [100000, 999999], 7: [1000000, 1000000] };
   const LSIZE = { 1: 10, 2: 90, 3: 900, 4: 9000, 5: 90000, 6: 900000, 7: 1 };
   // Card-rarity cutoffs, lifted from the engine module so the breakdown uses the same
@@ -1390,28 +1472,6 @@ function analysisWorker() {
     let m = 0; for (const L of lengths) m |= (1 << L); return m;
   }
 
-  // --- Local cache (IndexedDB) -------------------------------------------------
-  // The full 1,000,000-number sweep is ~tens of seconds, so we run it once and stash the
-  // resulting typed arrays in IndexedDB (localStorage is far too small). A cached dataset is
-  // reused for TTL_MS, and is keyed by a hash of engine.js so any scoring change busts it.
-  const CACHE_DB = 'rngdle-analysis', CACHE_STORE = 'ds', CACHE_KEY = 'full', TTL_MS = 86400000;
-  function idbReq(req) { return new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error); }); }
-  function idbStore(mode) {
-    return new Promise((res, rej) => {
-      const open = indexedDB.open(CACHE_DB, 1);
-      open.onupgradeneeded = () => open.result.createObjectStore(CACHE_STORE);
-      open.onsuccess = () => res(open.result.transaction(CACHE_STORE, mode).objectStore(CACHE_STORE));
-      open.onerror = () => rej(open.error);
-    });
-  }
-  async function idbGet(key) { return idbReq((await idbStore('readonly')).get(key)); }
-  async function idbPut(key, val) { return idbReq((await idbStore('readwrite')).put(val, key)); }
-  async function idbDel(key) { return idbReq((await idbStore('readwrite')).delete(key)); }
-  async function engineVersion() {
-    try { const t = await (await fetch(origin + '/engine.js')).text(); let h = 5381; for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h.toString(36) + '.' + t.length; }
-    catch (e) { return 'na'; }
-  }
-
   self.onmessage = async (ev) => {
     const m = ev.data;
     try {
@@ -1423,37 +1483,27 @@ function analysisWorker() {
       }
 
       if (m.cmd === 'purgeCache') {
-        await idbDel(CACHE_KEY).catch(() => {});
+        await engine();
+        await E.sweepCachePurge();
         self.postMessage({ type: 'purged' });
         return;
       }
 
       if (m.cmd === 'compute') {
         await engine();
-        const ver = await engineVersion();
         lastStride = 1; lastLengths = [1, 2, 3, 4, 5, 6]; lastSampled6 = false;
 
-        // 1) Reuse a fresh cached sweep if one exists (and the engine hasn't changed).
-        if (!m.force) {
-          const hit = await idbGet(CACHE_KEY).catch(() => null);
-          if (hit && hit.ver === ver && (Date.now() - hit.ts) < TTL_MS) {
-            epArr = hit.ep; lenArr = hit.len; idxArr = hit.idx; bits = hit.bits;
-            ROW = hit.row; count = hit.count; computedMax = hit.max; examples = hit.examples;
-            self.postMessage({ type: 'computed', count, maxEP: computedMax, lengths: lastLengths, domainTrue: count, cached: true, ts: hit.ts });
-            return;
-          }
-        }
-
-        // 2) Otherwise sweep every number 0..1,000,000 exactly (no sampling). Length 7 is the
-        //    single 7-digit value 1,000,000 - the top of the live game's roll range.
-        //    sweepAll spreads the sweep over one shard worker per core; the ranges are
-        //    contiguous and ascending, so slot k is simply the number k.
-        const lengths = [1, 2, 3, 4, 5, 6, 7];
-        const cap = 1000001;
-        const swept = await E.sweepAll(origin + '/engine.js', 0, cap - 1, EX_PER_BADGE,
-          pct => self.postMessage({ type: 'progress', pct }));
+        // The shared sweep (engine.js) already covers 0..1,000,000 with examples, which is
+        // exactly this page's domain - /grid and /chains read the same cached entry. Length
+        // 7 is the single 7-digit value 1,000,000, the top of the live game's roll range.
+        const swept = await E.sweepShared(origin, pct => self.postMessage({ type: 'progress', pct }), m.force);
+        const cap = swept.ep.length;
         ROW = swept.ROW;                           // bytes of badge bitmask per number
         epArr = swept.ep; bits = swept.bits; examples = swept.examples;
+
+        // Derived, not stored: at 1M elements this is a few ms, against 5MB of cache.
+        // The sweep is contiguous and ascending, so slot k is simply the number k.
+        const lengths = [1, 2, 3, 4, 5, 6, 7];
         lenArr = new Uint8Array(cap);
         idxArr = new Int32Array(cap);
         let maxEP = 0;
@@ -1464,9 +1514,8 @@ function analysisWorker() {
         for (let k = 0; k < cap; k++) if (epArr[k] > maxEP) maxEP = epArr[k];
         count = cap; computedMax = maxEP;
 
-        // 3) Stash it for next time (best-effort - ignore quota/private-mode failures).
-        await idbPut(CACHE_KEY, { ver, ts: Date.now(), ep: epArr, len: lenArr, idx: idxArr, bits, row: ROW, count, max: computedMax, examples }).catch(() => {});
-        self.postMessage({ type: 'computed', count, maxEP, lengths, domainTrue: count, cached: false });
+        self.postMessage({ type: 'computed', count, maxEP, lengths, domainTrue: count,
+          cached: swept.cached, ts: swept.ts });
         return;
       }
 
@@ -1475,6 +1524,7 @@ function analysisWorker() {
         const lenMask = lengthMask(m.lengths);     // which digit-lengths to include (bitmask over 1..7)
         const epMin = (m.epMin == null) ? -Infinity : m.epMin;   // "scores more than" (exclusive)
         const epMax = (m.epMax == null) ? Infinity : m.epMax;    // "and less than" (exclusive)
+        const epEq = (m.epEq == null) ? null : m.epEq;           // "scores exactly" (overrides the range)
         const tierMask = tierMaskOf(m.tiers);      // which rarity tiers to include
         const STEP = 0.25;                         // histogram resolution, in decades (dex)
         const MAXB = 2 + Math.ceil(Math.log10(Math.max(10, computedMax)) / STEP);
@@ -1492,7 +1542,7 @@ function analysisWorker() {
         for (let k = 0; k < count; k++) {
           if (!(lenMask & (1 << lenArr[k]))) continue;
           const v = epArr[k];
-          if (v <= epMin || v >= epMax) continue;
+          if (epEq != null ? v !== epEq : (v <= epMin || v >= epMax)) continue;
           if (!matches(k, badges, exclude)) continue;
           const t = tierOf(v);
           domain++;
@@ -1536,12 +1586,13 @@ function analysisWorker() {
         const lenMask = lengthMask(m.lengths);
         const epMin = (m.epMin == null) ? -Infinity : m.epMin;
         const epMax = (m.epMax == null) ? Infinity : m.epMax;
+        const epEq = (m.epEq == null) ? null : m.epEq;
         const tierMask = tierMaskOf(m.tiers);
         const rows = [];
         for (let k = 0; k < count; k++) {
           if (!(lenMask & (1 << lenArr[k]))) continue;
           const v = epArr[k];
-          if (v <= epMin || v >= epMax) continue;
+          if (epEq != null ? v !== epEq : (v <= epMin || v >= epMax)) continue;
           if (!matches(k, badges, exclude)) continue;
           const t = tierOf(v);
           if (!(tierMask & (1 << t))) continue;
@@ -1564,7 +1615,7 @@ function analysisClient(WORKER_SRC, TIERS) {
   const panel = $('analysis'), btn = $('an-btn'), statusEl = $('an-status');
   const chartEl = $('an-chart'), statsEl = $('an-stats'), lenWrap = $('an-lengths');
   const badgeList = $('an-badge-list'), badgeSearch = $('an-badge-search'), purgeBtn = $('an-purge');
-  const epMinEl = $('an-ep-min'), epMaxEl = $('an-ep-max');
+  const epMinEl = $('an-ep-min'), epMaxEl = $('an-ep-max'), epEqEl = $('an-ep-eq');
   const tierWrap = $('an-tiers'), tierOut = $('an-tier-breakdown');
 
   let worker = null, meta = [], computed = false, computing = false;
@@ -1660,13 +1711,19 @@ function analysisClient(WORKER_SRC, TIERS) {
     return t.lo.toLocaleString() + '-' + (t.hi - 1).toLocaleString() + ' EP';
   }
 
-  // EP score range: keep only numbers whose total EP is more than min and/or less than max.
-  // Blank or non-numeric means that bound is open. Re-filters instantly (no recompute).
+  // EP score range: keep only numbers whose total EP is more than min and/or less than
+  // max - or exactly the "Scores exactly" value, which overrides the range while set
+  // (the range inputs are disabled so the precedence is visible). Blank or non-numeric
+  // means that bound is open. Re-filters instantly (no recompute).
   epMinEl.addEventListener('input', scheduleFilter);
   epMaxEl.addEventListener('input', scheduleFilter);
+  epEqEl.addEventListener('input', () => {
+    epMinEl.disabled = epMaxEl.disabled = epBounds().eq != null;
+    scheduleFilter();
+  });
   function epBounds() {
     const p = el => { const v = parseFloat(el.value); return Number.isFinite(v) && v >= 0 ? v : null; };
-    return { min: p(epMinEl), max: p(epMaxEl) };
+    return { min: p(epMinEl), max: p(epMaxEl), eq: p(epEqEl) };
   }
 
   function buildBadgeList(filter) {
@@ -1740,7 +1797,7 @@ function analysisClient(WORKER_SRC, TIERS) {
   });
 
   $('an-export-examples').addEventListener('click', () => { if (computed) worker.postMessage({ cmd: 'exportExamples' }); });
-  $('an-export-csv').addEventListener('click', () => { if (computed) { const ep = epBounds(); worker.postMessage({ cmd: 'exportFilter', badges: [...selectedBadges], exclude: [...excludedBadges], lengths: selectedLengths(), tiers: selectedTiers(), epMin: ep.min, epMax: ep.max }); } });
+  $('an-export-csv').addEventListener('click', () => { if (computed) { const ep = epBounds(); worker.postMessage({ cmd: 'exportFilter', badges: [...selectedBadges], exclude: [...excludedBadges], lengths: selectedLengths(), tiers: selectedTiers(), epMin: ep.min, epMax: ep.max, epEq: ep.eq }); } });
 
   function setExportEnabled(on) { $('an-export-examples').disabled = !on; $('an-export-csv').disabled = !on; }
   setExportEnabled(false);
@@ -1757,7 +1814,7 @@ function analysisClient(WORKER_SRC, TIERS) {
   // setBusyText only swaps the label so the spinner keeps spinning smoothly across progress ticks.
   function setBusy(msg) {
     statusEl.className = 'computing';
-    statusEl.innerHTML = '<span class="an-spinner"></span><span class="an-ctext"></span>';
+    statusEl.innerHTML = '<span class="spinner"></span><span class="an-ctext"></span>';
     statusEl.querySelector('.an-ctext').textContent = msg;
   }
   function setBusyText(msg) { const t = statusEl.querySelector('.an-ctext'); if (t) t.textContent = msg; else setBusy(msg); }
@@ -1776,7 +1833,7 @@ function analysisClient(WORKER_SRC, TIERS) {
   let filterTimer = null;
   function scheduleFilter() { if (!computed) return; clearTimeout(filterTimer); filterTimer = setTimeout(runFilter, 60); }
   function selectedLengths() { const out = []; for (let L = 1; L <= 7; L++) { const b = $('an-len-' + L); if (b && b.classList.contains('on')) out.push(L); } return out; }
-  function runFilter() { const ep = epBounds(); worker.postMessage({ cmd: 'filter', badges: [...selectedBadges], exclude: [...excludedBadges], lengths: selectedLengths(), tiers: selectedTiers(), epMin: ep.min, epMax: ep.max }); }
+  function runFilter() { const ep = epBounds(); worker.postMessage({ cmd: 'filter', badges: [...selectedBadges], exclude: [...excludedBadges], lengths: selectedLengths(), tiers: selectedTiers(), epMin: ep.min, epMax: ep.max, epEq: ep.eq }); }
 
   function computedStatus(m) {
     let s = 'Analyzed all ' + m.domainTrue.toLocaleString() + ' numbers (every number, all lengths)';
@@ -1916,7 +1973,7 @@ function analysisClient(WORKER_SRC, TIERS) {
       stat('Max EP', Math.round(stats.max).toLocaleString()) +
       (stats.estimated ? '<p class="an-note">≈ counts scaled to the full 0-999,999 range from the 6-digit sample (' + stats.raw.toLocaleString() + ' numbers actually scanned).</p>' : '');
   }
-  function stat(k, v) { return '<div class="an-stat"><span>' + k + '</span><strong>' + v + '</strong></div>'; }
+  function stat(k, v) { return '<div class="stat"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>'; }
 
   // Largest-remainder (Hamilton) apportionment of the tier shares into hundredths of a
   // percent: floor each tier's exact share, then hand the leftover units to the largest
@@ -1974,7 +2031,7 @@ function analysisClient(WORKER_SRC, TIERS) {
         '<span class="an-tb-n">' + Math.round(t.count).toLocaleString() + '</span>' +
         '<span class="an-tb-p">' + pct(t) + '</span>' +
         '<span class="an-tb-track"><i style="width:' + (t.share * 100).toFixed(4) + '%;background:' + T.accent + '"></i></span>' +
-        '<span class="an-tb-ep">' + (t.count ? 'mean ' + Math.round(t.mean).toLocaleString() + ' EP' : '&mdash;') + '</span>' +
+        '<span class="an-tb-ep">' + (t.count ? 'mean ' + Math.round(t.mean).toLocaleString() + ' EP' : '-') + '</span>' +
         '</div>';
     }).join('');
 
@@ -2010,7 +2067,7 @@ const RARITY_COLORS = {
 // The EP cutoffs below are the exact boundaries derived from its shipped
 // SCORE_PERCENTILES table (each cutoff = smallest EP whose percentile >= the
 // threshold). Because the total-EP distribution shifts whenever the badge set
-// changes, these MUST be re-derived alongside src/percentiles.gen.js — these
+// changes, these MUST be re-derived alongside src/percentiles.gen.js - these
 // values are from the 2026-07-16 bundle (230 badges). Palette colours are the
 // rngdle.com RARITY_PALETTE highlight accents.
 const CARD_TIERS = [
@@ -2062,7 +2119,7 @@ function parseN(raw) {
 }
 
 // Some rngdle.com badges score on a number but their getContributors returns
-// nothing — either the highlight logic is narrower than the check ("Pair" only
+// nothing - either the highlight logic is narrower than the check ("Pair" only
 // resolves a digit appearing exactly twice, "Snake Eyes" only adjacent "11"), or
 // the badge shipped without any (most of the 2026-07-16 batch: Five of a Kind,
 // Framed Quad, the exact-number badges). Fall back to the digits that actually
@@ -2105,13 +2162,13 @@ function badgeGroups(id, s) {
     case 'ARITHMETIC': r = findArithmeticSplit(s); return r ? rng(r.splits, s.length) : null;
     case 'GEOMETRIC':  r = findGeometricSplit(s);  return r ? rng(r.splits, s.length) : null;
     case 'EQUATION':   r = findEquation(s);        return r ? rng(r.splits, s.length) : null;
-    // Consecutive Numbers (whole number splits into the parts) — Exact + Scrambled.
+    // Consecutive Numbers (whole number splits into the parts) - Exact + Scrambled.
     case 'CONSEC_PAIR_EXACT':      r = pPairExact(s);  return r ? rng(r.splits, s.length) : null;
     case 'CONSEC_TRIPLE_EXACT':
     case 'CONSEC_TRIPLE_SCRAMBLED': r = pTripleExact(s); return r ? rng(r.splits, s.length) : null;
     case 'CONSEC_QUAD_EXACT':
     case 'CONSEC_QUAD_SCRAMBLED':   r = pQuadExact(s);   return r ? rng(r.splits, s.length) : null;
-    // Consecutive Numbers found inside a longer number — split only that sub-run.
+    // Consecutive Numbers found inside a longer number - split only that sub-run.
     case 'CONSEC_TRIPLE_CONTAINS': r = pNAdjacent(s, 3); return r ? rng(r.splits, r.end) : null;
     case 'CONSEC_QUAD_CONTAINS':   r = pNAdjacent(s, 4); return r ? rng(r.splits, r.end) : null;
     case 'CONSEC_PAIR_ADJACENT': {
@@ -2127,7 +2184,7 @@ function badgeGroups(id, s) {
       return s.length >= 2 && s.length % 2 === 0 && s.slice(0, s.length / 2) === s.slice(s.length / 2)
         ? [[0, s.length / 2], [s.length / 2, s.length]] : null;
     // Even Spacing: every digit is its own part, so the card spreads the whole
-    // number evenly apart — mirroring the constant step the badge is about.
+    // number evenly apart - mirroring the constant step the badge is about.
     case 'EVEN_SPACING':
     case 'EVEN_SPACING_ABS':
       return [...s].map((_, i) => [i, i + 1]);
@@ -2139,7 +2196,7 @@ function badgeGroups(id, s) {
 // their consecutive run, so the beta card can animate the unscramble on hover.
 // Scramble covers the whole number; Mini Scramble covers the LONGEST substring that
 // sorts consecutive (leftmost on ties). The badge test itself stops at the first
-// shortest match — existence is the same either way — but the longest run is the
+// shortest match - existence is the same either way - but the longest run is the
 // more honest thing to show (90213 contains 0213, not just 021).
 function scramblePerm(id, s) {
   const permOf = (str, off) => [...str].map((ch, j) => [Number(ch), off + j])
@@ -2172,8 +2229,8 @@ function badgeNote(id, r) {
     case 'HARSHAD': return `${d.join(' + ')} = ${sum},  ${r.number} ÷ ${sum} = ${r.number / sum}`;
     case 'SPY':     return `${d.join(' + ')} = ${sum} = ${d.join(' × ')}`;
     case 'BLACKJACK': return `${d.join(' + ')} = 21`;
-    case 'HEAVY':   return `digit sum ${sum} — over 45`;
-    case 'FEATHER': return `digit sum ${sum} — under 15`;
+    case 'HEAVY':   return `digit sum ${sum} - over 45`;
+    case 'FEATHER': return `digit sum ${sum} - under 15`;
     case 'EVEN_SPACING': { const g = d[1] - d[0]; return `${d.join(', ')}  →  ${g >= 0 ? '+' : ''}${g} each step`; }
     case 'EVEN_SPACING_ABS': return `${d.join(', ')}  →  ±${Math.abs(d[1] - d[0])} each step`;
     case 'OUROBOROS': { for (let k = 1; k <= 7; k++) if (Math.pow(k, k) === r.number) return `${k}${sup(k)} = ${r.number.toLocaleString()}`; return null; }
@@ -2278,7 +2335,7 @@ function betaOutHTML(result) {
 
   return `
     <div class="bn-meta">
-      <span class="bn-pill">${pal.label}</span>
+      <span class="pill pill-lg">${pal.label}</span>
       ${prTxt ? `<span class="bn-pct" title="exact percentile of all numbers 0-1,000,000 by EP">${prTxt}</span>` : ''}
       <span class="bn-ep">${result.totalEP.toLocaleString()} EP</span>
     </div>
@@ -2313,52 +2370,15 @@ function renderHTML(result) {
   // The click-to-type number card is the one and only renderer.
   const body = renderBeta(result);
 
-  return `<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RNGdle EP Calculator</title>
-<style>
-  :root {
-    color-scheme: dark;
-    --bg:#08090c; --surface:#131419; --surface-2:#181a20; --border:#24262d; --border-2:#30333c;
-    --text:#e7e8ea; --muted:#8b8e97; --faint:#595c65; --accent:#5b93d6; --accent-soft:#142a3e;
-    --hl:#e8924e; --hl-lt:#f4b27a;
-    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    --r-card:14px;
-  }
-  * { box-sizing: border-box; }
-  body { font-family:var(--font); background:var(--bg);
-    color:var(--text); margin:0; padding:3.5rem 1.25rem 4rem; line-height:1.5; -webkit-font-smoothing:antialiased; }
-  .wrap { max-width:660px; margin:0 auto; }
-
-  h1 { font-size:1.45rem; font-weight:600; letter-spacing:-.02em; margin:0 0 .3rem; }
-  p.tag { color:var(--muted); margin:0 0 2rem; font-size:.92rem; }
-
-  input { font-size:1.05rem; padding:.65rem .8rem; border-radius:8px; border:1px solid var(--border);
-    background:var(--surface); color:var(--text); font-variant-numeric:tabular-nums; }
-  input::placeholder { color:var(--faint); }
-  input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
-  button { font-size:.92rem; padding:.65rem 1.1rem; border-radius:8px; cursor:pointer; font-weight:500;
-    border:1px solid var(--border-2); background:var(--surface-2); color:var(--text);
-    transition:background .12s, border-color .12s, opacity .12s; }
-  button:hover { background:#20232c; border-color:#3a3e49; }
-  .grid-btn { display:inline-flex; align-items:center; gap:.45rem; text-decoration:none;
-    font-size:.92rem; font-weight:500; padding:.65rem 1.1rem; border-radius:8px;
-    border:1px solid var(--border-2); background:var(--surface-2); color:var(--text);
-    transition:background .12s, border-color .12s; }
-  .grid-btn:hover { background:#20232c; border-color:#3a3e49; }
-  footer { margin-top:2.5rem; color:var(--faint); font-size:.8rem; }
-  footer code { color:var(--muted); font-family:var(--mono); }
-  a { color:var(--accent); }
+  const css = `
+  p.tag { margin:0 0 2rem; }
 
   /* --- Analysis panel --- */
   .an-bar { margin:2rem 0 1.5rem; display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; }
-  #an-btn { padding:.65rem 1.1rem; font-weight:500; }
-  #analysis { border:1px solid var(--border); border-radius:10px; padding:1.1rem 1.15rem 1.3rem; margin-bottom:1.5rem; }
+  #analysis { border:1px solid var(--border); border-radius:var(--r-card); padding:1.1rem 1.15rem 1.3rem; margin-bottom:1.5rem; }
   #analysis h2 { font-size:1.05rem; font-weight:600; letter-spacing:-.01em; margin:0 0 1rem; }
   .an-controls { display:flex; flex-wrap:wrap; align-items:flex-start; gap:1rem; margin-bottom:1rem; }
-  .an-controls fieldset { border:1px solid var(--border); border-radius:8px; padding:.55rem .7rem .7rem; margin:0; min-width:200px; flex:1; }
+  .an-controls fieldset { border:1px solid var(--border); border-radius:var(--r-ctl); padding:.55rem .7rem .7rem; margin:0; min-width:200px; flex:1; }
   .an-controls legend { color:var(--faint); font-size:.68rem; text-transform:uppercase; letter-spacing:.07em; padding:0 .35rem; font-weight:600; }
   .an-controls .an-badges-fs { flex:2 1 300px; min-width:260px; }
   /* Left column: number length on top, EP score range below it. */
@@ -2368,62 +2388,64 @@ function renderHTML(result) {
   #an-lengths { display:grid; grid-template-columns:repeat(7, 1fr); gap:.35rem; }
   .an-ep-row { display:flex; flex-direction:column; gap:.5rem; }
   .an-ep-row label { display:flex; align-items:center; justify-content:space-between; gap:.6rem; font-size:.82rem; color:var(--muted); white-space:nowrap; }
-  .an-ep-row input { width:7.5rem; flex:0 0 auto; font-size:.85rem; padding:.34rem .5rem; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-variant-numeric:tabular-nums; }
-  .an-ep-row input:focus { outline:none; border-color:var(--accent); }
+  .an-ep-row input { width:7.5rem; flex:0 0 auto; font-size:.85rem; padding:.34rem .5rem;
+    border-radius:var(--r-sm); background:var(--bg); }
+  .an-ep-row input:focus { box-shadow:none; }
+  .an-ep-row label:has(input:disabled) { opacity:.45; }
   .an-len { display:flex; align-items:center; justify-content:center; padding:.2rem 0;
     font-size:1.5rem; font-weight:700; font-variant-numeric:tabular-nums;
-    border:none; background:none; color:var(--text); cursor:pointer; line-height:1;
+    border:none; border-radius:0; background:none; color:var(--text); line-height:1;
     transition:opacity .15s, color .15s, text-shadow .15s; }
   .an-len:not(.on) { opacity:.28; }
-  .an-len:hover { opacity:1; }
+  .an-len:hover { opacity:1; background:none; border:none; }
   .an-len.on { color:#c9dbf2; text-shadow:0 0 16px rgba(91,147,214,.95), 0 0 6px rgba(91,147,214,.85); }
   .an-badge { display:flex; align-items:center; gap:.4rem; font-size:.85rem; cursor:pointer; }
-  #an-badge-search { width:100%; font-size:.85rem; padding:.4rem .55rem; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); margin-bottom:.45rem; }
-  #an-badge-search:focus { outline:none; border-color:var(--accent); }
+  #an-badge-search { width:100%; font-size:.85rem; padding:.4rem .55rem; border-radius:var(--r-sm);
+    background:var(--bg); margin-bottom:.45rem; }
+  #an-badge-search:focus { box-shadow:none; }
   .an-badge-list { max-height:150px; overflow:auto; display:flex; flex-direction:column; gap:.1rem; padding-right:.3rem; }
   .an-badge { justify-content:flex-start; padding:.12rem .25rem; border-radius:5px; cursor:default; }
   .an-badge:hover { background:var(--surface-2); }
   .an-badge-name { flex:1; min-width:0; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .an-badge em { flex:0 0 auto; text-align:right; color:var(--faint); font-style:normal; font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; }
   .an-tri { flex:0 0 auto; display:inline-flex; }
-  .an-tri button { font-size:.72rem; line-height:1; padding:.12rem .34rem; border:1px solid var(--border-2);
-    background:var(--surface-2); color:var(--faint); cursor:pointer; }
+  .an-tri button { font-size:.72rem; font-weight:500; line-height:1; padding:.12rem .34rem; border-radius:0;
+    border:1px solid var(--border-2); background:var(--surface-2); color:var(--faint); }
   .an-tri button:first-child { border-radius:4px 0 0 4px; }
   .an-tri button:last-child { border-radius:0 4px 4px 0; border-left:none; }
-  .an-tri button:hover { color:var(--text); }
+  .an-tri button:hover { color:var(--text); background:var(--surface-2); border-color:var(--border-2); }
   .an-tri button[data-act="do"].on { background:#1d6b3f; border-color:#2c9b58; color:#fff; }
   .an-tri button[data-act="dont"].on { background:#7a2230; border-color:#b3344a; color:#fff; }
   .an-badge-sel { margin-top:.55rem; font-size:.78rem; color:var(--muted); line-height:1.9; }
   .an-badge-sel em { font-style:normal; font-weight:600; color:#e88; }
-  .an-chip { display:inline-block; border:1px solid var(--border-2); color:var(--text); padding:.08rem .5rem; border-radius:999px; cursor:pointer; font-size:.78rem; }
+  .an-chip { display:inline-block; border:1px solid var(--border-2); color:var(--text); padding:.08rem .5rem; border-radius:var(--r-pill); cursor:pointer; font-size:.78rem; }
   .an-chip:hover { border-color:#444a57; background:var(--surface-2); }
   .an-chip-do { border-color:#2c9b58; }
   .an-chip-dont { border-color:#b3344a; }
-  .an-actions .an-purge-btn { margin-left:auto; background:transparent; border:1px solid var(--border-2); color:var(--muted); }
-  .an-actions .an-purge-btn:hover:not(:disabled) { border-color:#b3344a; color:#e88; }
+  .an-actions .an-purge-btn { margin-left:auto; background:transparent; color:var(--muted); }
+  .an-actions .an-purge-btn:hover:not(:disabled) { background:transparent; border-color:#b3344a; color:#e88; }
   #an-status { color:var(--muted); font-size:.85rem; min-height:1.2em; margin:.3rem 0 .7rem; }
   #an-status.computing { display:flex; align-items:center; justify-content:center; gap:.55rem; color:var(--text); font-size:.95rem; padding:1.1rem 0 .9rem; }
-  .an-spinner { width:1.05em; height:1.05em; flex:0 0 auto; border:2px solid var(--border-2); border-top-color:var(--accent); border-radius:50%; animation:an-spin .7s linear infinite; }
-  @keyframes an-spin { to { transform:rotate(360deg); } }
-  #an-chart svg { background:var(--bg); border:1px solid var(--border); border-radius:8px; }
+  #an-chart svg { background:var(--bg); border:1px solid var(--border); border-radius:var(--r-ctl); }
   .an-empty { color:var(--muted); text-align:center; padding:1.5rem; }
 
   /* --- Rarity: filter chips + breakdown --- */
   .an-controls .an-tier-fs { flex:1 1 100%; min-width:0; }
   #an-tiers { display:flex; flex-wrap:wrap; gap:.35rem; }
   .an-tier { font-size:.7rem; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
-    padding:.28rem .6rem; border-radius:999px; cursor:pointer; line-height:1;
+    padding:.28rem .6rem; border-radius:var(--r-pill); line-height:1;
     border:1px solid var(--tc); background:transparent; color:var(--tc);
     transition:opacity .15s, background .15s, box-shadow .15s; }
   .an-tier.on { background:color-mix(in srgb, var(--tc) 22%, transparent); box-shadow:0 0 10px -2px var(--tc); color:#fff; }
   .an-tier:not(.on) { opacity:.34; border-style:dashed; }
-  .an-tier:hover { opacity:1; }
+  .an-tier:hover { opacity:1; background:transparent; border-color:var(--tc); }
+  .an-tier.on:hover { background:color-mix(in srgb, var(--tc) 22%, transparent); }
   #an-tier-breakdown:empty { display:none; }
-  #an-tier-breakdown { margin-top:.9rem; border:1px solid var(--border); border-radius:8px; padding:.7rem .8rem .5rem; }
+  #an-tier-breakdown { margin-top:.9rem; border:1px solid var(--border); border-radius:var(--r-ctl); padding:.7rem .8rem .5rem; }
   .an-tb-head { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:.5rem;
     font-size:.72rem; text-transform:uppercase; letter-spacing:.07em; color:var(--faint); font-weight:600; margin-bottom:.55rem; }
   .an-tb-head span { text-transform:none; letter-spacing:0; font-weight:400; font-size:.76rem; color:var(--muted); }
-  .an-tb-bar { display:flex; height:.55rem; border-radius:999px; overflow:hidden; background:var(--surface-2); margin-bottom:.6rem; }
+  .an-tb-bar { display:flex; height:.55rem; border-radius:var(--r-pill); overflow:hidden; background:var(--surface-2); margin-bottom:.6rem; }
   .an-tb-bar i { display:block; min-width:1px; }
   .an-tb-rows { display:flex; flex-direction:column; gap:.05rem; }
   .an-tb-row { display:grid; grid-template-columns:.7rem 5.5rem 5rem 4rem 1fr 8rem; align-items:center; gap:.5rem;
@@ -2437,7 +2459,7 @@ function renderHTML(result) {
   .an-tb-name { font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; font-weight:600; color:var(--text); }
   .an-tb-n, .an-tb-p { font-family:var(--mono); font-variant-numeric:tabular-nums; text-align:right; }
   .an-tb-p { color:var(--muted); }
-  .an-tb-track { height:.4rem; border-radius:999px; background:var(--surface-2); overflow:hidden; }
+  .an-tb-track { height:.4rem; border-radius:var(--r-pill); background:var(--surface-2); overflow:hidden; }
   .an-tb-track i { display:block; height:100%; min-width:1px; opacity:.85; }
   .an-tb-ep { font-size:.72rem; color:var(--faint); font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
   .an-tb-note { color:var(--faint); font-size:.72rem; margin:.5rem 0 .1rem; }
@@ -2446,24 +2468,15 @@ function renderHTML(result) {
     .an-tb-track, .an-tb-ep { display:none; }
   }
   #an-stats { display:flex; flex-wrap:wrap; gap:.6rem; margin-top:.9rem; }
-  .an-stat { border:1px solid var(--border); border-radius:8px; padding:.5rem .7rem; flex:1; min-width:110px; }
-  .an-stat span { display:block; color:var(--faint); font-size:.66rem; text-transform:uppercase; letter-spacing:.06em; margin-bottom:.15rem; }
-  .an-stat strong { color:var(--text); font-size:1.05rem; font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; }
+  #an-stats .stat { flex:1; min-width:110px; }
   .an-note { flex-basis:100%; color:var(--muted); font-size:.75rem; margin:.3rem 0 0; }
   .an-actions { display:flex; flex-wrap:wrap; gap:.6rem; margin-top:1rem; }
   .an-actions button { font-size:.85rem; padding:.5rem .9rem; }
-  .an-actions button:disabled { opacity:.4; cursor:not-allowed; }
-
-  /* --- Top bar: "not affiliated" disclaimer + beta toggle (top-right) --- */
-  .topbar { position:fixed; top:0; left:0; right:0; z-index:50; display:flex; align-items:center; justify-content:center;
-    padding:.4rem .8rem; background:var(--surface); border-bottom:1px solid var(--border); }
-  .disclaimer { text-align:center; color:var(--hl-lt); font-size:.76rem; letter-spacing:.01em; }
-  .disclaimer strong { color:var(--text); }
 
   /* --- Number card (rngdle.com-style, click-to-type) --- */
   .bn { margin-bottom:1.5rem; }
   .bn-card { position:relative; display:flex; justify-content:center; align-items:center; min-height:6.4rem;
-    padding:1.6rem 1rem; border-radius:var(--r-card); border:1.5px solid color-mix(in srgb, var(--accent) 55%, var(--border)); cursor:text;
+    padding:1.6rem 1rem; border-radius:var(--r-hero); border:1.5px solid color-mix(in srgb, var(--accent) 55%, var(--border)); cursor:text;
     background:radial-gradient(120% 140% at 50% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 62%), var(--surface);
     box-shadow:0 14px 34px -18px var(--glow);
     transition:border-color .25s, box-shadow .25s; }
@@ -2471,10 +2484,10 @@ function renderHTML(result) {
   /* Transparent input overlays the card: clicking anywhere focuses it, typing drives the digits.
      Its (invisible) text must keep the same per-glyph pitch as .bn-number, or text selection
      drifts off the drawn digits: .18em = .02em letter-spacing + 2x.05em .bn-d padding + .06em gap. */
-  .bn-input { position:absolute; inset:0; width:100%; height:100%; margin:0; padding:0; border:0; border-radius:var(--r-card);
+  .bn-input { position:absolute; inset:0; width:100%; height:100%; margin:0; padding:0; border:0; border-radius:var(--r-hero);
     background:transparent; color:transparent; caret-color:var(--accent); text-align:center; cursor:text;
     font-family:var(--mono); font-weight:700; letter-spacing:.18em; font-size:clamp(2.4rem, 11vw, 4rem); }
-  .bn-input:focus { outline:none; }
+  .bn-input:focus { outline:none; box-shadow:none; }
   .bn-number[data-len="1"]+.bn-input, .bn-number[data-len="2"]+.bn-input, .bn-number[data-len="3"]+.bn-input { font-size:4rem; }
   .bn-number { display:flex; gap:.06em; font-family:var(--mono); font-weight:700; letter-spacing:.02em;
     font-size:clamp(2.4rem, 11vw, 4rem); line-height:1; pointer-events:none; }
@@ -2493,36 +2506,30 @@ function renderHTML(result) {
     opacity:0; transition:opacity .12s; }
   .bn-note.show { opacity:1; }
   .bn[data-tier="empty"] .bn-card { border-style:dashed; }
-  .bn[data-tier="empty"] .bn-pill { display:none; }
+  .bn[data-tier="empty"] .pill { display:none; }
   .bn-meta { display:flex; align-items:center; justify-content:center; gap:.55rem; margin-top:1rem; flex-wrap:wrap; }
-  .bn-pill { font-size:.72rem; font-weight:700; letter-spacing:.1em; padding:.18rem .6rem; border-radius:999px;
-    color:var(--accent); border:1px solid var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent); }
   .bn-pct { font-size:.82rem; color:var(--accent); font-weight:600; }
   .bn-ep { font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; color:var(--text); font-size:1.05rem; }
   .bn-sub { text-align:center; color:var(--muted); font-size:.8rem; margin-top:.4rem; }
   .bn-badges { display:flex; flex-wrap:wrap; gap:.45rem; justify-content:center; margin-top:1.2rem; }
   .bn-b { position:relative; display:inline-flex; align-items:center; gap:.35rem; font-size:.8rem; font-weight:500;
-    padding:.28rem .6rem; border-radius:999px; cursor:pointer; color:var(--text);
+    padding:.28rem .6rem; border-radius:var(--r-pill); cursor:pointer; color:var(--text);
     border:1px solid color-mix(in srgb, var(--bc) 55%, var(--border-2)); background:var(--surface-2); transition:background .12s, border-color .12s; }
   .bn-b:hover, .bn-b:focus-visible { outline:none; border-color:var(--bc); background:color-mix(in srgb, var(--bc) 16%, var(--surface-2)); }
   .bn-b em { font-style:normal; font-family:var(--mono); font-size:.72rem; color:var(--muted); }
   .bn-b::after { content:attr(data-tip); white-space:pre-line; position:absolute; left:50%; transform:translateX(-50%);
-    bottom:calc(100% + 8px); min-width:13rem; max-width:18rem; padding:.5rem .65rem; border-radius:8px; background:#06070a;
+    bottom:calc(100% + 8px); min-width:13rem; max-width:18rem; padding:.5rem .65rem; border-radius:var(--r-ctl); background:#06070a;
     border:1px solid var(--border-2); box-shadow:0 8px 24px rgba(0,0,0,.6); font-size:.75rem; font-weight:450; line-height:1.4;
     text-align:left; color:var(--text); opacity:0; pointer-events:none; transition:opacity .12s; z-index:10; }
   .bn-b:hover::after, .bn-b:focus-visible::after { opacity:1; }
-  .bn-badges .none { color:var(--muted); }
-</style></head>
-<body>
-  <div class="topbar">
-    <div class="disclaimer">This site is not affiliated with <strong>rngdle.com</strong>. Scoring is reverse-engineered.</div>
-  </div>
-  <div class="wrap">
+  .bn-badges .none { color:var(--muted); }`;
+
+  const page = `<div class="wrap">
   <h1>RNGdle EP Calculator</h1>
   <p class="tag">Click the box and type a number from 0 to 1,000,000 to see its EP and badges.</p>
   ${body}
 
-  <div class="an-bar"><button type="button" id="an-btn">Analyze all scores</button><a class="grid-btn" href="/grid">Explore all 1,000,000 numbers &rarr;</a><a class="grid-btn" href="/badges">Browse all ${BADGES.length} badges &rarr;</a><a class="grid-btn" href="/chains">Follow the score chains &rarr;</a><a class="grid-btn" href="/u">Player profiles &rarr;</a></div>
+  <div class="an-bar"><button type="button" id="an-btn" class="btn-primary">Analyze all scores</button></div>
 
   <section id="analysis" hidden>
     <h2>EP distribution across 0-1,000,000</h2>
@@ -2537,6 +2544,7 @@ function renderHTML(result) {
           <div class="an-ep-row">
             <label>Scores more than <input id="an-ep-min" type="number" min="0" step="1" placeholder="any" inputmode="numeric"></label>
             <label>and less than <input id="an-ep-max" type="number" min="0" step="1" placeholder="any" inputmode="numeric"></label>
+            <label>or scores exactly <input id="an-ep-eq" type="number" min="0" step="1" placeholder="unset" inputmode="numeric"></label>
           </div>
         </fieldset>
       </div>
@@ -2563,8 +2571,9 @@ function renderHTML(result) {
   </section>
 
   <footer>JSON API: <code>/api?n=696969</code></footer>
-</div>
-<script>
+</div>`;
+
+  const script = `
 // The click-to-type number card: digits light up where each badge scores,
 // and typing fetches /beta to re-render the tier colour + badge pills live.
 (function () {
@@ -2672,16 +2681,15 @@ function renderHTML(result) {
     input.addEventListener('input', onInput);
   }
 })();
-</script>
-<script type="module">
+
 // __name no-op shim: when bundled (esbuild keepNames), the serialized client/worker source
 // below references a __name() helper that only exists in the bundled Worker scope. Redefine
 // it here (page context) and inside the worker blob so the source runs standalone.
 var __name = (f) => f;
 const __WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + analysisWorker.toString() + ')()')};
-(${analysisClient.toString()})(__WORKER_SRC, ${JSON.stringify(tierMeta())});
-</script>
-</body></html>`;
+(${analysisClient.toString()})(__WORKER_SRC, ${JSON.stringify(tierMeta())});`;
+
+  return pageShell({ title: 'RNGdle EP Calculator', nav: 'calc', width: '660px', css, body: page, script });
 }
 
 // ---------------------------------------------------------------------------
@@ -2692,41 +2700,26 @@ const __WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + analysisWorker.toS
 // heatmap; picking a badge from the list switches to its membership map (which
 // numbers earn it), computed from the same engine.js sweep - no images needed.
 // The sweep (per-number count + packed earned-badge bitmask) runs once in a Web
-// Worker and is cached in IndexedDB, so reloads and badge switches are instant.
+// Worker and is cached in IndexedDB - the same entry / and /chains use - so reloads
+// and badge switches are instant, and only the first page visited pays for it.
 // Zoom/pan the canvas, hover for details, click a cell to open it on /.
 // ---------------------------------------------------------------------------
 
 function gridWorker() {
   let E = null, origin = '';
   let counts = null, bits = null, epArr = null, ROW = 0, cmin = 0, cmax = 0, emin = 0, emax = 0;
-  const DB = 'rngdle-grid', STORE = 'ds', KEY = 'sweep';
-  function idbStore(mode) {
-    return new Promise((res, rej) => {
-      const o = indexedDB.open(DB, 1);
-      o.onupgradeneeded = () => o.result.createObjectStore(STORE);
-      o.onsuccess = () => res(o.result.transaction(STORE, mode).objectStore(STORE));
-      o.onerror = () => rej(o.error);
-    });
-  }
-  function idbReq(r) { return new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
-  async function idbGet(k) { try { return await idbReq((await idbStore('readonly')).get(k)); } catch (e) { return null; } }
-  async function idbPut(k, v) { try { await idbReq((await idbStore('readwrite')).put(v, k)); } catch (e) {} }
-  // Cache key busts whenever engine.js changes (so a scoring edit reshades the grid).
-  async function version() {
-    try { const t = await (await fetch(origin + '/engine.js')).text(); let h = 5381; for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h.toString(36) + '.' + t.length; }
-    catch (e) { return 'na'; }
-  }
+  const N = 1000000;                    // the grid is a 1000x1000 canvas: 0..999,999 only
 
   // Membership of a single badge index: which numbers earn it (1) or not (0).
   function membership(idx) {
-    const N = counts.length, m = new Uint8Array(N), byte = idx >> 3, bit = 1 << (idx & 7);
+    const m = new Uint8Array(N), byte = idx >> 3, bit = 1 << (idx & 7);
     for (let n = 0; n < N; n++) if (bits[n * ROW + byte] & bit) m[n] = 1;
     return m;
   }
   // Numbers that earn badge idx but where some dominator badge (a same-family member
   // that would win supersession) is ALSO earned, so idx scores 0 there.
   function supersededMask(idx, doms) {
-    const N = counts.length, m = new Uint8Array(N), byte = idx >> 3, bit = 1 << (idx & 7);
+    const m = new Uint8Array(N), byte = idx >> 3, bit = 1 << (idx & 7);
     const db = doms.map(d => d >> 3), dm = doms.map(d => 1 << (d & 7));
     for (let n = 0; n < N; n++) {
       const row = n * ROW;
@@ -2755,32 +2748,28 @@ function gridWorker() {
       if (!E) E = await import(origin + '/engine.js');
       self.postMessage({ type: 'meta', badges: E.BADGE_META });
 
-      const ver = await version();
-      const hit = msg.force ? null : await idbGet(KEY);
-      if (hit && hit.ver === ver && hit.counts && hit.counts.length === 1000000 && hit.ep) {
-        counts = hit.counts; bits = hit.bits; epArr = hit.ep; ROW = hit.row;
-        cmin = hit.min; cmax = hit.max; emin = hit.emin; emax = hit.emax;
-      } else {
-        // Full 0..999,999 sweep: per-number badge count, total EP, and a packed
-        // earned-badge bitmask (for per-badge membership maps). sweepAll spreads it
-        // over one shard worker per core.
-        const N = 1000000;
-        const swept = await E.sweepAll(origin + '/engine.js', 0, N - 1, 0,
-          pct => self.postMessage({ type: 'progress', pct }));
-        counts = swept.cnt; epArr = swept.ep; bits = swept.bits; ROW = swept.ROW;
-        let mn = 255, mx = 0, en = Infinity, ex = 0;
-        for (let n = 0; n < N; n++) {
-          if (counts[n] < mn) mn = counts[n];
-          if (counts[n] > mx) mx = counts[n];
-          if (epArr[n] < en) en = epArr[n];
-          if (epArr[n] > ex) ex = epArr[n];
-        }
-        cmin = mn; cmax = mx; emin = en; emax = ex;
-        await idbPut(KEY, { ver, counts, ep: epArr, bits, row: ROW, min: mn, max: mx, emin: en, emax: ex });
+      // Shared sweep (engine.js): per-number badge count, total EP and the packed
+      // earned-badge bitmask, cached once for this page, / and /chains alike. It covers
+      // 0..1,000,000; the grid canvas is 1000x1000, so take the first 1,000,000 only.
+      const swept = await E.sweepShared(origin, pct => self.postMessage({ type: 'progress', pct }), msg.force);
+      counts = swept.cnt.subarray(0, N);
+      epArr = swept.ep.subarray(0, N);
+      bits = swept.bits.subarray(0, N * swept.ROW);
+      ROW = swept.ROW;
+
+      // Derived rather than stored - a single 1M pass costs a few ms.
+      let mn = 255, mx = 0, en = Infinity, ex = 0;
+      for (let n = 0; n < N; n++) {
+        if (counts[n] < mn) mn = counts[n];
+        if (counts[n] > mx) mx = counts[n];
+        if (epArr[n] < en) en = epArr[n];
+        if (epArr[n] > ex) ex = epArr[n];
       }
+      cmin = mn; cmax = mx; emin = en; emax = ex;
+
       // counts + bits stay resident for membership(); ship the page copies of counts + ep.
       const c = counts.slice(), e = epArr.slice();
-      self.postMessage({ type: 'done', counts: c.buffer, ep: e.buffer, min: cmin, max: cmax, emin: emin, emax: emax, cached: !!hit }, [c.buffer, e.buffer]);
+      self.postMessage({ type: 'done', counts: c.buffer, ep: e.buffer, min: cmin, max: cmax, emin: emin, emax: emax, cached: swept.cached }, [c.buffer, e.buffer]);
     } catch (e) {
       self.postMessage({ type: 'error', message: String(e && e.message || e) });
     }
@@ -3207,7 +3196,7 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
   // --- Konami code: Conway's Game of Life seeded from the current view ------
   // ↑↑↓↓←→←→BA turns the visible map into a torus-wrapped Game of Life. Alive
   // cells are the "lit" half of the active view (members for a badge view, above
-  // the midpoint for count/EP). Esc — or the code again — stops it and restores
+  // the midpoint for count/EP). Esc - or the code again - stops it and restores
   // the normal view. Pan/zoom keep working while it runs.
   const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
   let konamiPos = 0;
@@ -3325,42 +3314,36 @@ function renderGrid() {
       if (b !== a && (BADGES[b][3] > BADGES[a][3] || (BADGES[b][3] === BADGES[a][3] && b < a))) doms[a].push(b);
     }
   }
-  return `<!doctype html><html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="robots" content="noindex">
-<title>RNGdle - Number Grid</title>
-<style>
-  :root { color-scheme: dark;
-    --bg:#08090c; --surface:#131419; --surface-2:#181a20; --border:#24262d; --border-2:#30333c;
-    --text:#e7e8ea; --muted:#8b8e97;
-    --accent:#5b93d6; --hl:#e8924e; --hl-lt:#f4b27a;
-    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
-    font: 14px/1.4 var(--font);
-    overflow: hidden; -webkit-user-select: none; user-select: none; }
-  #grid { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  const css = `
+  /* Full-bleed canvas app: everything is fixed-positioned, so each overlay clears the
+     icon rail itself rather than relying on body padding. The canvas is inset too -
+     it stays clickable edge to edge instead of hiding a column under the rail. */
+  body { font-size: 14px; line-height: 1.4; -webkit-user-select: none; user-select: none; }
+  /* Explicit width, not left+right+auto: <canvas> is a replaced element, so width:auto
+     resolves to its intrinsic (attribute) size and ignores the insets entirely. */
+  #grid { position: fixed; top: 0; left: var(--rail-w); height: 100%;
+    width: calc(100% - var(--rail-w)); display: block; cursor: grab; touch-action: none; }
   #grid:active { cursor: grabbing; }
-  .panel { position: fixed; z-index: 5; background: rgba(12,14,22,.86);
-    border: 1px solid rgba(255,255,255,.12); border-radius: 10px; backdrop-filter: blur(6px); }
-  #side { top: 12px; left: 12px; bottom: 12px; width: 250px; max-width: calc(100vw - 24px);
+  .glass { position: fixed; z-index: 5; background: rgba(12,14,22,.86);
+    border: 1px solid rgba(255,255,255,.12); border-radius: var(--r-card); backdrop-filter: blur(6px); }
+  #side { top: 12px; left: calc(var(--rail-w) + 12px); bottom: 12px; width: 250px;
+    max-width: calc(100vw - var(--rail-w) - 24px);
     display: flex; flex-direction: column; padding: 12px; gap: 10px; transition: transform .25s ease; }
   body.nav-collapsed #side { transform: translateX(calc(-100% - 16px)); }
   .sidehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
   .sidehead h1 { flex: 1; }
-  #sidehide, #sideshow { flex: 0 0 auto; width: 32px; height: 32px; padding: 0;
-    display: inline-flex; align-items: center; justify-content: center; color: var(--text);
-    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
+  #sidehide, #sideshow { flex: 0 0 auto; width: 32px; height: 32px; padding: 0; color: var(--text);
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: var(--r-ctl); }
   #sidehide svg, #sideshow svg { width: 19px; height: 19px; }
-  #sidehide:hover, #sideshow:hover { background: rgba(255,255,255,.14); }
-  #sideshow { position: fixed; top: 12px; left: 12px; z-index: 7; display: none; }
+  #sidehide:hover, #sideshow:hover { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.14); }
+  #sideshow { position: fixed; top: 12px; left: calc(var(--rail-w) + 12px); z-index: 7; display: none; }
   body.nav-collapsed #sideshow { display: inline-flex; }
   #sidehide.hint { color: var(--hl-lt); animation: trayhint 1.15s ease-in-out infinite; }
   @keyframes trayhint { 0%, 100% { box-shadow: 0 0 0 0 transparent; border-color: rgba(255,255,255,.14); }
     50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--hl) 32%, transparent); border-color: var(--hl); } }
   @media (max-width: 640px) {
-    #side { left: 10px; right: 10px; width: auto; max-width: none; top: 10px; bottom: 10px; padding: 14px; gap: 12px; }
+    #side { left: calc(var(--rail-w) + 10px); right: 10px; width: auto; max-width: none;
+      top: 10px; bottom: 10px; padding: 14px; gap: 12px; }
     #search { padding: 11px 12px; font-size: 15px; }
     #supbtn { padding: 10px 12px; font-size: 14px; }
     #supmode button { padding: 0 10px; font-size: 13px; }
@@ -3375,15 +3358,13 @@ function renderGrid() {
   #side h1 { margin: 0; font-size: 14px; font-weight: 650; }
   #side .credit { font-size: 12px; color: var(--muted); }
   #side .credit b { color: var(--accent); font-weight: 600; }
-  #side .nav { font-size: 12px; color: var(--muted); }
-  #side .nav a { color: var(--accent); text-decoration: none; }
-  #side .nav a:hover { text-decoration: underline; }
+  #side .hint-text { font-size: 12px; color: var(--muted); }
   #vtitle { font-size: 12px; color: #cfd3df; min-height: 16px; }
   #suprow { display: flex; gap: 6px; align-items: stretch; }
-  #supbtn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 10px;
-    font-size: 12.5px; font-family: inherit; text-align: left; color: #c8ccd8; cursor: pointer;
-    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; }
-  #supbtn:hover:not(:disabled) { background: rgba(255,255,255,.12); }
+  #supbtn { flex: 1; min-width: 0; justify-content: flex-start; gap: 8px; padding: 7px 10px;
+    font-size: 12.5px; font-weight: 500; text-align: left; color: var(--dim);
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); }
+  #supbtn:hover:not(:disabled) { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.14); }
   #supbtn:disabled { opacity: .38; cursor: default; }
   #supbtn .dot { flex: 0 0 auto; width: 12px; height: 12px; border-radius: 3px;
     border: 1px solid rgba(255,255,255,.35); }
@@ -3391,56 +3372,54 @@ function renderGrid() {
     border-color: color-mix(in srgb, var(--hl) 45%, transparent); }
   #supbtn.on .dot { background: var(--hl); border-color: var(--hl); }
   #supmode { flex: 0 0 auto; display: flex; align-items: stretch;
-    border: 1px solid rgba(255,255,255,.14); border-radius: 8px; overflow: hidden; }
-  #supmode button { padding: 0 8px; font-size: 11.5px; font-family: inherit; color: #c8ccd8;
-    background: transparent; border: 0; cursor: pointer; }
+    border: 1px solid rgba(255,255,255,.14); border-radius: var(--r-ctl); overflow: hidden; }
+  #supmode button { padding: 0 8px; font-size: 11.5px; font-weight: 400; color: var(--dim);
+    background: transparent; border: 0; border-radius: 0; }
   #supmode button + button { border-left: 1px solid rgba(255,255,255,.14); }
   #supmode button:hover:not(:disabled) { background: rgba(255,255,255,.12); }
   #supmode button:disabled { opacity: .38; cursor: default; }
   #supmode button.on { background: color-mix(in srgb, var(--hl) 18%, transparent); color: #f6dcc0; }
-  #search { width: 100%; padding: 8px 10px; font-size: 13px; line-height: 1.4; color: var(--text);
-    -webkit-appearance: none; appearance: none; font-family: inherit;
-    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; }
+  #search { width: 100%; padding: 8px 10px; font-size: 13px; line-height: 1.4;
+    background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.14); }
+  #search:focus { box-shadow: none; border-color: var(--accent); }
   #list { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 2px; margin: 0 -4px; padding: 0 4px; }
   .item { flex: 0 0 auto; display: block; width: 100%; text-align: left; padding: 6px 8px; font-size: 12.5px;
-    line-height: 1.5; font-family: inherit;
-    color: #c8ccd8; background: transparent; border: 0; border-radius: 6px; cursor: pointer; white-space: nowrap;
+    font-weight: 400; line-height: 1.5;
+    color: var(--dim); background: transparent; border: 0; border-radius: var(--r-sm); white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
-  .item:hover { background: rgba(255,255,255,.07); }
+  .item:hover { background: rgba(255,255,255,.07); border: 0; }
   .item.on { background: color-mix(in srgb, var(--hl) 18%, transparent); color: #f6dcc0; }
   #ctrls { top: 12px; right: 12px; display: flex; gap: 6px; padding: 6px; }
-  #ctrls button { width: 34px; height: 34px; font-size: 17px; color: var(--text);
-    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; cursor: pointer; }
-  #ctrls button:hover { background: rgba(255,255,255,.14); }
+  #ctrls button { width: 34px; height: 34px; padding: 0; font-size: 17px; color: var(--text);
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); }
+  #ctrls button:hover { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.14); }
   #legend { bottom: 12px; right: 12px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
   #legbar { display: flex; align-items: center; gap: 8px; }
   #legend .scale { width: 150px; height: 10px; border-radius: 5px; }
   #legend .lab { color: var(--muted); }
-  #cmap { font-family: inherit; font-size: 12px; color: var(--text); background: rgba(255,255,255,.06);
-    -webkit-appearance: none; appearance: none; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 3px 6px; cursor: pointer; }
-  #cmap option { color: #000; }
+  #cmap { font-size: 12px; color: var(--text); background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.14); border-radius: var(--r-sm); padding: 3px 6px; }
+  #cmap:focus { box-shadow: none; }
   #tip { position: fixed; z-index: 6; display: none; pointer-events: none; padding: 6px 9px;
-    background: rgba(8,10,16,.92); border: 1px solid rgba(255,255,255,.18); border-radius: 8px; font-size: 12px; white-space: nowrap; }
+    background: rgba(8,10,16,.92); border: 1px solid rgba(255,255,255,.18); border-radius: var(--r-ctl); font-size: 12px; white-space: nowrap; }
   #tip b { font-size: 14px; }
   #tip span { display: block; color: var(--muted); font-size: 11px; margin-top: 1px; }
   #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 8;
     padding: 8px 14px; font-size: 13px; color: var(--text); background: rgba(8,10,16,.94);
-    border: 1px solid rgba(255,255,255,.18); border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+    border: 1px solid rgba(255,255,255,.18); border-radius: var(--r-ctl); opacity: 0; transition: opacity .2s; pointer-events: none; }
   #toast.show { opacity: 1; }
-  #ov { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+  #ov { position: fixed; top: 0; right: 0; bottom: 0; left: var(--rail-w); z-index: 10;
+    display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 14px; background: var(--bg); }
   #ov h2 { margin: 0; font-weight: 600; font-size: 16px; }
   #ovtext { color: var(--muted); font-size: 13px; }
-  #track { width: min(320px, 70vw); height: 8px; border-radius: 4px; background: rgba(255,255,255,.1); overflow: hidden; }
-  #bar { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
-</style></head>
-<body>
-<canvas id="grid"></canvas>
-<button id="sideshow" class="panel" title="Show panel" aria-label="Show panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>
-<div id="side" class="panel">
+  #track { width: min(320px, 70vw); }`;
+
+  const body = `<canvas id="grid"></canvas>
+<button id="sideshow" class="glass" title="Show panel" aria-label="Show panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>
+<div id="side" class="glass">
   <div class="sidehead"><h1>All 1,000,000 numbers</h1><button id="sidehide" title="Hide panel" aria-label="Hide panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button></div>
   <div class="credit">Heavily inspired by <b>basiliotornado</b></div>
-  <div class="nav"><a href="/">&larr; calculator</a> &nbsp;·&nbsp; <a href="/badges">badge index</a></div>
   <div id="vtitle">All numbers - badge count</div>
   <div id="suprow">
     <button id="supbtn" disabled title="Darken numbers where a higher badge in the same family supersedes the selected badge (it still shows as earned but scores 0 there)"><span class="dot"></span>Hide superseded badges</button>
@@ -3448,15 +3427,15 @@ function renderGrid() {
   </div>
   <input id="search" type="search" placeholder="Filter 230 badges…" autocomplete="off">
   <div id="list"></div>
-  <div class="nav">Pick a badge to highlight which numbers earn it. Click any cell to open it.</div>
+  <div class="hint-text">Pick a badge to highlight which numbers earn it. Click any cell to open it.</div>
 </div>
-<div id="ctrls" class="panel">
+<div id="ctrls" class="glass">
   <button id="zout" title="Zoom out">−</button>
   <button id="zreset" title="Fit">⤢</button>
   <button id="zin" title="Zoom in">+</button>
   <button id="zlink" title="Copy link to this view">🔗</button>
 </div>
-<div id="legend" class="panel">
+<div id="legend" class="glass">
   <select id="cmap" title="Colour scale (perceptually uniform)">
     <option>Grayscale</option><option>Viridis</option><option>Magma</option><option>Inferno</option><option>Plasma</option><option>Cividis</option>
   </select>
@@ -3466,15 +3445,19 @@ function renderGrid() {
 <div id="toast"></div>
 <div id="ov">
   <h2>Building the grid…</h2>
-  <div id="track"><div id="bar"></div></div>
+  <div id="track" class="progress"><i id="bar"></i></div>
   <div id="ovtext">Scoring 1,000,000 numbers (one-time; cached after)…</div>
-</div>
-<script type="module">
+</div>`;
+
+  const script = `
 var __name = (f) => f;
 const __GRID_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + gridWorker.toString() + ')()')};
-(${gridClient.toString()})(__GRID_WORKER_SRC, ${labels}, ${JSON.stringify(doms)});
-</script>
-</body></html>`;
+(${gridClient.toString()})(__GRID_WORKER_SRC, ${labels}, ${JSON.stringify(doms)});`;
+
+  return pageShell({
+    title: 'RNGdle - Number Grid', nav: 'grid', full: true, noindex: true, css, body, script,
+    viewport: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no',
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3487,7 +3470,8 @@ const __GRID_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + gridWorker.to
 //
 // Nothing here is precomputed or committed - the worker sweeps the live engine, so
 // the graph always reflects the current badge rules. Like /analyze and /grid it runs
-// client-side, and reuses the same sharded sweepAll.
+// client-side, off the same shared sweepShared() cache; only the graph build (edges,
+// loops, radial layout) is specific to this page.
 // ---------------------------------------------------------------------------
 
 function chainsWorker() {
@@ -3627,7 +3611,9 @@ function chainsWorker() {
     try {
       const E = await import(m.origin + '/engine.js');
       say('Scoring every number', 0);
-      const swept = await E.sweepAll(m.origin + '/engine.js', 0, N - 1, 0, p => say('Scoring every number', p));
+      // Shared with / and /grid: on a warm cache this returns immediately and only the
+      // graph build below (edges, loops, layout) actually costs anything.
+      const swept = await E.sweepShared(m.origin, p => say('Scoring every number', p));
       const EP = swept.ep;
 
       // --- edges -----------------------------------------------------------
@@ -4025,7 +4011,7 @@ function chainsClient(WORKER_SRC) {
         cut: Math.max(26, 300 / Math.sqrt(Math.max(1, C / 220))),
       };
       $('net-count').textContent = fmt(C) + ' node' + (C === 1 ? '' : 's') +
-        (msg.truncated ? ' (capped)' : msg.hopLimited ? '' : ' — whole basin');
+        (msg.truncated ? ' (capped)' : msg.hopLimited ? '' : ' - whole basin');
       if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
         for (let i = 0; i < Math.min(300, 90000 / Math.sqrt(C)); i++) step();
         net.alpha = 0;
@@ -4236,9 +4222,10 @@ function chainsClient(WORKER_SRC) {
       ['Deepest', String(c.maxDepth), 'steps, from ' + fmt(D.deepestChain.start)],
     ];
     $('figures').innerHTML = figs.map(f =>
-      '<div class="fig"><dt>' + f[0] + '</dt><dd class="mono">' + f[1] + '<span class="sub">' + f[2] + '</span></dd></div>').join('');
+      '<div class="stat stat-lg"><span class="k">' + f[0] + '</span><span class="v">' + f[1] +
+      '<span class="sub">' + f[2] + '</span></span></div>').join('');
 
-    $('loop-lede').textContent = 'Follow the arrows far enough and you almost never fall off the end — you land in a cycle and go round forever. There are exactly ' + D.cycles.length +
+    $('loop-lede').textContent = 'Follow the arrows far enough and you almost never fall off the end - you land in a cycle and go round forever. There are exactly ' + D.cycles.length +
       ', holding ' + fmt(c.inCycles) + ' numbers between them (' + (c.inCycles / c.nodes * 100).toFixed(1) + '% of the range). Hover a node to read its step.';
 
     // --- loops as node-link rings -----------------------------------------
@@ -4277,7 +4264,7 @@ function chainsClient(WORKER_SRC) {
       el.innerHTML = nodes.map((n, i) => {
         const inLoop = loopFrom != null && i >= loopFrom;
         return (i ? '<span class="arrow">→</span>' : '') +
-          '<a class="chip mono' + (terminal && i === nodes.length - 1 ? ' terminal' : '') +
+          '<a class="chain-chip mono' + (terminal && i === nodes.length - 1 ? ' terminal' : '') +
           (inLoop ? ' in-loop' : '') + '" href="/?n=' + n + '">' + fmt(n) + '</a>';
       }).join('');
     };
@@ -4309,11 +4296,11 @@ function chainsClient(WORKER_SRC) {
       const steps = loop ? loopFrom : path.length - 1;   // steps taken before it settles
       let v;
       if (endsAtSink && path.length === 1) {
-        v = '<strong>' + fmt(n) + '</strong> scores <strong>' + fmt(D.sinkEP[last]) + '</strong>, which is past the top of the range — ' +
+        v = '<strong>' + fmt(n) + '</strong> scores <strong>' + fmt(D.sinkEP[last]) + '</strong>, which is past the top of the range - ' +
             'so it is one of the ' + fmt(c.sinks) + ' numbers whose chain ends immediately.';
       } else if (endsAtSink) {
         v = '<strong>' + fmt(n) + '</strong> runs for <strong>' + steps + ' step' + (steps === 1 ? '' : 's') +
-            '</strong> and ends at <strong>' + fmt(last) + '</strong>, which scores ' + fmt(D.sinkEP[last]) + ' — ' +
+            '</strong> and ends at <strong>' + fmt(last) + '</strong>, which scores ' + fmt(D.sinkEP[last]) + ' - ' +
             fmt(D.sinkEP[last] - 1000000) + ' past the top of the range, so there is nowhere left to go.';
       } else if (loop && loopFrom === 0) {
         v = '<strong>' + fmt(n) + '</strong> is itself part of the <strong>' + loop.length + '-step loop</strong>, ' +
@@ -4321,7 +4308,7 @@ function chainsClient(WORKER_SRC) {
       } else if (loop) {
         v = '<strong>' + fmt(n) + '</strong> runs for <strong>' + steps + ' step' + (steps === 1 ? '' : 's') +
             '</strong>, then joins the <strong>' + loop.length + '-step loop</strong> at ' + fmt(cur) +
-            ' and repeats forever — ' + fmt(path.length) + ' distinct numbers in all.';
+            ' and repeats forever - ' + fmt(path.length) + ' distinct numbers in all.';
       } else {
         v = '<strong>' + fmt(n) + '</strong> returns to a number it has already visited after ' + steps + ' steps.';
       }
@@ -4353,7 +4340,7 @@ function chainsClient(WORKER_SRC) {
     const joined = deep.nodes[deep.nodes.length - 1];
     const joinedLoop = D.cycles.find(x => x.members.indexOf(joined) >= 0);
     $('deep-note').textContent = 'After ' + deep.depth + ' steps it arrives at ' + fmt(joined) +
-      ', already a member of the ' + (joinedLoop ? joinedLoop.length : '?') + '-step loop — from there it repeats forever, ' +
+      ', already a member of the ' + (joinedLoop ? joinedLoop.length : '?') + '-step loop - from there it repeats forever, ' +
       (joinedLoop ? deep.depth + ' + ' + joinedLoop.length + ' = ' + (deep.depth + joinedLoop.length) + ' distinct numbers in all.' : '');
 
     const esc = D.escapeChain;
@@ -4362,7 +4349,7 @@ function chainsClient(WORKER_SRC) {
     const sinkNode = esc.nodes[esc.nodes.length - 1];
     const sinkRow = D.topSinks.filter(s => s.sink === sinkNode)[0];
     $('esc-note').innerHTML = '<span class="mono">' + fmt(sinkNode) + '</span> scores <span class="mono">' + fmt(esc.ep) +
-      '</span> — ' + fmt(esc.ep - 1000000) + ' past the top of the range, so there is nowhere left to go.' +
+      '</span> - ' + fmt(esc.ep - 1000000) + ' past the top of the range, so there is nowhere left to go.' +
       (sinkRow ? ' ' + fmt(sinkRow.basin) + ' numbers finish here, more than at any other sink.' : '');
 
     // --- depth profile -----------------------------------------------------
@@ -4373,7 +4360,7 @@ function chainsClient(WORKER_SRC) {
     for (const k of keys) {
       const h = D.hist[k] / max * (H - PAD * 2);
       s += '<rect class="bar" x="' + (PAD + k * bw).toFixed(2) + '" y="' + (H - PAD - h).toFixed(2) + '" width="' +
-        Math.max(0.8, bw - 0.6).toFixed(2) + '" height="' + h.toFixed(2) + '"><title>depth ' + k + ' — ' + fmt(D.hist[k]) + ' numbers</title></rect>';
+        Math.max(0.8, bw - 0.6).toFixed(2) + '" height="' + h.toFixed(2) + '"><title>depth ' + k + ' - ' + fmt(D.hist[k]) + ' numbers</title></rect>';
     }
     for (const k of [0, 20, 40, 60, 80, 100]) if (k <= c.maxDepth)
       s += '<text x="' + (PAD + k * bw).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + k + '</text>';
@@ -4385,71 +4372,52 @@ function chainsClient(WORKER_SRC) {
       '<tr><td><a class="mono" href="/?n=' + x.sink + '">' + fmt(x.sink) + '</a></td><td class="mono">' + fmt(x.ep) +
       '</td><td class="mono">+' + fmt(x.ep - 1000000) + '</td><td class="mono">' + fmt(x.basin) + '</td></tr>').join('');
     $('sink-lede').textContent = 'The ' + fmt(c.sinks) + ' numbers whose EP lands outside the range, ranked by how many numbers eventually drain through them. ' +
-      fmt(c.inSinks) + ' numbers end at one — just ' + (c.inSinks / c.nodes * 100).toFixed(1) + '% of the range.';
+      fmt(c.inSinks) + ' numbers end at one - just ' + (c.inSinks / c.nodes * 100).toFixed(1) + '% of the range.';
   }
 }
 
 function renderChains() {
-  return `<!doctype html><html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RNGdle - The EP Graph</title>
-<style>
+  // The chains page keeps its editorial rhythm (full-width sections, big hero, figure
+  // grid) but is skinned entirely from the shared tokens: --ink/--rule/--panel are now
+  // aliases so the long tail of rules below didn't have to be rewritten by hand.
+  const css = `
   :root{
-    --ground:#F5F6F8; --panel:#fff; --ink:#10131A; --ink-dim:#454C5D; --muted:#6E7789; --rule:#DFE3EA;
-    --c0:#E23F44; --c1:#C97800; --c2:#1E8F4E; --c3:#2E6BD8; --c4:#9B45C7; --sink:#5B7391; --accent:#2E6BD8;
+    --ink:var(--text); --ink-dim:var(--dim); --rule:var(--border); --panel:var(--surface); --ground:var(--bg);
+    --c0:#FF5A5C; --c1:#FFB040; --c2:#6EE18C; --c3:#78AAFF; --c4:#E17DFF; --sink:#7891AF;
   }
-  @media (prefers-color-scheme:dark){
-    :root{
-      --ground:#08090C; --panel:#0F1218; --ink:#E9EBF1; --ink-dim:#AAB2C4; --muted:#7C859B; --rule:#1D222C;
-      --c0:#FF5A5C; --c1:#FFB040; --c2:#6EE18C; --c3:#78AAFF; --c4:#E17DFF; --sink:#7891AF; --accent:#78AAFF;
-    }
-  }
-  :root[data-theme="light"]{
-    --ground:#F5F6F8; --panel:#fff; --ink:#10131A; --ink-dim:#454C5D; --muted:#6E7789; --rule:#DFE3EA;
-    --c0:#E23F44; --c1:#C97800; --c2:#1E8F4E; --c3:#2E6BD8; --c4:#9B45C7; --sink:#5B7391; --accent:#2E6BD8;
-  }
-  :root[data-theme="dark"]{
-    --ground:#08090C; --panel:#0F1218; --ink:#E9EBF1; --ink-dim:#AAB2C4; --muted:#7C859B; --rule:#1D222C;
-    --c0:#FF5A5C; --c1:#FFB040; --c2:#6EE18C; --c3:#78AAFF; --c4:#E17DFF; --sink:#7891AF; --accent:#78AAFF;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--ground);color:var(--ink);
-    font-family:ui-sans-serif,"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
-    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
-  .mono{font-family:ui-monospace,"Cascadia Mono","SF Mono",Consolas,Menlo,monospace;font-variant-numeric:tabular-nums}
-  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
-  section{padding-block:clamp(40px,6vw,72px);border-top:1px solid var(--rule)}
+  body{font-size:16px;line-height:1.6}
+  .wrap{padding:0 24px}
+  section{padding-block:clamp(36px,5.5vw,64px);border-top:1px solid var(--rule)}
   section:first-of-type{border-top:0}
   h1{font-size:clamp(2.1rem,6vw,3.6rem);line-height:1.02;letter-spacing:-.035em;font-weight:680;margin:0;text-wrap:balance}
   h2{font-size:clamp(1.15rem,2.4vw,1.5rem);letter-spacing:-.02em;font-weight:640;margin:0 0 6px;text-wrap:balance}
   p{margin:0;max-width:66ch;color:var(--ink-dim)}
-  .eyebrow{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;font-weight:620;color:var(--muted);margin:0 0 14px}
   .lede{font-size:1.06rem;margin-top:18px}
   .note{font-size:.9rem;color:var(--muted);margin-top:14px}
   .head{display:flex;flex-direction:column;gap:4px;margin-bottom:26px}
-  .hero{padding-top:clamp(36px,5vw,64px)}
-  .plate{margin-top:30px;background:#08090C;border:1px solid var(--rule);border-radius:3px;overflow:hidden}
+  .hero{padding-top:clamp(20px,3vw,40px)}
+  .plate{margin:30px 0 0;background:#08090C;border:1px solid var(--rule);border-radius:var(--r-card);overflow:hidden}
   #plate-wrap{position:relative;line-height:0}
   .plate canvas{display:block;width:100%;aspect-ratio:1;height:auto;cursor:grab;touch-action:none}
   .plate canvas:active{cursor:grabbing}
   .plate canvas:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   #plate-hud{position:absolute;top:10px;right:12px;display:flex;align-items:center;gap:8px;
     line-height:1.4;font-size:.75rem;color:#8A93A6;pointer-events:none}
-  #plate-hud button{pointer-events:auto;padding:4px 10px;font:inherit;color:#C7CEDA;
-    background:rgba(12,14,22,.82);border:1px solid rgba(255,255,255,.16);border-radius:2px;cursor:pointer}
-  #plate-hud button:hover{border-color:var(--accent);color:var(--accent)}
+  #plate-hud button{pointer-events:auto;padding:4px 10px;font:inherit;font-size:.75rem;color:var(--dim);
+    background:rgba(12,14,22,.82);border:1px solid rgba(255,255,255,.16);border-radius:var(--r-sm)}
+  #plate-hud button:hover{border-color:var(--accent);color:var(--accent);background:rgba(12,14,22,.82)}
   #net-depth-wrap,#net-count{display:none}
   body.net-mode #net-depth-wrap,body.net-mode #net-count{display:inline-flex;align-items:center}
-  #net-depth{pointer-events:auto;padding:4px 6px;font:inherit;font-size:.75rem;color:#C7CEDA;
-    background:rgba(12,14,22,.9);border:1px solid rgba(255,255,255,.16);border-radius:2px;cursor:pointer}
+  #net-depth{pointer-events:auto;padding:4px 6px;font:inherit;font-size:.75rem;color:var(--dim);
+    background:rgba(12,14,22,.9);border:1px solid rgba(255,255,255,.16);border-radius:var(--r-sm)}
+  #net-depth:focus{box-shadow:none}
   #net-depth:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   #net-count{color:#8A93A6}
   #plate-modes{display:inline-flex;pointer-events:auto}
   #plate-modes button{border-radius:0;margin-left:-1px}
-  #plate-modes button:first-child{border-radius:2px 0 0 2px;margin-left:0}
-  #plate-modes button:last-child{border-radius:0 2px 2px 0}
-  #plate-modes button.on{color:#08090C;background:var(--accent);border-color:var(--accent)}
+  #plate-modes button:first-child{border-radius:var(--r-sm) 0 0 var(--r-sm);margin-left:0}
+  #plate-modes button:last-child{border-radius:0 var(--r-sm) var(--r-sm) 0}
+  #plate-modes button.on{color:var(--on-accent);background:var(--accent);border-color:var(--accent)}
   #plate-hud button:focus-visible,#plate-modes button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   #plate-readout{position:absolute;left:12px;bottom:10px;font-size:.78rem;color:#C7CEDA;
     line-height:1.4;pointer-events:none;text-shadow:0 1px 3px #000}
@@ -4461,17 +4429,13 @@ function renderChains() {
     border-top:1px solid rgba(255,255,255,.09);font-size:.8rem;color:#8A93A6;background:#0B0D12}
   .key{display:flex;align-items:center;gap:7px;white-space:nowrap}
   .swatch{width:9px;height:9px;border-radius:50%;flex:none}
-  #loading{margin-top:30px;padding:26px;border:1px solid var(--rule);border-radius:3px;background:var(--panel)}
-  #track{height:3px;background:var(--rule);border-radius:2px;overflow:hidden;margin-top:14px}
-  #bar{height:100%;width:0;background:var(--accent);transition:width .2s ease}
+  #loading{margin-top:30px;padding:26px;border:1px solid var(--rule);border-radius:var(--r-card);background:var(--panel)}
+  #track{margin-top:14px}
   body:not(.ready) .needs-data{display:none}
-  .figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
-  .fig{background:var(--panel);padding:18px 20px}
-  .fig dt{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
-  .fig dd{margin:0;font-size:1.6rem;letter-spacing:-.03em;font-weight:600;line-height:1}
-  .fig .sub{display:block;font-size:.78rem;font-weight:400;color:var(--muted);letter-spacing:0;margin-top:7px}
+  .figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.6rem;margin:0}
+  .figures .stat{background:var(--panel);padding:16px 18px}
   .loops{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:18px}
-  .loop{background:var(--panel);border:1px solid var(--rule);border-radius:3px;padding:16px}
+  .loop{background:var(--panel);border:1px solid var(--rule);border-radius:var(--r-card);padding:16px}
   .loop h3{margin:0;font-size:.95rem;font-weight:620;display:flex;align-items:center;gap:8px}
   .loop .meta{font-size:.8rem;color:var(--muted);margin:3px 0 10px}
   .loop svg{display:block;width:100%;height:auto;overflow:visible}
@@ -4482,29 +4446,22 @@ function renderChains() {
   .node:focus-visible circle{stroke:var(--ink);stroke-width:1.5}
   .readout{min-height:1.5em;margin-top:10px;font-size:.84rem;border-top:1px dashed var(--rule);padding-top:9px}
   .readout .dim{color:var(--muted)}
-  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   #trace-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-  #trace-n{flex:1 1 200px;max-width:280px;padding:9px 12px;font-size:1rem;color:var(--ink);
-    background:var(--panel);border:1px solid var(--rule);border-radius:2px}
-  #trace-n:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
-  #trace-form button{padding:9px 16px;font:inherit;font-size:.9rem;color:var(--ground);background:var(--accent);
-    border:1px solid var(--accent);border-radius:2px;cursor:pointer}
-  #trace-form button.ghost{color:var(--ink-dim);background:transparent;border-color:var(--rule)}
-  #trace-form button:hover{filter:brightness(1.08)}
-  #trace-form button.ghost:hover{border-color:var(--accent);color:var(--accent);filter:none}
-  #trace-form button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .verdict{margin-top:18px;padding:14px 16px;border-left:2px solid var(--accent);background:var(--panel);font-size:.95rem}
+  #trace-n{flex:1 1 200px;max-width:280px;font-size:1rem}
+  .verdict{margin-top:18px;padding:14px 16px;border-left:2px solid var(--accent);border-radius:0 var(--r-ctl) var(--r-ctl) 0;
+    background:var(--panel);font-size:.95rem}
   .verdict strong{color:var(--ink)}
   .verdict.is-sink{border-left-color:var(--sink)}
   .chain{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:16px}
-  .chip{display:inline-block;padding:3px 9px;border:1px solid var(--rule);border-radius:2px;
+  .chain-chip{display:inline-block;padding:3px 9px;border:1px solid var(--rule);border-radius:var(--r-sm);
     background:var(--panel);font-size:.84rem;color:var(--ink);text-decoration:none}
-  .chip:hover{border-color:var(--accent);color:var(--accent)}
-  .chip.terminal{border-color:var(--sink);color:var(--sink);font-weight:600}
+  .chain-chip:hover{border-color:var(--accent);color:var(--accent)}
+  .chain-chip.terminal{border-color:var(--sink);color:var(--sink);font-weight:600}
   /* --loop-hue is set per trace, so the highlight matches the loop it lands in */
-  .chip.in-loop{border-color:var(--loop-hue,var(--c0));color:var(--loop-hue,var(--c0))}
+  .chain-chip.in-loop{border-color:var(--loop-hue,var(--c0));color:var(--loop-hue,var(--c0))}
   .arrow{color:var(--muted);font-size:.8rem}
-  .escape{margin-top:16px;padding:13px 16px;border-left:2px solid var(--sink);background:var(--panel);font-size:.9rem}
+  .escape{margin-top:16px;padding:13px 16px;border-left:2px solid var(--sink);border-radius:0 var(--r-ctl) var(--r-ctl) 0;
+    background:var(--panel);font-size:.9rem}
   .profile{width:100%;height:auto;display:block;margin-top:8px;overflow:visible}
   .profile .bar{fill:var(--accent);opacity:.75}
   .profile .bar:hover{opacity:1}
@@ -4515,22 +4472,21 @@ function renderChains() {
   th:first-child,td:first-child{text-align:left}
   th{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
   tbody tr:hover{background:color-mix(in srgb,var(--accent) 7%,transparent)}
-  footer{padding:34px 0 56px;border-top:1px solid var(--rule)}
+  footer{margin-top:0;padding:34px 0 56px;border-top:1px solid var(--rule)}
   footer p{color:var(--muted);font-size:.84rem}
-  a{color:var(--accent)}
-  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
-</style></head><body>
-<div class="wrap">
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}`;
+
+  const body = `<div class="wrap">
   <section class="hero">
     <p class="eyebrow">RNGdle &middot; every number 0&ndash;1,000,000</p>
     <h1>Each number points at its own score.</h1>
     <p class="lede">Take any number, work out the EP it earns, and treat that score as the next number.
       Almost every number can do this, so the whole range becomes one graph with a single arrow leaving
-      every node. This is all of them &mdash; scored in your browser from the live badge rules, not from a
+      every node. This is all of them - scored in your browser from the live badge rules, not from a
       stored snapshot.</p>
     <div id="loading">
       <p id="status" class="mono">Starting…</p>
-      <div id="track"><div id="bar"></div></div>
+      <div id="track" class="progress"><i id="bar"></i></div>
     </div>
     <figure class="plate needs-data">
       <div id="plate-wrap">
@@ -4570,7 +4526,7 @@ function renderChains() {
   </section>
 
   <section class="needs-data">
-    <dl class="figures" id="figures"></dl>
+    <div class="figures" id="figures"></div>
     <p class="note">A number is a <strong>sink</strong> when its EP exceeds 1,000,000 and the chain simply stops.
       Mean EP sits around 21,500, comfortably inside the range, so the map points overwhelmingly inward.</p>
   </section>
@@ -4582,8 +4538,8 @@ function renderChains() {
     <form id="trace-form" autocomplete="off">
       <label class="sr-only" for="trace-n">Number to trace</label>
       <input id="trace-n" class="mono" type="text" inputmode="numeric" placeholder="e.g. 70076" aria-describedby="trace-msg">
-      <button type="submit">Trace</button>
-      <button type="button" id="trace-random" class="ghost">Random</button>
+      <button type="submit" class="btn-primary">Trace</button>
+      <button type="button" id="trace-random" class="btn-ghost">Random</button>
     </form>
     <p class="note" id="trace-msg"></p>
     <div id="trace-out" hidden>
@@ -4606,7 +4562,7 @@ function renderChains() {
 
   <section class="needs-data">
     <div class="head"><p class="eyebrow">Longest escape</p><h2 id="esc-title"></h2>
-      <p>Chains that terminate are the rare case. This is the longest of them &mdash; each number scoring the
+      <p>Chains that terminate are the rare case. This is the longest of them - each number scoring the
         next, until the final score overshoots the range.</p></div>
     <div class="chain" id="esc-chain"></div>
     <div class="escape" id="esc-note"></div>
@@ -4630,8 +4586,9 @@ function renderChains() {
     <span class="mono">n &rarr; EP(n)</span>, kept only where the score is itself a legal input. Loops are
     found by walking each number until it meets a settled node or itself. Any number here opens in the
     calculator. See also <a href="/grid">the grid</a> and <a href="/badges">every badge</a>.</p></footer>
-</div>
-<script type="module">
+</div>`;
+
+  const script = `
 // __name shim, page scope: when this Worker is bundled (esbuild keepNames), the source
 // returned by toString() carries __name(fn,"fn") calls for any nested function
 // declaration - and chainsClient has several. That helper only exists in the bundled
@@ -4639,9 +4596,9 @@ function renderChains() {
 // source below and engineModuleSource() each carry their own copy for the same reason.
 var __name = (f) => f;
 const __CHAINS_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + chainsWorker.toString() + ')()')};
-(${chainsClient.toString()})(__CHAINS_WORKER_SRC);
-</script>
-</body></html>`;
+(${chainsClient.toString()})(__CHAINS_WORKER_SRC);`;
+
+  return pageShell({ title: 'RNGdle - The EP Graph', nav: 'chains', width: '1080px', css, body, script });
 }
 
 // ---------------------------------------------------------------------------
@@ -4688,7 +4645,7 @@ function renderBadgeIndex() {
 
     const search = `${label} ${id} ${desc} ${tier}${isNew ? ' new newly added' : ''}`.toLowerCase();
     return `<article class="bd${isNew ? ' is-new' : ''}" id="${id}" data-search="${esc(search)}" data-ep="${ep}" data-prob="${prob ?? -1}" data-tier="${tier}" data-new="${isNew ? '1' : '0'}" style="--tc:${pal.accent}">
-  <header><span class="bd-emoji">${emoji}</span><h2>${esc(label)}</h2>${isNew ? '<span class="bd-new">New</span>' : ''}<span class="bd-pill">${pal.label}</span></header>
+  <header><span class="bd-emoji">${emoji}</span><h2>${esc(label)}</h2>${isNew ? '<span class="bd-new">New</span>' : ''}<span class="pill">${pal.label}</span></header>
   <p class="bd-desc">${esc(desc)}</p>
   <div class="bd-stats"><span class="bd-ep">+${ep.toLocaleString()} EP</span><span class="bd-prob" title="Exact share of all inputs 0-1,000,000 that earn this badge">${fmtProb(prob)} of numbers</span></div>
   ${famHTML}
@@ -4716,86 +4673,50 @@ function renderBadgeIndex() {
       `<a class="newbox-chip" href="#${id}">${emoji} ${esc(label)}</a>`).join('')}</div>
   </section>` : '';
 
-  return `<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex">
-<title>RNGdle - Badge Index</title>
-<style>
-  :root {
-    color-scheme: dark;
-    --bg:#08090c; --surface:#131419; --surface-2:#181a20; --border:#24262d; --border-2:#30333c;
-    --text:#e7e8ea; --muted:#8b8e97; --faint:#595c65; --accent:#5b93d6;
-    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  body { font-family:var(--font); background:var(--bg); color:var(--text); margin:0;
-    padding:2.2rem 1.25rem 4rem; line-height:1.5; -webkit-font-smoothing:antialiased; }
-  .wrap { max-width:1100px; margin:0 auto; }
-  h1 { font-size:1.45rem; font-weight:600; letter-spacing:-.02em; margin:0 0 .3rem; }
-  p.tag { color:var(--muted); margin:0 0 1.4rem; font-size:.92rem; }
-  a { color:var(--accent); }
-  .nav { font-size:.85rem; color:var(--muted); margin-bottom:.6rem; }
-  .nav a { text-decoration:none; }
-  .nav a:hover { text-decoration:underline; }
-
+  const css = `
   /* --- toolbar --- */
   .bar { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; align-items:center; gap:.5rem;
     padding:.7rem 0 .6rem; margin-bottom:1rem; background:linear-gradient(var(--bg) 88%, transparent);
     border-bottom:1px solid var(--border); }
-  #q { flex:1 1 200px; min-width:160px; font-size:.92rem; padding:.5rem .7rem; border-radius:8px;
-    border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:inherit; }
-  #q:focus { outline:none; border-color:var(--accent); }
-  .chip { font-family:inherit; font-size:.78rem; font-weight:600; padding:.3rem .65rem; border-radius:999px;
-    cursor:pointer; color:var(--muted); border:1px solid var(--border-2); background:var(--surface-2);
-    transition:color .12s, border-color .12s, background .12s; --tc:var(--accent); }
-  .chip em { font-style:normal; font-weight:500; color:var(--faint); }
-  .chip:hover { border-color:var(--tc); color:var(--text); }
-  .chip.on { color:var(--text); border-color:var(--tc); background:color-mix(in srgb, var(--tc) 16%, var(--surface-2)); }
-  .chip.on em { color:inherit; opacity:.75; }
-  #sort { font-family:inherit; font-size:.85rem; padding:.45rem .55rem; border-radius:8px; cursor:pointer;
-    color:var(--text); border:1px solid var(--border-2); background:var(--surface-2); }
+  #q { flex:1 1 200px; min-width:160px; }
+  #sort { font-size:.85rem; padding:.45rem .55rem; border-color:var(--border-2); background:var(--surface-2); }
   #count { flex-basis:100%; color:var(--faint); font-size:.78rem; }
 
   /* --- cards --- */
   #cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:.7rem; }
-  .bd { border:1px solid var(--border); border-left:3px solid var(--tc); border-radius:10px;
+  .bd { border:1px solid var(--border); border-left:3px solid var(--tc); border-radius:var(--r-card);
     background:var(--surface); padding:.75rem .9rem .8rem; display:flex; flex-direction:column; gap:.4rem;
-    scroll-margin-top:5rem; }
+    scroll-margin-top:4rem; }
   .bd:target { border-color:var(--tc); box-shadow:0 0 0 3px color-mix(in srgb, var(--tc) 25%, transparent); }
   .bd header { display:flex; align-items:center; gap:.5rem; }
   .bd-emoji { font-size:1.25rem; flex:0 0 auto; }
   .bd h2 { flex:1; font-size:1rem; font-weight:600; margin:0; letter-spacing:-.01em; min-width:0; }
-  .bd-pill { flex:0 0 auto; font-size:.64rem; font-weight:700; letter-spacing:.09em; padding:.14rem .5rem;
-    border-radius:999px; color:var(--tc); border:1px solid var(--tc);
-    background:color-mix(in srgb, var(--tc) 14%, transparent); }
   .bd-new { flex:0 0 auto; font-size:.62rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase;
-    padding:.14rem .45rem; border-radius:999px; color:#0a1a10; background:#43d17f; border:1px solid #43d17f; }
-  .bd.is-new { border-color:color-mix(in srgb, #43d17f 45%, var(--border)); }
-  .bd.is-new:target { box-shadow:0 0 0 3px color-mix(in srgb, #43d17f 30%, transparent); }
+    padding:.14rem .45rem; border-radius:var(--r-pill); color:var(--on-ok); background:var(--ok); border:1px solid var(--ok); }
+  .bd.is-new { border-color:color-mix(in srgb, var(--ok) 45%, var(--border)); }
+  .bd.is-new:target { box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 30%, transparent); }
 
   /* --- newly-added banner --- */
-  .newbox { border:1px solid color-mix(in srgb, #43d17f 40%, var(--border)); border-radius:12px;
-    background:color-mix(in srgb, #43d17f 7%, var(--surface)); padding:.85rem 1rem; margin-bottom:1.1rem; }
+  .newbox { border:1px solid color-mix(in srgb, var(--ok) 40%, var(--border)); border-radius:var(--r-card);
+    background:color-mix(in srgb, var(--ok) 7%, var(--surface)); padding:.85rem 1rem; margin-bottom:1.1rem; }
   .newbox-head { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem .7rem; margin-bottom:.6rem; }
   .newbox-tag { font-size:.9rem; font-weight:700; color:#7ee6ab; letter-spacing:.01em; }
   .newbox-date { font-size:.8rem; color:var(--muted); }
-  .newbox-btn { margin-left:auto; font-family:inherit; font-size:.78rem; font-weight:600; cursor:pointer;
-    padding:.32rem .7rem; border-radius:999px; color:#7ee6ab; border:1px solid color-mix(in srgb, #43d17f 45%, var(--border-2));
-    background:transparent; transition:background .12s, color .12s; }
-  .newbox-btn:hover { background:color-mix(in srgb, #43d17f 16%, transparent); color:var(--text); }
-  .newbox-btn.on { background:#43d17f; color:#0a1a10; border-color:#43d17f; }
+  .newbox-btn { margin-left:auto; font-size:.78rem; font-weight:600; padding:.32rem .7rem; border-radius:var(--r-pill);
+    color:#7ee6ab; border-color:color-mix(in srgb, var(--ok) 45%, var(--border-2)); background:transparent; }
+  .newbox-btn:hover { background:color-mix(in srgb, var(--ok) 16%, transparent); color:var(--text);
+    border-color:color-mix(in srgb, var(--ok) 45%, var(--border-2)); }
+  .newbox-btn.on { background:var(--ok); color:var(--on-ok); border-color:var(--ok); }
   .newbox-list { display:flex; flex-wrap:wrap; gap:.4rem; }
-  .newbox-chip { font-size:.8rem; text-decoration:none; padding:.28rem .6rem; border-radius:8px;
+  .newbox-chip { font-size:.8rem; text-decoration:none; padding:.28rem .6rem; border-radius:var(--r-ctl);
     color:var(--text); background:var(--surface-2); border:1px solid var(--border-2); white-space:nowrap; }
-  .newbox-chip:hover { border-color:#43d17f; }
-  .bd-desc { margin:0; font-size:.86rem; color:#c8ccd8; }
+  .newbox-chip:hover { border-color:var(--ok); }
+  .bd-desc { margin:0; font-size:.86rem; color:var(--dim); }
   .bd-stats { display:flex; align-items:baseline; gap:.8rem; font-size:.82rem; }
   .bd-ep { font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; }
   .bd-prob { color:var(--muted); }
   .bd-fam { font-size:.76rem; color:var(--muted); line-height:1.6; }
-  .bd-fam b { color:#c8ccd8; font-weight:600; }
+  .bd-fam b { color:var(--dim); font-weight:600; }
   .bd-fam a { color:var(--muted); text-decoration:none; border-bottom:1px dotted var(--faint); }
   .bd-fam a:hover { color:var(--text); }
   .bd-ex { margin-top:auto; padding-top:.15rem; display:flex; align-items:baseline; gap:.45rem; flex-wrap:wrap;
@@ -4803,15 +4724,11 @@ function renderBadgeIndex() {
   .bd-ex a { text-decoration:none; }
   .bd-ex a:hover { text-decoration:underline; }
   .bd-map { margin-left:auto; white-space:nowrap; }
+  footer { max-width:760px; }`;
 
-  footer { margin-top:2.2rem; color:var(--faint); font-size:.8rem; max-width:760px; line-height:1.7; }
-  footer b { color:var(--muted); font-weight:600; }
-</style></head>
-<body>
-<div class="wrap">
-  <div class="nav"><a href="/">&larr; calculator</a> &nbsp;·&nbsp; <a href="/grid">number grid</a> &nbsp;·&nbsp; <a href="/u">player profiles</a></div>
+  const body = `<div class="wrap">
   <h1>Badge Index</h1>
-  <p class="tag">All ${BADGES.length} badges — how to earn each one, its rarity, EP score, and how many numbers hit it.
+  <p class="tag">All ${BADGES.length} badges - how to earn each one, its rarity, EP score, and how many numbers hit it.
     Example numbers open the calculator; <b>map</b> highlights every earning number on the grid.</p>
   ${newBox}
   <div class="bar">
@@ -4836,8 +4753,9 @@ ${cards}
     the rest are displayed but add 0 EP. <b>&ldquo;% of numbers&rdquo;</b> is the exact share of all
     1,000,001 inputs (0&ndash;1,000,000) that earn the badge.
   </footer>
-</div>
-<script>
+</div>`;
+
+  const script = `
 (function () {
   var grid = document.getElementById('cards');
   var cards = [].slice.call(grid.children);
@@ -4903,9 +4821,11 @@ ${cards}
   window.addEventListener('hashchange', reveal);
   apply();
   reveal();
-})();
-</script>
-</body></html>`;
+})();`;
+
+  return pageShell({
+    title: 'RNGdle - Badge Index', nav: 'badges', width: '1100px', noindex: true, css, body, script,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -4997,72 +4917,51 @@ function profileCopyData(sum) {
       ['streak', `🔥 ${sum.maxStreak.toLocaleString()} Day Max Streak`],
       ['badges', `🏅 ${sum.distinctBadges} Badges`],
       ['ep', `📈 ${sum.totalEP.toLocaleString()} (Total) EP`],
-      ['bestRoll', `🎲 Best Roll: ${b ? `${b.number} (${b.ep.toLocaleString()} EP) on ${fmtDateNumeric(b.at)}` : '—'}`],
+      ['bestRoll', `🎲 Best Roll: ${b ? `${b.number} (${b.ep.toLocaleString()} EP) on ${fmtDateNumeric(b.at)}` : '-'}`],
     ],
   };
 }
 
-// Shared <head> for the profile pages (mirrors the /badges dark theme tokens).
-function profileHead(title) {
-  return `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex"><title>${esc(title)}</title>
-<style>
-  :root { color-scheme:dark; --bg:#08090c; --surface:#131419; --surface-2:#181a20; --border:#24262d;
-    --border-2:#30333c; --text:#e7e8ea; --muted:#8b8e97; --faint:#595c65; --accent:#5b93d6;
-    --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace; }
-  * { box-sizing:border-box; }
-  body { font-family:var(--font); background:var(--bg); color:var(--text); margin:0; padding:2.2rem 1.25rem 4rem;
-    line-height:1.5; -webkit-font-smoothing:antialiased; }
-  .wrap { max-width:920px; margin:0 auto; }
-  a { color:var(--accent); }
-  .nav { font-size:.85rem; color:var(--muted); margin-bottom:.9rem; }
-  .nav a { text-decoration:none; } .nav a:hover { text-decoration:underline; }
-  h1 { font-size:1.5rem; font-weight:600; letter-spacing:-.02em; margin:0 0 .2rem; }
+// Page-specific CSS for /u and /u/<name>; everything else comes from src/ui.js.
+const PROFILE_CSS = `
+  h1 { font-size:1.5rem; margin:0 0 .2rem; }
   h1 .at { color:var(--faint); font-weight:400; }
   .phead { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; }
-  .copy-btn { flex:0 0 auto; font-family:inherit; font-size:.85rem; font-weight:600; cursor:pointer; white-space:nowrap;
-    padding:.5rem .85rem; border-radius:8px; color:var(--text); background:var(--surface-2);
-    border:1px solid var(--border-2); transition:border-color .12s, background .12s, color .12s; }
-  .copy-btn:hover { border-color:var(--accent); }
-  .copy-btn.ok { color:#0a1a10; background:#43d17f; border-color:#43d17f; }
+  .copy-btn { font-size:.85rem; font-weight:600; white-space:nowrap; padding:.5rem .85rem; }
+  .copy-btn:hover { border-color:var(--accent); background:var(--surface-2); }
+  .copy-btn.ok { color:var(--on-ok); background:var(--ok); border-color:var(--ok); }
   .pbtns { position:relative; display:flex; gap:.4rem; flex:0 0 auto; align-items:flex-start; }
   .cfg-btn { padding:.5rem .6rem; }
   .cfg-modal { position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:1rem; }
   .cfg-modal[hidden] { display:none; }
   .cfg-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.62); }
   .cfg-dialog { position:relative; width:min(880px,100%); max-height:88vh; overflow:auto; background:var(--surface);
-    border:1px solid var(--border-2); border-radius:14px; padding:1rem 1.15rem 1.15rem; box-shadow:0 18px 48px rgba(0,0,0,.6); }
+    border:1px solid var(--border-2); border-radius:var(--r-hero); padding:1rem 1.15rem 1.15rem; box-shadow:0 18px 48px rgba(0,0,0,.6); }
   .cfg-head { display:flex; align-items:center; justify-content:space-between; margin:0 0 .8rem; }
   .cfg-head h3 { font-size:.72rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0; }
-  .cfg-x { background:none; border:none; color:var(--muted); font-size:.95rem; cursor:pointer; padding:.2rem .35rem; border-radius:6px; }
-  .cfg-x:hover { color:var(--text); background:var(--surface-2); }
+  .cfg-x { background:none; border:none; color:var(--muted); font-size:.95rem; padding:.2rem .35rem; border-radius:var(--r-sm); }
+  .cfg-x:hover { color:var(--text); background:var(--surface-2); border:none; }
   .cfg-body { display:grid; grid-template-columns:1fr 1.25fr; gap:1.2rem; align-items:start; }
   @media (max-width:640px) { .cfg-body { grid-template-columns:1fr; } }
   .cfg-preview h4 { font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); margin:0 0 .45rem; }
   .cfg-preview pre { margin:0; font-family:var(--mono); font-size:.74rem; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere;
-    background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:.7rem .8rem; }
+    background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-card); padding:.7rem .8rem; }
   .cfg-foot { display:flex; justify-content:space-between; align-items:center; gap:.6rem; margin-top:1.1rem; }
   .cfg-reset { color:var(--muted); font-weight:500; }
   .cfg-reset:hover { color:var(--text); }
   .cfg-row { display:flex; gap:.55rem; align-items:flex-start; font-size:.85rem; cursor:pointer; }
-  .cfg-row input { margin:.2rem 0 0; accent-color:var(--accent); flex:0 0 auto; }
+  .cfg-row input { margin:.2rem 0 0; flex:0 0 auto; }
   .cfg-row + .cfg-row { margin-top:.55rem; }
   .cfg-mini + .cfg-mini { margin-top:.3rem; }
   .cfg-mini input { margin-top:.15rem; }
   .cfg-sub { font-size:.66rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); margin:.95rem 0 .5rem; }
   .cfg-sub:first-child { margin-top:0; }
   .cfg-row small { display:block; color:var(--muted); font-size:.74rem; line-height:1.35; margin-top:.1rem; }
-  p.tag { color:var(--muted); margin:.1rem 0 1.5rem; font-size:.92rem; }
+  p.tag { margin:.1rem 0 1.5rem; }
   .uform { display:flex; gap:.5rem; max-width:420px; margin:1rem 0; }
-  .uform input { flex:1; font-size:.95rem; padding:.55rem .7rem; border-radius:8px; border:1px solid var(--border-2);
-    background:var(--surface); color:var(--text); font-family:inherit; }
-  .uform input:focus { outline:none; border-color:var(--accent); }
-  .uform button { font-family:inherit; font-weight:600; font-size:.9rem; padding:.55rem 1rem; border-radius:8px; cursor:pointer;
-    color:#0a1220; background:var(--accent); border:1px solid var(--accent); }
+  .uform input { flex:1; font-size:.95rem; }
   .grid2 { display:grid; grid-template-columns:1.1fr 1fr; gap:1rem; margin-bottom:1.3rem; }
   @media (max-width:680px) { .grid2 { grid-template-columns:1fr; } }
-  .panel { border:1px solid var(--border); border-radius:12px; background:var(--surface); padding:1rem 1.1rem; }
-  .panel h2 { font-size:.78rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin:0 0 .7rem; }
   .tier-row { display:flex; align-items:center; gap:.6rem; padding:.28rem 0; font-size:.92rem; }
   .tier-dot { width:.62rem; height:.62rem; border-radius:50%; flex:0 0 auto; background:var(--tc); box-shadow:0 0 8px var(--tc); }
   .tier-name { font-weight:600; } .tier-pct { color:var(--faint); font-size:.8rem; }
@@ -5071,11 +4970,7 @@ function profileHead(title) {
     font-size:.78rem; color:var(--muted); }
   .tier-row.zero { opacity:.4; }
   .tier-total { margin-top:.35rem; padding-top:.5rem; padding-left:1.22rem; border-top:1px solid var(--border); }
-  .stat { display:flex; align-items:baseline; justify-content:space-between; padding:.4rem 0; border-bottom:1px solid var(--border); }
-  .stat:last-child { border-bottom:none; }
-  .stat .k { color:var(--muted); font-size:.9rem; } .stat .v { font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; }
-  .stat .v small { color:var(--faint); font-weight:400; }
-  .rolls { border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .rolls { border:1px solid var(--border); border-radius:var(--r-card); overflow:hidden; }
   .rolls table { width:100%; border-collapse:collapse; font-size:.88rem; }
   .rolls th { text-align:left; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--faint);
     padding:.55rem .8rem; background:var(--surface-2); font-weight:600; }
@@ -5083,39 +4978,40 @@ function profileHead(title) {
   .rolls tr:hover td { background:var(--surface-2); }
   .rolls .num a { font-family:var(--mono); text-decoration:none; }
   .rolls .num a:hover { text-decoration:underline; }
-  .rp { display:inline-block; font-size:.66rem; font-weight:700; letter-spacing:.05em; padding:.1rem .45rem; border-radius:999px;
-    color:var(--tc); border:1px solid var(--tc); background:color-mix(in srgb, var(--tc) 14%, transparent); }
-  .ep { font-family:var(--mono); } .muted { color:var(--muted); }
-  .err { border:1px solid #7c2d3a; background:color-mix(in srgb,#e5484d 8%,var(--surface)); border-radius:12px; padding:1rem 1.1rem; color:#ffb3b8; }
-</style>`;
+  .ep { font-family:var(--mono); }`;
+
+/** Wrap a profile page body in the shared shell. */
+function profilePage(title, body, script) {
+  return pageShell({
+    title: esc(title), nav: 'profiles', width: '920px', noindex: true,
+    css: PROFILE_CSS, body, script,
+  });
 }
 
 // The username search form (shown at /u with no name, and atop each profile).
 function profileForm(value) {
   return `<form class="uform" action="/u" method="get" onsubmit="var v=this.u.value.trim();if(v){location.href='/u/'+encodeURIComponent(v);}return false;">
     <input name="u" placeholder="rngdle username, e.g. cubityfirst" value="${esc(value || '')}" autocomplete="off" spellcheck="false">
-    <button type="submit">View</button>
+    <button type="submit" class="btn-primary">View</button>
   </form>`;
 }
 
 function renderProfileForm(prefill) {
-  return `<!doctype html><html lang="en"><head>${profileHead('RNGdle - Player Profile')}</head><body><div class="wrap">
-  <div class="nav"><a href="/">&larr; calculator</a> &nbsp;·&nbsp; <a href="/badges">badge index</a></div>
+  return profilePage('RNGdle - Player Profile', `<div class="wrap">
   <h1>Player Profile</h1>
-  <p class="tag">Enter a rngdle.com username to compute their collection summary — tier spread, badges collected,
-    total EP and best roll — scored locally with this tool.</p>
+  <p class="tag">Enter a rngdle.com username to compute their collection summary - tier spread, badges collected,
+    total EP and best roll - scored locally with this tool.</p>
   ${profileForm(prefill)}
-</div></body></html>`;
+</div>`);
 }
 
 function renderProfileError(username, status) {
   const msg = status === 404 ? `No rngdle profile found for <b>${esc(username)}</b>.` : `Couldn't load <b>${esc(username)}</b> from rngdle (status ${status}).`;
-  return `<!doctype html><html lang="en"><head>${profileHead('RNGdle - Profile not found')}</head><body><div class="wrap">
-  <div class="nav"><a href="/u">&larr; profiles</a> &nbsp;·&nbsp; <a href="/">calculator</a></div>
+  return profilePage('RNGdle - Profile not found', `<div class="wrap">
   <h1>Player Profile</h1>
   ${profileForm(username)}
   <div class="err">${msg}</div>
-</div></body></html>`;
+</div>`);
 }
 
 function renderProfile(username, sum) {
@@ -5133,22 +5029,21 @@ function renderProfile(username, sum) {
       <span class="tier-share">100%</span></div>`;
 
   const b = sum.best;
-  const bestHTML = b ? `<a href="/?n=${b.number}">${b.number.toLocaleString()}</a> <small>(${b.ep.toLocaleString()} EP)</small> · ${fmtDate(b.at)}` : '—';
+  const bestHTML = b ? `<a href="/?n=${b.number}">${b.number.toLocaleString()}</a> <small>(${b.ep.toLocaleString()} EP)</small> · ${fmtDate(b.at)}` : '-';
 
   const rows = sum.scored.slice().sort((a, c) => new Date(c.at) - new Date(a.at)).map(r => {
     const acc = TIER_PALETTE[r.tier].accent;
     return `<tr>
       <td class="muted">${fmtDate(r.at)}</td>
       <td class="num"><a href="/?n=${r.number}">${r.number.toLocaleString()}</a></td>
-      <td><span class="rp" style="--tc:${acc}">${TIER_PALETTE[r.tier].label}</span></td>
+      <td><span class="pill" style="--tc:${acc}">${TIER_PALETTE[r.tier].label}</span></td>
       <td class="ep">${r.ep.toLocaleString()}</td>
       <td class="muted">${r.badgeCount ?? ''}</td>
     </tr>`;
   }).join('');
 
   const copyData = profileCopyData(sum);
-  return `<!doctype html><html lang="en"><head>${profileHead('RNGdle - ' + username)}</head><body><div class="wrap">
-  <div class="nav"><a href="/u">&larr; profiles</a> &nbsp;·&nbsp; <a href="/">calculator</a> &nbsp;·&nbsp; <a href="/badges">badge index</a></div>
+  const body = `<div class="wrap">
   <div class="phead">
     <div>
       <h1><span class="at">@</span>${esc(username)}</h1>
@@ -5197,21 +5092,22 @@ function renderProfile(username, sum) {
   </div>
   <script type="application/json" id="copy-data">${JSON.stringify(copyData).replace(/</g, '\\u003c')}</script>
   <div class="grid2">
-    <div class="panel"><h2>Rarity spread</h2>${tierRows}</div>
-    <div class="panel"><h2>Collection</h2>
-      <div class="stat"><span class="k">Total Rolls</span><span class="v">${sum.totalRolls.toLocaleString()}</span></div>
-      <div class="stat"><span class="k">Badges collected</span><span class="v">${sum.distinctBadges} <small>/ ${BADGES.length}</small></span></div>
-      <div class="stat"><span class="k">Total EP</span><span class="v">${sum.totalEP.toLocaleString()}</span></div>
-      <div class="stat"><span class="k">Max streak</span><span class="v">${sum.maxStreak.toLocaleString()} <small>day${sum.maxStreak === 1 ? '' : 's'}</small></span></div>
-      <div class="stat"><span class="k">Best roll</span><span class="v" style="font-weight:500">${bestHTML}</span></div>
+    <div class="card"><h2>Rarity spread</h2>${tierRows}</div>
+    <div class="card"><h2>Collection</h2>
+      <div class="kv"><span class="k">Total Rolls</span><span class="v">${sum.totalRolls.toLocaleString()}</span></div>
+      <div class="kv"><span class="k">Badges collected</span><span class="v">${sum.distinctBadges} <small>/ ${BADGES.length}</small></span></div>
+      <div class="kv"><span class="k">Total EP</span><span class="v">${sum.totalEP.toLocaleString()}</span></div>
+      <div class="kv"><span class="k">Max streak</span><span class="v">${sum.maxStreak.toLocaleString()} <small>day${sum.maxStreak === 1 ? '' : 's'}</small></span></div>
+      <div class="kv"><span class="k">Best roll</span><span class="v" style="font-weight:500">${bestHTML}</span></div>
     </div>
   </div>
   <div class="rolls"><table>
     <thead><tr><th>Date</th><th>Number</th><th>Tier</th><th>EP</th><th>Badges</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
-</div>
-<script>
+</div>`;
+
+  const script = `
 (function () {
   var btn = document.getElementById('copy-btn'), data = document.getElementById('copy-data');
   if (!btn || !data) return;
@@ -5289,9 +5185,9 @@ function renderProfile(username, sum) {
   }
   bindCopy(btn);
   bindCopy(document.getElementById('cfg-copy'));
-})();
-</script>
-</body></html>`;
+})();`;
+
+  return profilePage('RNGdle - ' + username, body, script);
 }
 
 export { compute, BADGES, FAMILIES, engineModuleSource, CARD_TIERS, cardTier };
@@ -5301,14 +5197,15 @@ export default {
     const url = new URL(request.url);
     const raw = url.searchParams.get('n');
 
-    // Browser engine for the client-side "Analyze all scores" Web Worker.
+    // Browser engine for the client-side workers on /, /grid and /chains. It also carries
+    // sweepShared(), the one cached full-range sweep all three of them read.
     if (url.pathname === '/engine.js') {
       // Short browser cache: one page load fetches this up to three times (the worker's
       // module import, the version hash, and sweepAll's shard blob), and 15 min is long
       // enough that they collapse to one origin hit while a scoring change still reaches
-      // everyone within the quarter hour. Both worker caches are keyed by a hash of this
-      // file, so a stale copy self-corrects as soon as the entry expires - keep max-age
-      // well under the analysis cache's 1-day TTL.
+      // everyone within the quarter hour. The shared sweep cache is keyed by a hash of
+      // this file, so a stale copy self-corrects as soon as the entry expires - keep
+      // max-age well under that cache's TTL.
       return new Response(engineModuleSource(), {
         headers: {
           'content-type': 'text/javascript; charset=utf-8',
