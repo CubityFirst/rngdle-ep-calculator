@@ -39,6 +39,12 @@ export const BETA_TOOLS = [
     note: 'Also measures the supersession tax - EP earned but never scored.',
   },
   {
+    slug: 'species', title: 'Species', kind: 'Report',
+    blurb: 'Two numbers with the same badges are the same thing to the scorer. ' +
+      'Grouped that way, the range stops being a line and becomes a population.',
+    note: 'Distinct badge sets, their rank-size curve, and the true one-of-a-kinds.',
+  },
+  {
     slug: 'collector', title: 'The Collector', kind: 'Odds',
     blurb: 'How many rolls to earn all 230 badges - simulated over the real earner ' +
       'sets - against how few numbers would do it if you could pick them.',
@@ -226,6 +232,9 @@ const THUMBS = {
     <path d="M4 36 L60 4" stroke-dasharray="4 3" opacity=".5"/>`,
   spectrum: `<path d="M4 8h56M4 14h56M4 20h56M4 26h56M4 32h56" stroke-dasharray="2 5" opacity=".9"/>
     <path d="M4 11h56M4 17h56M4 23h56M4 29h56" stroke-dasharray="7 3" opacity=".35"/>`,
+  species: `<circle cx="14" cy="20" r="10" opacity=".9"/><circle cx="33" cy="20" r="6" opacity=".6"/>
+    <circle cx="45" cy="20" r="4" opacity=".45"/><circle cx="53" cy="20" r="2.5" opacity=".35"/>
+    <circle cx="59" cy="20" r="1.5" opacity=".25"/>`,
   collector: `<path d="M4 34 C 20 34, 26 12, 40 8 S 56 5, 60 5"/>
     <circle cx="16" cy="29" r="2.2" opacity=".6"/><circle cx="28" cy="17" r="2.2" opacity=".8"/>
     <circle cx="44" cy="7" r="2.2"/><path d="M4 34h56" opacity=".25"/>`,
@@ -3333,6 +3342,287 @@ const __W = ${JSON.stringify(workerSrc(collectorWorker))};
 }
 
 // ---------------------------------------------------------------------------
+// /beta/species - the number space as a taxonomy.
+//
+// Two numbers with exactly the same set of badges are, to the scorer, the same thing:
+// the badge set determines supersession, which determines EP, so they cannot even be
+// told apart by their score. Group all 1,000,001 numbers by that set and the range
+// stops being a line and becomes a population - a few enormous species covering most
+// of it, a long tail of small ones, and some number of true one-of-a-kinds.
+//
+// Grouping is done on the raw 29-byte bitmask, hashed into buckets and compared
+// byte-for-byte inside them, so nothing depends on the hash being collision-free.
+// ---------------------------------------------------------------------------
+
+function speciesWorker() {
+  let bits = null, ROW = 0, N = 0, keyOf = null, species = null;
+
+  self.onmessage = async ev => {
+    const m = ev.data;
+    if (m.cmd === 'find') {
+      const s = species[keyOf[m.n]];
+      const sample = [];
+      // Walking the range for members is O(N) but only on demand, and it avoids
+      // holding a member list for all 1,000,001 numbers just to show eight of them.
+      for (let n = 0; n < N && sample.length < 9; n++) if (keyOf[n] === keyOf[m.n]) sample.push(n);
+      self.postMessage({ type: 'found', n: m.n, size: s.count, rank: s.rank, sample });
+      return;
+    }
+    if (m.cmd !== 'init') return;
+    try {
+      const swept = await betaSweep(m.origin, 0.6);
+      bits = swept.bits; ROW = swept.ROW; N = swept.ep.length;
+
+      self.postMessage({ type: 'progress', pct: 0.65, msg: 'Grouping by badge set…' });
+      const buckets = new Map();                  // hash -> [species index, ...]
+      const reps = [], counts = [];
+      keyOf = new Int32Array(N);
+
+      for (let n = 0; n < N; n++) {
+        if ((n & 0x3ffff) === 0) self.postMessage({ type: 'progress', pct: 0.65 + 0.3 * (n / N) });
+        const base = n * ROW;
+        let h = 2166136261;                       // FNV-1a over the mask bytes
+        for (let b = 0; b < ROW; b++) { h ^= bits[base + b]; h = Math.imul(h, 16777619); }
+        h = h >>> 0;
+        let list = buckets.get(h), found = -1;
+        if (list) {
+          outer: for (const si of list) {
+            const rb = reps[si] * ROW;
+            for (let b = 0; b < ROW; b++) if (bits[rb + b] !== bits[base + b]) continue outer;
+            found = si; break;
+          }
+        } else { list = []; buckets.set(h, list); }
+        if (found < 0) { found = reps.length; reps.push(n); counts.push(0); list.push(found); }
+        counts[found]++;
+        keyOf[n] = found;
+      }
+
+      // Rank by population, and hand back the head of the list plus the rank-size
+      // curve, which is the shape that says whether this is a few big groups or a
+      // genuine long tail.
+      const order = Array.from(counts.keys()).sort((a, b) => counts[b] - counts[a]);
+      species = new Array(reps.length);
+      order.forEach((si, r) => { species[si] = { count: counts[si], rank: r + 1 }; });
+
+      const top = order.slice(0, 40).map(si => ({ n: reps[si], count: counts[si], ep: swept.ep[reps[si]],
+        badges: swept.cnt[reps[si]] }));
+      const sizes = order.map(si => counts[si]);
+      let singles = 0;
+      for (const c of counts) if (c === 1) singles++;
+      self.postMessage({ type: 'ready', total: reps.length, singles, N, top, sizes });
+    } catch (e) {
+      self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
+    }
+  };
+}
+
+function speciesClient(WORKER_SRC, TIERS) {
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.round(n).toLocaleString();
+  const compact = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(1) + 'k' : fmt(n);
+  const tierOf = ep => { let t = TIERS[0]; for (const x of TIERS) if (ep >= x.lo) t = x; return t; };
+  let W = null, D = null;
+
+  // Rank-size on log-log: a straight line here would mean a scale-free population,
+  // and the shape it actually has is the finding.
+  function zipf(sizes) {
+    const CW = 760, H = 260, M = { l: 52, r: 14, t: 14, b: 34 };
+    const lgR = Math.log10(sizes.length), lgS = Math.log10(sizes[0]);
+    const cx = r => M.l + (Math.log10(r) / lgR) * (CW - M.l - M.r);
+    const cy = s => H - M.b - (Math.log10(s) / lgS) * (H - M.t - M.b);
+    const pts = [];
+    // One point per pixel column: 60,000 species would otherwise be 60,000 vertices.
+    let last = -1;
+    for (let r = 1; r <= sizes.length; r++) {
+      const x = Math.round(cx(r));
+      if (x === last) continue;
+      last = x;
+      pts.push(`${x},${cy(sizes[r - 1]).toFixed(1)}`);
+    }
+    const g = [];
+    for (let e = 0; e <= Math.ceil(lgR); e++) {
+      const x = cx(Math.pow(10, e));
+      if (x > CW - M.r) continue;
+      g.push(`<line class="grid" x1="${x.toFixed(1)}" y1="${M.t}" x2="${x.toFixed(1)}" y2="${H - M.b}"/>`);
+      g.push(`<text class="ax" x="${x.toFixed(1)}" y="${H - M.b + 15}" text-anchor="middle">${compact(Math.pow(10, e))}</text>`);
+    }
+    for (let e = 0; e <= Math.ceil(lgS); e++) {
+      const y = cy(Math.pow(10, e));
+      if (y < M.t) continue;
+      g.push(`<line class="grid" x1="${M.l}" y1="${y.toFixed(1)}" x2="${CW - M.r}" y2="${y.toFixed(1)}"/>`);
+      g.push(`<text class="ax" x="${M.l - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${compact(Math.pow(10, e))}</text>`);
+    }
+    g.push(`<polyline class="cline" points="${pts.join(' ')}"/>`);
+    $('zipf').innerHTML = `<svg viewBox="0 0 ${CW} ${H}" role="img"
+      aria-label="Species population against rank, both logarithmic">${g.join('')}
+      <text class="axl" x="${M.l + (CW - M.l - M.r) / 2}" y="${H - 3}" text-anchor="middle">species by rank (log)</text>
+      <text class="axl" transform="translate(12 ${M.t + (H - M.t - M.b) / 2}) rotate(-90)" text-anchor="middle">numbers in it (log)</text>
+    </svg>`;
+  }
+
+  function top(list) {
+    $('top').innerHTML = list.map((s, i) => {
+      const t = tierOf(s.ep);
+      return `<a class="srow" href="/?n=${s.n}">
+        <span class="sr">${i + 1}</span>
+        <span class="sn">${s.n.toLocaleString()}<em>${s.badges} badge${s.badges === 1 ? '' : 's'} · ${fmt(s.ep)} EP</em></span>
+        <span class="pill" style="--tc:${t.accent}">${t.label}</span>
+        <span class="sc">${fmt(s.count)}<i>${(100 * s.count / D.N).toFixed(2)}%</i></span>
+      </a>`;
+    }).join('');
+  }
+
+  $('find-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const n = parseInt(($('find').value || '').replace(/\D/g, ''), 10);
+    if (!Number.isInteger(n) || n < 0 || n >= D.N) {
+      $('found').innerHTML = '<p class="err">Give me a number from 0 to 1,000,000.</p>';
+      return;
+    }
+    $('found').innerHTML = '<div class="loading"><span class="spinner"></span>Looking…</div>';
+    W.postMessage({ cmd: 'find', n });
+  });
+
+  function found(m) {
+    const others = m.sample.filter(x => x !== m.n);
+    $('found').innerHTML = `
+      <div class="fh"><b>${m.n.toLocaleString()}</b> belongs to species
+        <b>#${fmt(m.rank)}</b> of ${fmt(D.total)}</div>
+      <div class="tiles">
+        <div class="stat stat-lg"><span class="k">Numbers like it</span><span class="v">${fmt(m.size)}</span>
+          <span class="sub">${m.size === 1 ? 'one of a kind' : 'share its exact badge set'}</span></div>
+        <div class="stat stat-lg"><span class="k">Share of the range</span><span class="v">${
+          (100 * m.size / D.N).toFixed(m.size < 100 ? 5 : 3)}%</span>
+          <span class="sub">scores exactly this way</span></div>
+      </div>
+      ${others.length ? `<div class="fsame">Same badge set: ${
+        others.map(x => `<a href="/?n=${x}">${x.toLocaleString()}</a>`).join(' · ')}${
+        m.size > others.length + 1 ? ` and ${fmt(m.size - others.length - 1)} more` : ''}</div>` : ''}`;
+  }
+
+  betaBoot(WORKER_SRC, m => { if (m.type === 'found') found(m); }).then(({ worker, data }) => {
+    W = worker; D = data;
+    $('page').classList.add('on');
+    const biggest = data.top[0];
+    // Number-weighted, not species-weighted: "how many numbers share YOUR badge set"
+    // is the question a player has, and it is not the mean species size.
+    let acc = 0, medianShare = 1;
+    for (const s of data.sizes) { acc += s; if (acc >= data.N / 2) { medianShare = s; break; } }
+    let half = 0, run = 0;
+    while (run < data.N / 2 && half < data.sizes.length) run += data.sizes[half++];
+
+    $('stats').innerHTML = `
+      <div class="stat stat-lg"><span class="k">Distinct kinds</span><span class="v">${fmt(data.total)}</span>
+        <span class="sub">badge sets across ${fmt(data.N)} numbers</span></div>
+      <div class="stat stat-lg"><span class="k">One of a kind</span><span class="v">${fmt(data.singles)}</span>
+        <span class="sub">${(100 * data.singles / data.N).toFixed(1)}% of all numbers score like nothing else</span></div>
+      <div class="stat stat-lg"><span class="k">Biggest kind</span><span class="v">${compact(biggest.count)}</span>
+        <span class="sub">numbers, out of a million - ${biggest.badges} badges each</span></div>
+      <div class="stat stat-lg"><span class="k">A typical number</span><span class="v">${
+        medianShare === 1 ? 'unique' : fmt(medianShare)}</span>
+        <span class="sub">${medianShare === 1 ? 'the median number shares with nobody'
+          : 'numbers share the median badge set'}</span></div>`;
+    zipf(data.sizes);
+    top(data.top);
+    $('halfline').textContent =
+      `It takes the ${fmt(half)} most common kinds - ${(100 * half / data.total).toFixed(0)}% of them - ` +
+      `to account for half of all ${fmt(data.N)} numbers. There is no small set of common cases here: ` +
+      `the badge rules are discriminating enough that most numbers really are their own thing.`;
+  });
+}
+
+function renderSpecies(ctx) {
+  const { CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE } = ctx;
+  const tiers = CARD_TIER_NAMES.map((key, i) => ({
+    label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
+    lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
+  }));
+
+  const css = `
+  #page { display:none; }
+  #page.on { display:block; }
+  #stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:.6rem; margin-bottom:1.2rem; }
+  #stats .stat, .tiles .stat { min-width:0; overflow-wrap:anywhere; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:.5rem; }
+  .card { margin-bottom:.9rem; }
+  .card > p.small { margin:-.35rem 0 .8rem; font-size:.8rem; color:var(--muted); line-height:1.6; }
+  svg { width:100%; height:auto; display:block; }
+  .grid { stroke:var(--border); stroke-width:1; }
+  .ax { fill:var(--faint); font-size:10px; font-family:var(--mono); }
+  .axl { fill:var(--muted); font-size:11px; }
+  .cline { fill:none; stroke:var(--accent); stroke-width:1.6; }
+
+  #top { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:0 .8rem; }
+  .srow { display:flex; align-items:center; gap:.55rem; padding:.34rem .3rem; text-decoration:none;
+    border-radius:var(--r-sm); color:var(--dim); }
+  .srow:hover { background:var(--surface-2); color:var(--text); }
+  .srow .sr { flex:0 0 1.7rem; font-family:var(--mono); font-size:.72rem; color:var(--faint); }
+  .srow .sn { flex:1; min-width:0; display:flex; flex-direction:column; font-family:var(--mono); font-size:.86rem; }
+  .srow .sn em { font-style:normal; font-size:.7rem; color:var(--faint); font-family:var(--font); }
+  .srow .sc { flex:0 0 auto; text-align:right; font-family:var(--mono); font-size:.8rem; }
+  .srow .sc i { display:block; font-style:normal; font-size:.68rem; color:var(--faint); }
+
+  #find-form { display:flex; gap:.5rem; margin-bottom:.8rem; }
+  #find { flex:1; min-width:0; max-width:16rem; }
+  .fh { font-size:.92rem; margin-bottom:.7rem; }
+  .fh b { font-family:var(--mono); }
+  .fsame { margin-top:.7rem; font-size:.82rem; color:var(--muted); line-height:1.8; }
+  .loading { display:flex; align-items:center; gap:.6rem; color:var(--muted); font-size:.86rem; }
+  #halfline { font-size:.86rem; color:var(--dim); margin:.8rem 0 0; }`;
+
+  const body = `<div class="wrap">
+  <div class="tool-head">
+    <h1>Species <span class="beta-tag">beta</span></h1>
+    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <p class="tag">Two numbers with the same badges are the same thing to the scorer. Grouped that way,
+    the range turns into a population.</p>
+
+  <div id="page">
+    <div id="stats"></div>
+
+    <section class="card">
+      <h2>Rank against size</h2>
+      <p class="small">Every distinct badge set, ordered by how many numbers carry it, on log axes. A
+        straight line would mean the population is scale-free - each kind a fixed fraction of the one
+        above it.</p>
+      <div id="zipf"></div>
+      <p id="halfline"></p>
+    </section>
+
+    <section class="card">
+      <h2>Find a number's kind</h2>
+      <p class="small">How many other numbers score exactly the same way, and which ones.</p>
+      <form id="find-form"><input id="find" type="text" inputmode="numeric" placeholder="e.g. 123456"
+        autocomplete="off"><button type="submit" class="btn-primary btn-sm">Look up</button></form>
+      <div id="found"></div>
+    </section>
+
+    <section class="card">
+      <h2>The commonest kinds</h2>
+      <p class="small">Ranked by population, each shown by its lowest member. Every number in a kind
+        scores identically, so the EP beside each one is the EP of all of them.</p>
+      <div id="top"></div>
+    </section>
+  </div>
+
+  <footer>
+    Numbers are grouped on the raw earned-badge bitmask, before supersession - which is the right
+    granularity, because the badge set is what determines supersession, and therefore EP. Sets are
+    hashed into buckets and then compared byte for byte inside them, so a hash collision cannot merge
+    two kinds. <b>One of a kind</b> counts numbers whose badge set no other number in the range has.
+  </footer>
+</div>
+${overlayHTML('Then grouping all 1,000,001 numbers by their exact badge set.')}`;
+
+  const script = `${BETA_BOOT_JS}
+const __W = ${JSON.stringify(workerSrc(speciesWorker))};
+(${speciesClient.toString()})(__W, ${JSON.stringify(tiers)});`;
+
+  return betaShell({ title: 'RNGdle - Species', width: '900px', slug: 'species', css, body, script });
+}
+
+// ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
 
@@ -3361,4 +3651,5 @@ const RENDERERS = {
   oracle: renderOracle,
   luck: renderLuck,
   collector: renderCollector,
+  species: renderSpecies,
 };
