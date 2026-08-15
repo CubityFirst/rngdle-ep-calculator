@@ -39,6 +39,12 @@ export const BETA_TOOLS = [
     note: 'Also measures the supersession tax - EP earned but never scored.',
   },
   {
+    slug: 'luck', title: 'Luck Lab', kind: 'Odds',
+    blurb: 'What a roll is worth before you make it. Exact tier odds, what your best ' +
+      'should look like after N rolls, and how lucky a real player actually got.',
+    note: 'Closed-form best-of-N off the exact score distribution - nothing simulated.',
+  },
+  {
     slug: 'oracle', title: 'Digit Oracle', kind: 'Interactive',
     blurb: 'Half a number is already worth something. Lock any digits and every ' +
       'remaining choice is re-scored against the numbers that still match.',
@@ -66,13 +72,15 @@ const BETA_CSS = `
     color:var(--hl-lt); border:1px solid color-mix(in srgb, var(--hl) 45%, transparent);
     background:color-mix(in srgb, var(--hl) 14%, transparent); vertical-align:.15em; }
 
-  /* One-time sweep overlay. Identical on every tool so the wait always looks the same. */
-  .ov { position:fixed; inset:0 0 0 var(--rail-w); z-index:30; display:flex; flex-direction:column;
+  /* One-time sweep overlay. Identical on every tool so the wait always looks the same.
+     Prefixed because it is a full-screen fixed layer: a tool that happened to reuse a
+     bare class name here would paint its own markup over the whole page. */
+  .beta-ov { position:fixed; inset:0 0 0 var(--rail-w); z-index:30; display:flex; flex-direction:column;
     align-items:center; justify-content:center; gap:.9rem; background:var(--bg); text-align:center; padding:1rem; }
-  .ov h2 { margin:0; font-size:1rem; font-weight:600; }
-  .ov .progress { width:min(340px, 70vw); }
-  .ov p { margin:0; color:var(--muted); font-size:.82rem; max-width:34rem; }
-  .ov.done { display:none; }
+  .beta-ov h2 { margin:0; font-size:1rem; font-weight:600; }
+  .beta-ov .progress { width:min(340px, 70vw); }
+  .beta-ov p { margin:0; color:var(--muted); font-size:.82rem; max-width:34rem; }
+  .beta-ov.done { display:none; }
 
   /* Tool header used by the document-shell pages. */
   .tool-head { display:flex; align-items:flex-start; gap:.7rem; margin-bottom:.2rem; }
@@ -96,7 +104,7 @@ function betaShell(o) {
 
 // The standard overlay markup. `what` is the one-line explanation under the bar.
 function overlayHTML(what) {
-  return `<div class="ov" id="ov">
+  return `<div class="beta-ov" id="ov">
   <h2 id="ovhead">Scoring 1,000,000 numbers…</h2>
   <div class="progress"><i id="ovbar"></i></div>
   <p id="ovtext">${what} One-time - the result is cached in this browser and shared with the other tools.</p>
@@ -212,6 +220,8 @@ const THUMBS = {
     <path d="M4 36 L60 4" stroke-dasharray="4 3" opacity=".5"/>`,
   spectrum: `<path d="M4 8h56M4 14h56M4 20h56M4 26h56M4 32h56" stroke-dasharray="2 5" opacity=".9"/>
     <path d="M4 11h56M4 17h56M4 23h56M4 29h56" stroke-dasharray="7 3" opacity=".35"/>`,
+  luck: `<path d="M4 34 C 14 34, 18 30, 22 20 S 28 4, 33 4 S 40 12, 45 22 S 54 34, 60 34"/>
+    <path d="M45 34v-8M52 34v-4" opacity=".45"/>`,
   oracle: `<rect x="4" y="6" width="10" height="28" rx="2" opacity=".3"/>
     <rect x="17" y="6" width="10" height="28" rx="2" opacity=".95"/>
     <rect x="30" y="6" width="10" height="28" rx="2" opacity=".3"/>
@@ -2572,6 +2582,373 @@ const __W = ${JSON.stringify(workerSrc(oracleWorker))};
 }
 
 // ---------------------------------------------------------------------------
+// /beta/luck - the odds of a roll, and whether yours were any good.
+//
+// Every other tool here is about the numbers. This one is about the player: the sweep
+// is the exact distribution of EP over the whole roll space, so every question of the
+// "how likely was that?" kind has a closed-form answer rather than a simulated one.
+//
+// The one that matters is best-of-N. If F is the EP distribution then the best of N
+// independent rolls is below x with probability F(x)^N, which gives both the typical
+// best for a given number of rolls AND, read the other way, exactly how lucky a real
+// player's best roll was among everyone else who rolled the same number of times.
+// ---------------------------------------------------------------------------
+
+function luckWorker() {
+  self.onmessage = async ev => {
+    if (ev.data.cmd !== 'init') return;
+    try {
+      const swept = await betaSweep(ev.data.origin, 0.85);
+      const N = swept.ep.length;
+      self.postMessage({ type: 'progress', pct: 0.9, msg: 'Sorting every score…' });
+      // The empirical CDF, as a sorted copy. 8MB, transferred zero-copy, and it lets
+      // the page answer any percentile question exactly instead of interpolating.
+      const sorted = Float64Array.from(swept.ep).sort();
+      const ep = Float64Array.from(swept.ep);
+      self.postMessage({ type: 'ready', sorted: sorted.buffer, ep: ep.buffer, N },
+        [sorted.buffer, ep.buffer]);
+    } catch (e) {
+      self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
+    }
+  };
+}
+
+function luckClient(WORKER_SRC, TIERS) {
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.round(n).toLocaleString();
+  const compact = n => n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(2) + 'M'
+    : n >= 1e4 ? (n / 1e3).toFixed(1) + 'k' : fmt(n);
+  const oneIn = p => p <= 0 ? '-' : p >= 1 ? '1 in 1' : '1 in ' + fmt(1 / p);
+
+  let S = null, EP = null, N = 0;
+
+  // Share of all rolls scoring at or below x, and its inverse.
+  function cdf(x) {
+    let lo = 0, hi = N;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (S[m] <= x) lo = m + 1; else hi = m; }
+    return lo / N;
+  }
+  function quantile(p) { return S[Math.min(N - 1, Math.max(0, Math.round(p * N) - 1))]; }
+  function tierOf(ep) { let t = TIERS[0]; for (const x of TIERS) if (ep >= x.lo) t = x; return t; }
+
+  // --- distribution chart -------------------------------------------------
+  function distribution() {
+    const W = 760, H = 260, M = { l: 44, r: 14, t: 14, b: 40 }, BINS = 150;
+    const lgMax = Math.log10(1 + S[N - 1]);
+    const bins = new Float64Array(BINS);
+    for (let i = 0; i < N; i++) bins[Math.min(BINS - 1, (Math.log10(1 + S[i]) / lgMax * BINS) | 0)]++;
+    const mx = Math.max(...bins);
+    const bx = i => M.l + (i / BINS) * (W - M.l - M.r);
+    const bw = (W - M.l - M.r) / BINS;
+
+    const g = [];
+    // Tier bands behind the bars: the histogram is the shape, the bands are the stakes.
+    for (let t = 0; t < TIERS.length; t++) {
+      const x0 = bx(Math.log10(1 + TIERS[t].lo) / lgMax * BINS);
+      const x1 = t + 1 < TIERS.length ? bx(Math.log10(1 + TIERS[t + 1].lo) / lgMax * BINS) : W - M.r;
+      if (x1 - x0 < 0.5) continue;
+      g.push(`<rect class="band" x="${x0.toFixed(1)}" y="${M.t}" width="${(x1 - x0).toFixed(1)}"
+        height="${H - M.t - M.b}" fill="${TIERS[t].accent}"/>`);
+      if (x1 - x0 > 52) g.push(`<text class="tl" x="${((x0 + x1) / 2).toFixed(1)}" y="${M.t + 12}"
+        text-anchor="middle" fill="${TIERS[t].accent}">${TIERS[t].label}</text>`);
+    }
+    for (let i = 0; i < BINS; i++) {
+      if (!bins[i]) continue;
+      const h = (bins[i] / mx) * (H - M.t - M.b);
+      g.push(`<rect class="bar" x="${bx(i).toFixed(1)}" y="${(H - M.b - h).toFixed(1)}"
+        width="${Math.max(0.6, bw - 0.4).toFixed(2)}" height="${h.toFixed(1)}"/>`);
+    }
+    for (let e = 2; e <= Math.floor(lgMax); e++) {
+      const x = bx(e / lgMax * BINS);
+      g.push(`<text class="ax" x="${x.toFixed(1)}" y="${H - M.b + 15}" text-anchor="middle">${
+        compact(Math.pow(10, e))}</text>`);
+    }
+    $('dist').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img"
+      aria-label="Distribution of EP over all 1,000,001 rolls">${g.join('')}
+      <text class="axl" x="${M.l + (W - M.l - M.r) / 2}" y="${H - 4}" text-anchor="middle">EP of a single roll (log scale)</text>
+    </svg>`;
+  }
+
+  // --- odds table ---------------------------------------------------------
+  function odds() {
+    $('odds').innerHTML = TIERS.slice().reverse().map(t => {
+      const p = 1 - cdf(t.lo - 0.5);              // P(roll lands in this tier or above)
+      const exact = cdf((TIERS[TIERS.indexOf(t) + 1] || { lo: Infinity }).lo - 0.5) - cdf(t.lo - 0.5);
+      return `<div class="orow">
+        <span class="pill" style="--tc:${t.accent}">${t.label}</span>
+        <span class="ol">${t.lo ? fmt(t.lo) + '+ EP' : 'any score'}</span>
+        <span class="obar"><i style="width:${Math.max(0.5, 100 * Math.pow(exact, 0.35)).toFixed(1)}%;background:${t.accent}"></i></span>
+        <span class="oval">${(100 * exact).toFixed(exact < 0.001 ? 4 : 2)}%</span>
+        <span class="oe">${oneIn(p)} or better</span>
+      </div>`;
+    }).join('');
+  }
+
+  // --- best-of-N ----------------------------------------------------------
+  // P(best of n <= x) = F(x)^n, so the median best is the F = 0.5^(1/n) quantile and
+  // the 10-90 band falls straight out the same way.
+  const bestAt = (n, q) => quantile(Math.pow(q, 1 / n));
+
+  function bestOfN() {
+    const n = Number($('rolls').value);
+    $('rollsv').textContent = fmt(n);
+    const med = bestAt(n, 0.5), lo = bestAt(n, 0.1), hi = bestAt(n, 0.9);
+    const pMyth = 1 - Math.pow(cdf(TIERS[TIERS.length - 1].lo - 0.5), n);
+    const t = tierOf(med);
+    $('bon').innerHTML = `
+      <div class="stat stat-lg"><span class="k">Typical best</span><span class="v">${compact(med)}</span>
+        <span class="sub">EP · <span class="pill" style="--tc:${t.accent}">${t.label}</span></span></div>
+      <div class="stat stat-lg"><span class="k">Unlucky / lucky</span><span class="v">${compact(lo)} - ${compact(hi)}</span>
+        <span class="sub">the middle 80% of players</span></div>
+      <div class="stat stat-lg"><span class="k">At least one ${TIERS[TIERS.length - 1].label.toLowerCase()}</span>
+        <span class="v">${(100 * pMyth).toFixed(pMyth < 0.001 ? 3 : 1)}%</span>
+        <span class="sub">${oneIn(pMyth)} players</span></div>`;
+
+    // The whole curve, so the slider has context rather than three numbers in a vacuum.
+    const W = 760, H = 170, M = { l: 52, r: 12, t: 12, b: 28 };
+    const maxN = 10000, lgN = Math.log10(maxN);
+    const lgMax = Math.log10(1 + S[N - 1]);
+    const cx = k => M.l + (Math.log10(k) / lgN) * (W - M.l - M.r);
+    const cy = v => H - M.b - (Math.log10(1 + v) / lgMax) * (H - M.t - M.b);
+    const pts = [], band = [];
+    for (let k = 1; k <= maxN; k = k < 10 ? k + 1 : Math.round(k * 1.18)) {
+      pts.push(`${cx(k).toFixed(1)},${cy(bestAt(k, 0.5)).toFixed(1)}`);
+      band.push([cx(k), cy(bestAt(k, 0.9)), cy(bestAt(k, 0.1))]);
+    }
+    const top = band.map(b => `${b[0].toFixed(1)},${b[1].toFixed(1)}`).join(' ');
+    const bot = band.slice().reverse().map(b => `${b[0].toFixed(1)},${b[2].toFixed(1)}`).join(' ');
+    $('curve').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Typical best score against number of rolls">
+      <polygon class="cband" points="${top} ${bot}"/>
+      <polyline class="cline" points="${pts.join(' ')}"/>
+      <line class="cmark" x1="${cx(n).toFixed(1)}" y1="${M.t}" x2="${cx(n).toFixed(1)}" y2="${H - M.b}"/>
+      ${[1, 10, 100, 1000, 10000].map(k =>
+        `<text class="ax" x="${cx(k).toFixed(1)}" y="${H - 8}" text-anchor="middle">${k >= 1000 ? (k / 1000) + 'k' : k}</text>`).join('')}
+      <text class="axl" x="4" y="${M.t + 8}">best EP</text>
+    </svg>`;
+  }
+
+  // --- your rolls ---------------------------------------------------------
+  function analyse(nums, label) {
+    const valid = nums.filter(n => Number.isInteger(n) && n >= 0 && n < N);
+    if (!valid.length) {
+      $('verdict').innerHTML = '<p class="err">No usable numbers - give me integers from 0 to 1,000,000.</p>';
+      return;
+    }
+    const rows = valid.map(n => ({ n, ep: EP[n], p: cdf(EP[n]) })).sort((a, b) => b.ep - a.ep);
+    const k = rows.length;
+    const best = rows[0];
+    // Two independent readings of the same rolls: how good the single best one was
+    // among players with the same number of rolls, and whether the whole set drifted
+    // high or low (percentiles are uniform, so their mean has a known spread).
+    const beatShare = Math.pow(best.p, k);
+    const meanP = rows.reduce((s, r) => s + r.p, 0) / k;
+    const z = (meanP - 0.5) / Math.sqrt(1 / 12 / k);
+    const par = bestAt(k, 0.5);
+    const verdict = beatShare >= 0.999 ? 'extraordinary' : beatShare >= 0.99 ? 'very lucky'
+      : beatShare >= 0.75 ? 'lucky' : beatShare >= 0.25 ? 'about par'
+      : beatShare >= 0.01 ? 'unlucky' : 'brutal';
+
+    $('verdict').innerHTML = `
+      <div class="vhead"><b>${label}</b><span>${fmt(k)} roll${k === 1 ? '' : 's'}</span></div>
+      <div class="vstats">
+        <div class="stat stat-lg"><span class="k">Best roll</span><span class="v">${compact(best.ep)}</span>
+          <span class="sub">EP · <a href="/?n=${best.n}">${best.n.toLocaleString()}</a>
+            · ${(100 * best.p).toFixed(3)}th percentile</span></div>
+        <div class="stat stat-lg"><span class="k">Luckier than</span><span class="v">${(100 * beatShare).toFixed(1)}%</span>
+          <span class="sub">of players with ${fmt(k)} rolls - <b>${verdict}</b></span></div>
+        <div class="stat stat-lg"><span class="k">Par for ${fmt(k)} rolls</span><span class="v">${compact(par)}</span>
+          <span class="sub">EP · what a median player's best would be</span></div>
+        <div class="stat stat-lg"><span class="k">Overall drift</span><span class="v">${z >= 0 ? '+' : ''}${z.toFixed(2)}σ</span>
+          <span class="sub">mean percentile ${(100 * meanP).toFixed(1)} vs 50 expected</span></div>
+      </div>
+      <div class="strip" title="every roll by percentile, left = worst">${
+        rows.slice().sort((a, b) => a.p - b.p).map(r =>
+          `<i style="left:${(100 * r.p).toFixed(3)}%;background:${tierOf(r.ep).accent}"
+            title="${r.n.toLocaleString()} · ${fmt(r.ep)} EP · ${(100 * r.p).toFixed(2)}th"></i>`).join('')}</div>
+      <div class="stripax"><span>worst possible</span><span>median</span><span>best possible</span></div>
+      <div class="vlist">${rows.slice(0, 8).map(r => {
+        const t = tierOf(r.ep);
+        return `<a class="vrow" href="/?n=${r.n}"><span class="vn">${r.n.toLocaleString()}</span>
+          <span class="pill" style="--tc:${t.accent}">${t.label}</span>
+          <span class="vp">${(100 * r.p).toFixed(2)}th</span>
+          <span class="ve">${fmt(r.ep)} EP</span></a>`;
+      }).join('')}</div>`;
+  }
+
+  $('paste-go').addEventListener('click', () => {
+    const nums = ($('paste').value.match(/\d+/g) || []).map(Number);
+    analyse(nums, 'Pasted rolls');
+  });
+  $('user-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const u = $('user').value.trim();
+    if (!u) return;
+    $('verdict').innerHTML = '<div class="loading"><span class="spinner"></span>Loading rolls…</div>';
+    try {
+      const r = await fetch('/api/profile?u=' + encodeURIComponent(u));
+      const d = await r.json();
+      if (!r.ok || !d.scored) throw new Error(d.error || 'could not load that player');
+      analyse(d.scored.map(s => s.number), d.username || u);
+    } catch (err) {
+      $('verdict').innerHTML = `<p class="err">${err.message}</p>`;
+    }
+  });
+  $('rolls').addEventListener('input', bestOfN);
+
+  betaBoot(WORKER_SRC).then(({ data }) => {
+    S = new Float64Array(data.sorted); EP = new Float64Array(data.ep); N = data.N;
+    $('page').classList.add('on');
+    $('head').innerHTML = `
+      <div class="stat stat-lg"><span class="k">Median roll</span><span class="v">${fmt(quantile(0.5))}</span>
+        <span class="sub">EP · half of all numbers score less</span></div>
+      <div class="stat stat-lg"><span class="k">Mean roll</span><span class="v">${
+        fmt(S.reduce((a, b) => a + b, 0) / N)}</span><span class="sub">EP · dragged up by the tail</span></div>
+      <div class="stat stat-lg"><span class="k">Top 1% starts at</span><span class="v">${fmt(quantile(0.99))}</span>
+        <span class="sub">EP</span></div>
+      <div class="stat stat-lg"><span class="k">Best possible</span><span class="v">${compact(S[N - 1])}</span>
+        <span class="sub">EP · one number in the range</span></div>`;
+    distribution(); odds(); bestOfN();
+    // ?u=name deep-links straight into an analysis, so a profile page can point here.
+    const u = new URLSearchParams(location.search).get('u');
+    if (u) { $('user').value = u; $('user-form').dispatchEvent(new Event('submit')); }
+  });
+}
+
+function renderLuck(ctx) {
+  const { CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE } = ctx;
+  const tiers = CARD_TIER_NAMES.map((key, i) => ({
+    label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
+    lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
+  }));
+
+  const css = `
+  #page { display:none; }
+  #page.on { display:block; }
+  #head { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:.6rem; margin-bottom:1.2rem; }
+  .card { margin-bottom:.9rem; }
+  .card > p.small { margin:-.35rem 0 .8rem; font-size:.8rem; color:var(--muted); line-height:1.6; }
+  svg { width:100%; height:auto; display:block; }
+  .ax { fill:var(--faint); font-size:10px; font-family:var(--mono); }
+  .axl { fill:var(--muted); font-size:11px; }
+  .band { opacity:.13; }
+  .tl { font-size:8.5px; font-weight:700; letter-spacing:.09em; opacity:.85; }
+  .bar { fill:var(--dim); }
+
+  .orow { display:grid; grid-template-columns:5.6rem 6.5rem 1fr 4.4rem 9rem; align-items:center; gap:.6rem;
+    padding:.32rem .2rem; font-size:.82rem; }
+  .orow .ol { color:var(--muted); font-family:var(--mono); font-size:.76rem; }
+  .orow .obar { height:8px; border-radius:var(--r-pill); background:var(--surface-2); overflow:hidden; }
+  .orow .obar i { display:block; height:100%; }
+  .orow .oval { text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .orow .oe { text-align:right; color:var(--faint); font-family:var(--mono); font-size:.75rem; }
+  @media (max-width:720px) { .orow { grid-template-columns:5.6rem 1fr 4.4rem; } .orow .ol, .orow .oe { display:none; } }
+
+  #curve { margin-top:.9rem; }
+  #bon { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); gap:.5rem; }
+  #bon .stat { min-width:0; overflow-wrap:anywhere; }
+  .slider { display:flex; align-items:center; gap:.7rem; margin-bottom:.8rem; }
+  .slider input { flex:1; }
+  .slider b { font-family:var(--mono); min-width:4rem; text-align:right; }
+  .cband { fill:color-mix(in srgb, var(--accent) 18%, transparent); }
+  .cline { fill:none; stroke:var(--accent); stroke-width:1.6; }
+  .cmark { stroke:var(--hl); stroke-width:1.2; stroke-dasharray:3 3; }
+
+  .inputs { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:.8rem; margin-bottom:.9rem; }
+  @media (max-width:720px) { .inputs { grid-template-columns:1fr; } }
+  .inputs label { display:block; font-size:.72rem; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--faint); font-weight:600; margin-bottom:.3rem; }
+  #user-form { display:flex; gap:.5rem; }
+  #user { flex:1; min-width:0; }
+  #paste { width:100%; height:64px; resize:vertical; font-family:var(--mono); font-size:.8rem; }
+  #paste-go { margin-top:.4rem; }
+
+  .vhead { display:flex; align-items:baseline; gap:.6rem; margin-bottom:.7rem; }
+  .vhead b { font-size:1rem; }
+  .vhead span { color:var(--muted); font-size:.82rem; }
+  .vstats { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:.5rem; margin-bottom:1rem; }
+  .vstats .stat { min-width:0; overflow-wrap:anywhere; }
+  .strip { position:relative; height:26px; border-radius:var(--r-sm); background:
+    linear-gradient(90deg, var(--surface-2), var(--surface-3)); border:1px solid var(--border); }
+  .strip i { position:absolute; top:3px; width:3px; height:18px; border-radius:2px; margin-left:-1.5px; opacity:.9; }
+  .stripax { display:flex; justify-content:space-between; margin:.25rem 0 .9rem; font-size:.7rem; color:var(--faint); }
+  .vrow { display:flex; align-items:center; gap:.6rem; padding:.3rem .35rem; text-decoration:none;
+    border-radius:var(--r-sm); color:var(--dim); }
+  .vrow:hover { background:var(--surface-2); color:var(--text); }
+  .vrow .vn { flex:1; font-family:var(--mono); font-size:.88rem; }
+  .vrow .vp, .vrow .ve { font-family:var(--mono); font-size:.76rem; color:var(--faint); }
+  .loading { display:flex; align-items:center; gap:.6rem; color:var(--muted); font-size:.86rem; }`;
+
+  const body = `<div class="wrap">
+  <div class="tool-head">
+    <h1>Luck Lab <span class="beta-tag">beta</span></h1>
+    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <p class="tag">What a roll is worth before you make it - and how lucky yours actually were.</p>
+
+  <div id="page">
+    <div id="head"></div>
+
+    <section class="card">
+      <h2>What a single roll scores</h2>
+      <p class="small">Every one of the 1,000,001 legal rolls, binned by EP on a log axis, with the card
+        tiers shaded behind. Nearly everything lands in the crowded middle; the tiers that matter are
+        the thin tail on the right.</p>
+      <div id="dist"></div>
+    </section>
+
+    <section class="card">
+      <h2>Tier odds per roll</h2>
+      <p class="small">Read down the percentages: 1%, 4%, 5%, 15%, 25%, 49%. The card tiers are not
+        placed at round EP values at all - they are cut at round <b>percentiles</b> of this exact
+        distribution, which is why the thresholds themselves look so arbitrary.</p>
+      <div id="odds"></div>
+    </section>
+
+    <section class="card">
+      <h2>Best of N rolls</h2>
+      <p class="small">The best of N independent rolls is below a score with probability F(score) to the
+        power N - so the whole curve of "how good should my best be by now" is exact, not simulated.</p>
+      <div class="slider"><span class="muted">Rolls</span>
+        <input id="rolls" type="range" min="1" max="2000" value="50">
+        <b id="rollsv">50</b></div>
+      <div id="bon"></div>
+      <div id="curve"></div>
+    </section>
+
+    <section class="card">
+      <h2>How lucky were yours?</h2>
+      <p class="small">Look up a player, or paste any list of numbers. Each roll is scored against the
+        exact distribution above, so nothing here is an estimate.</p>
+      <div class="inputs">
+        <div><label for="user">rngdle player</label>
+          <form id="user-form"><input id="user" type="text" placeholder="username" autocomplete="off">
+            <button type="submit" class="btn-primary btn-sm">Check</button></form></div>
+        <div><label for="paste">or paste rolls</label>
+          <textarea id="paste" placeholder="123456, 696969, 100000&#10;one per line or comma separated"></textarea>
+          <button type="button" id="paste-go" class="btn-sm">Analyse</button></div>
+      </div>
+      <div id="verdict"></div>
+    </section>
+  </div>
+
+  <footer>
+    <b>Luckier than</b> is F(your best) raised to the power of your roll count: the exact share of
+    players with the same number of rolls whose best would come in below yours. <b>Overall drift</b> is
+    a z-score on the mean percentile of every roll - percentiles are uniform by construction, so their
+    mean has a known spread and any real streak of good or bad luck shows up as sigma. Player rolls come
+    from rngdle's public API and are scored here, locally.
+  </footer>
+</div>
+${overlayHTML('Then sorting all 1,000,001 scores into the exact distribution behind every number here.')}`;
+
+  const script = `${BETA_BOOT_JS}
+const __W = ${JSON.stringify(workerSrc(luckWorker))};
+(${luckClient.toString()})(__W, ${JSON.stringify(tiers)});`;
+
+  return betaShell({ title: 'RNGdle - Luck Lab', width: '900px', slug: 'luck', css, body, script });
+}
+
+// ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
 
@@ -2598,4 +2975,5 @@ const RENDERERS = {
   economy: renderEconomy,
   spectrum: renderSpectrum,
   oracle: renderOracle,
+  luck: renderLuck,
 };
