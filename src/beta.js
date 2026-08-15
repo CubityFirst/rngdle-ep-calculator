@@ -19,6 +19,8 @@ import { pageShell } from './ui.js';
 // `render` is looked up from RENDERERS below (declared after the renderers exist).
 // ---------------------------------------------------------------------------
 
+// Reading order, not registry order: the three pictures of the range first, then the
+// one you drive, then the two about odds, then the two written up as findings.
 export const BETA_TOOLS = [
   {
     slug: 'atlas', title: 'EP Atlas', kind: '3D',
@@ -27,34 +29,16 @@ export const BETA_TOOLS = [
     note: 'WebGL2 - orbit, zoom, click to land on a number.',
   },
   {
+    slug: 'spectrum', title: 'Badge Spectrum', kind: '2D',
+    blurb: 'Every badge as a density stripe across the full range. Digit-length rules ' +
+      'step at each power of ten, modular rules band, exact badges are one lit pixel.',
+    note: '230 stripes, orderable by how evenly each rule is spread.',
+  },
+  {
     slug: 'pairs', title: 'Badge Affinity', kind: 'Matrix',
     blurb: 'Which badges travel together. A 230x230 co-occurrence matrix over every ' +
       'number, plus the conditional odds - given this badge, what else did you get?',
     note: 'Lift, P(B|A) and Jaccard, orderable by family or by cluster.',
-  },
-  {
-    slug: 'economy', title: 'Badge Economy', kind: 'Report',
-    blurb: 'Is every badge priced correctly? Plots what each badge pays against how ' +
-      'rare it actually is, and ranks the biggest over- and under-payers.',
-    note: 'Also measures the supersession tax - EP earned but never scored.',
-  },
-  {
-    slug: 'species', title: 'Species', kind: 'Report',
-    blurb: 'Two numbers with the same badges are the same thing to the scorer. ' +
-      'Grouped that way, the range stops being a line and becomes a population.',
-    note: 'Distinct badge sets, their rank-size curve, and the true one-of-a-kinds.',
-  },
-  {
-    slug: 'collector', title: 'The Collector', kind: 'Odds',
-    blurb: 'How many rolls to earn all 230 badges - simulated over the real earner ' +
-      'sets - against how few numbers would do it if you could pick them.',
-    note: 'Exact collection curve, plus a greedy cover of the whole badge list.',
-  },
-  {
-    slug: 'luck', title: 'Luck Lab', kind: 'Odds',
-    blurb: 'What a roll is worth before you make it. Exact tier odds, what your best ' +
-      'should look like after N rolls, and how lucky a real player actually got.',
-    note: 'Closed-form best-of-N off the exact score distribution - nothing simulated.',
   },
   {
     slug: 'oracle', title: 'Digit Oracle', kind: 'Interactive',
@@ -63,10 +47,28 @@ export const BETA_TOOLS = [
     note: 'Mean EP behind all 60 digit-position choices, conditional on what you know.',
   },
   {
-    slug: 'spectrum', title: 'Badge Spectrum', kind: '2D',
-    blurb: 'Every badge as a density stripe across the full range. Periodic rules ' +
-      'show up as banding, digit-length rules as hard steps.',
-    note: '230 stripes, sortable, with a zoomable readout.',
+    slug: 'luck', title: 'Luck Lab', kind: 'Odds',
+    blurb: 'What a roll is worth before you make it. Exact tier odds, what your best ' +
+      'should look like after N rolls, and how lucky a real player actually got.',
+    note: 'Closed-form best-of-N off the exact score distribution - nothing simulated.',
+  },
+  {
+    slug: 'collector', title: 'The Collector', kind: 'Odds',
+    blurb: 'How many rolls to earn all 230 badges - simulated over the real earner ' +
+      'sets - against how few numbers would do it if you could pick them.',
+    note: 'Exact collection curve, plus a greedy cover of the whole badge list.',
+  },
+  {
+    slug: 'economy', title: 'Badge Economy', kind: 'Report',
+    blurb: 'Every badge turns out to be priced at exactly 100 / its own odds, so all ' +
+      '230 are worth the same per roll. Only supersession breaks the tie.',
+    note: 'The price law, and what families cost in EP that is earned but never paid.',
+  },
+  {
+    slug: 'species', title: 'Species', kind: 'Report',
+    blurb: 'Two numbers with the same badges are the same thing to the scorer. ' +
+      'Grouped that way, the range stops being a line and becomes a population.',
+    note: 'Distinct badge sets, their rank-size curve, and the true one-of-a-kinds.',
   },
 ];
 
@@ -260,7 +262,7 @@ export function renderBetaIndex() {
     </a>`).join('');
 
   const css = `
-  #cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(330px, 1fr)); gap:.8rem; }
+  #cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(330px,100%),1fr)); gap:.8rem; }
   .tool { display:flex; flex-direction:column; text-decoration:none; color:inherit; overflow:hidden;
     border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface);
     transition:border-color .12s, transform .12s, background .12s; }
@@ -484,7 +486,7 @@ function pairsClient(WORKER_SRC, META, FAMS, PAL) {
   const octx = off.getContext('2d');
   const img = octx.createImageData(B, B);
   const BAND = 10;                              // family colour strips along both edges
-  let CELL = 3, PAD = 0;
+  let CELL = 3, PAD = 0, SCALE = 1;             // SCALE: drawn px per CSS px (narrow screens)
 
   // 40 families + standalone: a repeating but locally-distinct hue set, only ever read
   // as "same block / different block", so exact hues do not matter.
@@ -514,12 +516,16 @@ function pairsClient(WORKER_SRC, META, FAMS, PAL) {
     const card = cv.parentElement;
     const cs = getComputedStyle(card);
     const inner = card.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-    const avail = Math.max(240, Math.min(inner, 760));
+    const avail = inner > 40 ? Math.min(inner, 760) : 700;
+    // Below 2px a cell stops being visible at all, so on a narrow screen the matrix
+    // is drawn at 2px and then scaled down by CSS rather than shrunk further.
     CELL = Math.max(2, Math.floor((avail - BAND - 2) / B));
     const side = B * CELL, total = side + BAND + 2;
+    const shown = Math.min(total, avail);
+    SCALE = total / shown;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     cv.width = total * dpr; cv.height = total * dpr;
-    cv.style.width = total + 'px'; cv.style.height = total + 'px';
+    cv.style.width = shown + 'px'; cv.style.height = shown + 'px';
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     PAD = BAND + 2;
 
@@ -694,7 +700,8 @@ function pairsClient(WORKER_SRC, META, FAMS, PAL) {
   // --- events ------------------------------------------------------------
   function cellAt(ev) {
     const r = cv.getBoundingClientRect();
-    const x = ev.clientX - r.left - PAD, y = ev.clientY - r.top - PAD;
+    // SCALE undoes the CSS downscale applied when the matrix cannot fit at 2px cells.
+    const x = (ev.clientX - r.left) * SCALE - PAD, y = (ev.clientY - r.top) * SCALE - PAD;
     const c = Math.floor(x / CELL), rw = Math.floor(y / CELL);
     if (c < 0 || rw < 0 || c >= B || rw >= B) return null;
     return { i: order[rw], j: order[c] };
@@ -767,7 +774,7 @@ function renderPairs(ctx) {
   /* Both tracks are fr-sized (with a 0 minimum) so the matrix column's width comes from
      the grid, never from the canvas inside it - see draw()'s measurement note. */
   .cols { display:grid; grid-template-columns:minmax(0,730px) minmax(0,1fr); gap:1rem; align-items:start; }
-  @media (max-width:1000px) { .cols { grid-template-columns:1fr; } }
+  @media (max-width:1000px) { .cols { grid-template-columns:minmax(0,1fr); } }
 
   .mxcard { padding:.8rem; display:flex; flex-direction:column; gap:.6rem; align-items:center; }
   #mx { display:block; max-width:100%; cursor:crosshair; border-radius:var(--r-sm); }
@@ -805,7 +812,7 @@ function renderPairs(ctx) {
   .sh-name { flex:1; min-width:0; display:flex; flex-direction:column; }
   .sh-name b { font-size:1rem; font-weight:600; }
   .sh-name span { font-size:.74rem; color:var(--muted); }
-  .sh-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:.4rem; }
+  .sh-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.4rem; }
   .sh-links { display:flex; gap:.8rem; margin-top:.7rem; font-size:.78rem; }
 
   .prow { display:flex; align-items:center; gap:.5rem; width:100%; text-align:left; padding:.32rem .45rem;
@@ -1770,7 +1777,7 @@ function renderEconomy(ctx) {
   const css = `
   #report { display:none; }
   #report.on { display:block; }
-  #stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px,1fr)); gap:.6rem; margin-bottom:1.2rem; }
+  #stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(190px,100%),1fr)); gap:.6rem; margin-bottom:1.2rem; }
 
   .chartcard { padding:1rem 1.1rem 1.2rem; margin-bottom:1.2rem; }
   #chart svg { width:100%; height:auto; display:block; }
@@ -1787,7 +1794,7 @@ function renderEconomy(ctx) {
   .chart-note b { color:var(--dim); font-weight:600; }
   .swatch { display:inline-block; width:22px; border-top:1.4px dashed var(--hl); vertical-align:.25em; }
 
-  .grid2 { display:grid; grid-template-columns:repeat(auto-fit, minmax(330px,1fr)); gap:.8rem; margin-bottom:.8rem; }
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(330px,100%),1fr)); gap:.8rem; margin-bottom:.8rem; }
   .card > p.small { margin:-.35rem 0 .7rem; font-size:.78rem; color:var(--muted); line-height:1.55; }
   .erow { display:flex; align-items:center; gap:.55rem; padding:.34rem .3rem; text-decoration:none;
     border-radius:var(--r-sm); color:var(--dim); }
@@ -2009,9 +2016,11 @@ function spectrumClient(WORKER_SRC, META, FAMS, PAL) {
     octx.putImageData(img, 0, 0);
 
     const gut = 12;                                // family colour gutter on the left
-    // Floor the width: the first draw can land before the card is laid out, and a
-    // zero-width canvas silently keeps its 300px default rather than erroring.
-    const cw = Math.max(280, cv.parentElement.clientWidth - 2);
+    // The floor is only for the not-yet-laid-out case (clientWidth 0, where a canvas
+    // silently keeps its 300px default instead of erroring) - a real narrow
+    // measurement has to win, or the canvas widens the page on a phone.
+    const measured = cv.parentElement.clientWidth - 2;
+    const cw = measured > 40 ? measured : 280;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     cv.style.width = cw + 'px'; cv.style.height = (B * RH) + 'px';
     cv.width = cw * dpr; cv.height = B * RH * dpr;
@@ -2163,8 +2172,8 @@ function renderSpectrum(ctx) {
   .bar label { font-size:.78rem; color:var(--muted); }
   .bar select { font-size:.85rem; padding:.4rem .5rem; }
 
-  .cols { display:grid; grid-template-columns:minmax(0,1fr) 330px; gap:1rem; align-items:start; }
-  @media (max-width:1000px) { .cols { grid-template-columns:1fr; } }
+  .cols { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,330px); gap:1rem; align-items:start; }
+  @media (max-width:1000px) { .cols { grid-template-columns:minmax(0,1fr); } }
   .speccard { padding:.7rem; position:relative; }
   #spec { display:block; cursor:crosshair; border-radius:var(--r-sm); }
   .xax { display:flex; justify-content:space-between; margin:.4rem 0 0 12px; font-size:.7rem;
@@ -2505,9 +2514,9 @@ function renderOracle(ctx) {
   #pattern i { font-style:normal; color:var(--faint); }
 
   .cols { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,320px); gap:1rem; align-items:start; }
-  @media (max-width:980px) { .cols { grid-template-columns:1fr; } }
+  @media (max-width:980px) { .cols { grid-template-columns:minmax(0,1fr); } }
 
-  #board { display:grid; grid-template-columns:repeat(6,1fr); gap:.5rem; transition:opacity .12s; }
+  #board { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:.5rem; transition:opacity .12s; }
   #board.working { opacity:.55; }
   .col { display:flex; flex-direction:column; gap:.3rem; min-width:0; }
   .chead { height:34px; display:flex; align-items:center; justify-content:center; }
@@ -2842,7 +2851,7 @@ function renderLuck(ctx) {
   const css = `
   #page { display:none; }
   #page.on { display:block; }
-  #head { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:.6rem; margin-bottom:1.2rem; }
+  #head { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(180px,100%),1fr)); gap:.6rem; margin-bottom:1.2rem; }
   .card { margin-bottom:.9rem; }
   .card > p.small { margin:-.35rem 0 .8rem; font-size:.8rem; color:var(--muted); line-height:1.6; }
   svg { width:100%; height:auto; display:block; }
@@ -2862,7 +2871,7 @@ function renderLuck(ctx) {
   @media (max-width:720px) { .orow { grid-template-columns:5.6rem 1fr 4.4rem; } .orow .ol, .orow .oe { display:none; } }
 
   #curve { margin-top:.9rem; }
-  #bon { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); gap:.5rem; }
+  #bon { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(130px,100%),1fr)); gap:.5rem; }
   #bon .stat { min-width:0; overflow-wrap:anywhere; }
   .slider { display:flex; align-items:center; gap:.7rem; margin-bottom:.8rem; }
   .slider input { flex:1; }
@@ -2872,7 +2881,7 @@ function renderLuck(ctx) {
   .cmark { stroke:var(--hl); stroke-width:1.2; stroke-dasharray:3 3; }
 
   .inputs { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:.8rem; margin-bottom:.9rem; }
-  @media (max-width:720px) { .inputs { grid-template-columns:1fr; } }
+  @media (max-width:720px) { .inputs { grid-template-columns:minmax(0,1fr); } }
   .inputs label { display:block; font-size:.72rem; letter-spacing:.06em; text-transform:uppercase;
     color:var(--faint); font-weight:600; margin-bottom:.3rem; }
   #user-form { display:flex; gap:.5rem; }
@@ -2883,7 +2892,7 @@ function renderLuck(ctx) {
   .vhead { display:flex; align-items:baseline; gap:.6rem; margin-bottom:.7rem; }
   .vhead b { font-size:1rem; }
   .vhead span { color:var(--muted); font-size:.82rem; }
-  .vstats { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:.5rem; margin-bottom:1rem; }
+  .vstats { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(160px,100%),1fr)); gap:.5rem; margin-bottom:1rem; }
   .vstats .stat { min-width:0; overflow-wrap:anywhere; }
   .strip { position:relative; height:26px; border-radius:var(--r-sm); background:
     linear-gradient(90deg, var(--surface-2), var(--surface-3)); border:1px solid var(--border); }
@@ -3245,12 +3254,12 @@ function renderCollector(ctx) {
   .cline { fill:none; stroke:var(--accent); stroke-width:1.8; }
   .cmark { stroke:var(--hl); stroke-width:1.2; stroke-dasharray:3 3; }
 
-  .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:.5rem; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(150px,100%),1fr)); gap:.5rem; }
   .tiles .stat { min-width:0; overflow-wrap:anywhere; }
   .slider { display:flex; align-items:center; gap:.7rem; margin:.9rem 0 .8rem; }
   .slider input { flex:1; }
   .slider b { font-family:var(--mono); min-width:5rem; text-align:right; }
-  .two { display:grid; grid-template-columns:repeat(auto-fit, minmax(320px,1fr)); gap:.9rem; }
+  .two { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(320px,100%),1fr)); gap:.9rem; }
 
   .mrow, .crow { display:flex; align-items:center; gap:.55rem; padding:.32rem .3rem; text-decoration:none;
     border-radius:var(--r-sm); color:var(--dim); }
@@ -3263,7 +3272,7 @@ function renderCollector(ctx) {
   .crow .ci { flex:0 0 1.6rem; font-family:var(--mono); font-size:.72rem; color:var(--faint); }
   .crow .cn { flex:1; font-family:var(--mono); font-size:.88rem; }
   .crow .cg { font-family:var(--mono); font-size:.76rem; color:var(--ok); }
-  #coverlist { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px,1fr)); gap:0 .5rem;
+  #coverlist { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(180px,100%),1fr)); gap:0 .5rem;
     margin-top:.7rem; }
 
   #dhist { display:flex; align-items:flex-end; gap:1px; height:90px; padding:.2rem; margin-top:.8rem;
@@ -3541,9 +3550,9 @@ function renderSpecies(ctx) {
   const css = `
   #page { display:none; }
   #page.on { display:block; }
-  #stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:.6rem; margin-bottom:1.2rem; }
+  #stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(180px,100%),1fr)); gap:.6rem; margin-bottom:1.2rem; }
   #stats .stat, .tiles .stat { min-width:0; overflow-wrap:anywhere; }
-  .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:.5rem; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(160px,100%),1fr)); gap:.5rem; }
   .card { margin-bottom:.9rem; }
   .card > p.small { margin:-.35rem 0 .8rem; font-size:.8rem; color:var(--muted); line-height:1.6; }
   svg { width:100%; height:auto; display:block; }
@@ -3552,7 +3561,7 @@ function renderSpecies(ctx) {
   .axl { fill:var(--muted); font-size:11px; }
   .cline { fill:none; stroke:var(--accent); stroke-width:1.6; }
 
-  #top { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:0 .8rem; }
+  #top { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(300px,100%),1fr)); gap:0 .8rem; }
   .srow { display:flex; align-items:center; gap:.55rem; padding:.34rem .3rem; text-decoration:none;
     border-radius:var(--r-sm); color:var(--dim); }
   .srow:hover { background:var(--surface-2); color:var(--text); }

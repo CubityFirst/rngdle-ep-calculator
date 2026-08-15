@@ -47,7 +47,8 @@ Types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `chore`.
 
 Scopes are optional but preferred; the ones in use: `card` (the click-to-type
 number card on `/`), `badges` (`/badges` index), `grid`, `analysis`, `profiles`
-(`/u`), `engine`, `gen` (generator/snapshots), `research`.
+(`/u`), `beta` (the `/beta` lab in `src/beta.js`), `engine`, `gen`
+(generator/snapshots), `research`.
 
 Examples:
 

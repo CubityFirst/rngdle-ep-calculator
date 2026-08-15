@@ -23,4 +23,7 @@ CONTRIBUTING.md. Pre-2026-07-21 history uses an older style; don't rewrite it.
 - Badge rules are at full parity with rngdle.com; don't "simplify" a `test` or the
   prod-ported `p*` helpers without re-checking parity (see README "Rules").
 - `FAMILY_NAMES` in `src/index.js` is index-aligned with `FAMILIES` - keep them in sync.
+- `src/beta.js` (the `/beta` lab) must not import from `src/index.js` - index.js imports
+  it, so an edge back would be a cycle. Everything it needs arrives through `betaCtx()`.
+  New tools need a `BETA_TOOLS` entry *and* a `RENDERERS` entry or the route 404s.
 - Wrangler is invoked via npm scripts / `npx wrangler`, never a global install.

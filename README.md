@@ -19,6 +19,8 @@ npm test             # run the badge-logic test harness
   and example numbers (each linking into the calculator, plus a link to that badge's
   `/grid` highlight view). Searchable, filterable by rarity, sortable by EP /
   rarity / name.
+- **Beta lab:** `GET /beta` - an index of experimental data-vis and insight tools, each at
+  `/beta/<tool>`. See below.
 - **JSON API:** `GET /api?n=696969` →
   `{ number, totalEP, count, badges: [{ id, label, emoji, ep, rarity }] }`
 - **Browser engine:** `GET /engine.js` - an ES module (`computeLean`, `BADGE_META`,
@@ -60,6 +62,36 @@ single-threaded sweep with an identical result.
   `number,totalEP,rarity`;
   *Examples per badge (.txt)* lists example numbers for every badge. Use **Full** resolution
   for complete examples (6-digit-only badges are missed by sampling).
+
+## Beta lab (`/beta`)
+
+Experimental tools, all in `src/beta.js`, all reading the **same** cached full-range
+sweep as `/`, `/grid` and `/chains` (`sweepShared` in `engine.js`). Nothing here is
+precomputed on the server, so every one of them tracks the live badge rules; the sweep
+runs once per browser and every tool after that is instant.
+
+Each tool is a dedicated Web Worker that sweeps and derives, plus a page that only
+draws - so neither the sweep nor a heavy derivation (a 230×230 co-occurrence pass is
+~100M operations) ever touches the main thread. `betaBoot` / `betaSweep` in `beta.js`
+are the two halves of that protocol.
+
+| Route | What it is |
+| --- | --- |
+| `/beta/atlas` | The 1000×1000 map as WebGL2 **terrain** - EP or badge count as height, card tier as colour. One mesh with no vertex attributes: the vertex shader derives position from `gl_VertexID` and fetches everything from one `RGBA32F` texture. Picking renders a second pass through a projection that blows the pixel under the cursor up to fill a 1×1 framebuffer. |
+| `/beta/spectrum` | Every badge as a **density stripe** across the range - one row per badge, one column per thousand numbers. Digit-length rules step at each power of ten, modular rules band, exact badges are a single lit pixel. Orderable by an entropy measure of how evenly a rule is spread. |
+| `/beta/pairs` | **Badge affinity**: how often each of the ~26k badge pairs lands on the same number, read as lift, `P(B|A)`, Jaccard or a raw count. Orderable by family or by average-linkage cluster. |
+| `/beta/oracle` | **Digit oracle**: lock any digits of a six-digit number and all 60 digit-position choices are re-scored against only the numbers that still match. |
+| `/beta/luck` | **Roll odds**: the exact EP distribution, tier odds, closed-form best-of-N, and a luck reading for a real player's rolls (via `/api/profile`, scored locally). |
+| `/beta/collector` | **Coupon collector**: rolls needed to earn all 230 badges, simulated over the real earner sets, against a greedy cover of the same badge list. |
+| `/beta/economy` | **Badge pricing**, written up as a finding: EP turns out to be exactly `100 / P(earn)` for every badge, so supersession is the only thing that varies. |
+| `/beta/species` | The range grouped by **exact badge set** - distinct kinds, their rank-size curve, and the numbers that score like nothing else. |
+
+Two things worth knowing about the code:
+
+- Tool pages are marked `noindex` and the routes are not linked from the main tools;
+  the only entry point is the rail's **Beta lab** item.
+- The shared loading overlay is `.beta-ov`, deliberately prefixed: it is a full-screen
+  fixed layer, so a tool reusing a bare class name would paint over the whole page.
 
 ## Generated snapshot files (`npm run gen`)
 
