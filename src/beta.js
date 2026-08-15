@@ -39,6 +39,12 @@ export const BETA_TOOLS = [
     note: 'Also measures the supersession tax - EP earned but never scored.',
   },
   {
+    slug: 'collector', title: 'The Collector', kind: 'Odds',
+    blurb: 'How many rolls to earn all 230 badges - simulated over the real earner ' +
+      'sets - against how few numbers would do it if you could pick them.',
+    note: 'Exact collection curve, plus a greedy cover of the whole badge list.',
+  },
+  {
     slug: 'luck', title: 'Luck Lab', kind: 'Odds',
     blurb: 'What a roll is worth before you make it. Exact tier odds, what your best ' +
       'should look like after N rolls, and how lucky a real player actually got.',
@@ -220,6 +226,9 @@ const THUMBS = {
     <path d="M4 36 L60 4" stroke-dasharray="4 3" opacity=".5"/>`,
   spectrum: `<path d="M4 8h56M4 14h56M4 20h56M4 26h56M4 32h56" stroke-dasharray="2 5" opacity=".9"/>
     <path d="M4 11h56M4 17h56M4 23h56M4 29h56" stroke-dasharray="7 3" opacity=".35"/>`,
+  collector: `<path d="M4 34 C 20 34, 26 12, 40 8 S 56 5, 60 5"/>
+    <circle cx="16" cy="29" r="2.2" opacity=".6"/><circle cx="28" cy="17" r="2.2" opacity=".8"/>
+    <circle cx="44" cy="7" r="2.2"/><path d="M4 34h56" opacity=".25"/>`,
   luck: `<path d="M4 34 C 14 34, 18 30, 22 20 S 28 4, 33 4 S 40 12, 45 22 S 54 34, 60 34"/>
     <path d="M45 34v-8M52 34v-4" opacity=".45"/>`,
   oracle: `<rect x="4" y="6" width="10" height="28" rx="2" opacity=".3"/>
@@ -2949,6 +2958,381 @@ const __W = ${JSON.stringify(workerSrc(luckWorker))};
 }
 
 // ---------------------------------------------------------------------------
+// /beta/collector - how long it takes to earn every badge.
+//
+// Two different questions, and the gap between the answers is the whole point:
+//
+//   Rolling at random, how many rolls until you have seen all 230 at least once?
+//   If you could CHOOSE your numbers, how few would you need?
+//
+// The first is a weighted coupon-collector problem. The expected count after n rolls
+// is exactly the sum over badges of 1 - (1 - p)^n, which needs no simulation; the
+// completion TIME does, because the badges are far from independent - a family's
+// members mostly arrive together, and the rarest badges cluster on the same handful of
+// numbers. So the simulation draws from the actual earner sets rather than from
+// independent geometrics, which would give a badly wrong answer.
+//
+// The second is a set cover. Greedy over the sweep's per-badge example numbers gives a
+// legitimate upper bound in a few hundred thousand operations - not proof of the
+// minimum, but enough to show how absurd the ratio is.
+// ---------------------------------------------------------------------------
+
+function collectorWorker() {
+  const RARE_MAX = 2000;                          // "rare" = earned by <= this many numbers
+  const RUNS = 240;
+
+  self.onmessage = async ev => {
+    if (ev.data.cmd !== 'init') return;
+    try {
+      const swept = await betaSweep(ev.data.origin, 0.6);
+      const bits = swept.bits, ROW = swept.ROW, N = swept.ep.length;
+      const B = E.BADGE_META.length;
+
+      const earn = new Float64Array(B);
+      const idx = new Int32Array(256);
+      for (let n = 0; n < N; n++) {
+        const k = betaEarned(bits, n * ROW, ROW, idx);
+        for (let a = 0; a < k; a++) earn[idx[a]]++;
+      }
+
+      // --- the rare set, and every number that carries one of them ---------
+      // Everything outside it is earned by >= RARE_MAX numbers, i.e. within a few
+      // hundred rolls with near-certainty, so it never decides the completion time.
+      self.postMessage({ type: 'progress', pct: 0.7, msg: 'Finding the rare badges…' });
+      const rare = [];
+      for (let i = 0; i < B; i++) if (earn[i] > 0 && earn[i] <= RARE_MAX) rare.push(i);
+      const rareOf = new Int32Array(B).fill(-1);
+      rare.forEach((b, i) => { rareOf[b] = i; });
+
+      // CSR: member[m] is a number, and flat[off[m]..off[m+1]] are the rare badges on it.
+      const members = [], off = [0], flat = [];
+      for (let n = 0; n < N; n++) {
+        const k = betaEarned(bits, n * ROW, ROW, idx);
+        let any = false;
+        for (let a = 0; a < k; a++) {
+          const r = rareOf[idx[a]];
+          if (r >= 0) { flat.push(r); any = true; }
+        }
+        if (any) { members.push(n); off.push(flat.length); }
+      }
+      const U = members.length, pHit = U / N;
+
+      // --- completion time -------------------------------------------------
+      // Each union hit is a uniform draw from `members`; the rolls between hits are
+      // geometric, and by the time a run finishes there are thousands of them, so the
+      // total is summed with a normal approximation rather than drawn one at a time.
+      self.postMessage({ type: 'progress', pct: 0.82, msg: 'Simulating collections…' });
+      const have = new Uint8Array(rare.length);
+      const times = new Float64Array(RUNS);
+      const sd1 = Math.sqrt(1 - pHit) / pHit;
+      for (let r = 0; r < RUNS; r++) {
+        have.fill(0);
+        let left = rare.length, hits = 0;
+        while (left > 0) {
+          const m = (Math.random() * U) | 0;
+          hits++;
+          for (let j = off[m]; j < off[m + 1]; j++) {
+            if (!have[flat[j]]) { have[flat[j]] = 1; left--; }
+          }
+        }
+        // Sum of `hits` geometrics: mean hits/pHit, sd sd1*sqrt(hits). Box-Muller once.
+        const u1 = Math.max(1e-12, Math.random()), u2 = Math.random();
+        const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+        times[r] = Math.max(hits, hits / pHit + z * sd1 * Math.sqrt(hits));
+        if ((r & 15) === 0) self.postMessage({ type: 'progress', pct: 0.82 + 0.12 * (r / RUNS) });
+      }
+      times.sort();
+
+      // --- greedy set cover over the sweep's example numbers ---------------
+      self.postMessage({ type: 'progress', pct: 0.95, msg: 'Searching for a cover…' });
+      const cand = [...new Set(swept.examples.flat().map(e => e[0]))];
+      const candMask = cand.map(n => {
+        const k = betaEarned(bits, n * ROW, ROW, idx);
+        return Array.from(idx.subarray(0, k));
+      });
+      const covered = new Uint8Array(B);
+      const cover = [];
+      let need = 0;
+      for (let i = 0; i < B; i++) if (earn[i] > 0) need++;
+      while (need > 0) {
+        let bestI = -1, bestGain = 0;
+        for (let c = 0; c < cand.length; c++) {
+          let gain = 0;
+          for (const b of candMask[c]) if (!covered[b]) gain++;
+          if (gain > bestGain) { bestGain = gain; bestI = c; }
+        }
+        if (bestI < 0) break;                     // examples cannot reach the rest
+        for (const b of candMask[bestI]) if (!covered[b]) { covered[b] = 1; need--; }
+        cover.push([cand[bestI], bestGain]);
+      }
+
+      self.postMessage({ type: 'ready', earn: earn.buffer, N, RARE_MAX, rare, U, pHit,
+        times: times.buffer, cover, uncovered: need }, [earn.buffer, times.buffer]);
+    } catch (e) {
+      self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
+    }
+  };
+}
+
+function collectorClient(WORKER_SRC, META, PAL) {
+  const B = META.length;
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.round(n).toLocaleString();
+  const compact = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(0) + 'k' : fmt(n);
+  let EARN = null, N = 0, T = null, D = null;
+
+  // Exact expected number of distinct badges after n rolls - no simulation needed,
+  // because expectation is linear even though the badges are wildly dependent.
+  function expected(n) {
+    let s = 0;
+    for (let i = 0; i < B; i++) {
+      if (!EARN[i]) continue;
+      s += 1 - Math.pow(1 - EARN[i] / N, n);
+    }
+    return s;
+  }
+  const reachable = () => { let c = 0; for (let i = 0; i < B; i++) if (EARN[i]) c++; return c; };
+
+  function curve() {
+    const W = 760, H = 240, M = { l: 46, r: 14, t: 14, b: 34 };
+    const maxLg = 7;                              // 1 .. 10,000,000 rolls
+    const R = reachable();
+    const cx = n => M.l + (Math.log10(n) / maxLg) * (W - M.l - M.r);
+    const cy = v => H - M.b - (v / R) * (H - M.t - M.b);
+    const pts = [];
+    for (let e = 0; e <= maxLg * 40; e++) {
+      const n = Math.pow(10, e / 40);
+      pts.push(`${cx(n).toFixed(1)},${cy(expected(n)).toFixed(1)}`);
+    }
+    const g = [];
+    for (let e = 0; e <= maxLg; e++) {
+      const x = cx(Math.pow(10, e));
+      g.push(`<line class="grid" x1="${x.toFixed(1)}" y1="${M.t}" x2="${x.toFixed(1)}" y2="${H - M.b}"/>`);
+      g.push(`<text class="ax" x="${x.toFixed(1)}" y="${H - M.b + 15}" text-anchor="middle">${
+        e === 0 ? '1' : e < 3 ? Math.pow(10, e) : e < 6 ? Math.pow(10, e - 3) + 'k' : Math.pow(10, e - 6) + 'M'}</text>`);
+    }
+    for (const f of [0.25, 0.5, 0.75, 1]) {
+      const y = cy(R * f);
+      g.push(`<line class="grid" x1="${M.l}" y1="${y.toFixed(1)}" x2="${W - M.r}" y2="${y.toFixed(1)}"/>`);
+      g.push(`<text class="ax" x="${M.l - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${Math.round(R * f)}</text>`);
+    }
+    g.push(`<polyline class="cline" points="${pts.join(' ')}"/>`);
+    g.push(`<line class="cmark" id="cmark" x1="0" y1="${M.t}" x2="0" y2="${H - M.b}"/>`);
+    $('curve').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img"
+      aria-label="Expected badges collected against number of rolls">${g.join('')}
+      <text class="axl" x="${M.l + (W - M.l - M.r) / 2}" y="${H - 3}" text-anchor="middle">rolls (log scale)</text>
+    </svg>`;
+    return { cx, W };
+  }
+
+  let CX = null;
+  function atRolls() {
+    const n = Math.round(Math.pow(10, Number($('nrolls').value) / 20));
+    const e = expected(n), R = reachable();
+    $('nrollsv').textContent = fmt(n);
+    const missing = [];
+    for (let i = 0; i < B; i++) {
+      if (!EARN[i]) continue;
+      const p = Math.pow(1 - EARN[i] / N, n);     // still missing after n rolls
+      if (p > 0.5) missing.push({ i, p });
+    }
+    missing.sort((a, b) => b.p - a.p);
+    $('atn').innerHTML = `
+      <div class="stat stat-lg"><span class="k">Badges by then</span><span class="v">${e.toFixed(1)}</span>
+        <span class="sub">of ${R} reachable</span></div>
+      <div class="stat stat-lg"><span class="k">Still missing</span><span class="v">${(R - e).toFixed(1)}</span>
+        <span class="sub">${missing.length} of them more likely absent than present</span></div>`;
+    $('missing').innerHTML = missing.slice(0, 10).map(m =>
+      `<a class="mrow" href="/badges#${META[m.i][5]}"><span class="me">${META[m.i][1]}</span>
+        <span class="ml">${META[m.i][0]}</span>
+        <span class="mv">${(100 * m.p).toFixed(1)}% absent</span></a>`).join('') ||
+      '<p class="muted small">Every badge is more likely to be in the collection than not.</p>';
+    const mk = document.getElementById('cmark');
+    if (mk && CX) { const x = CX.cx(Math.max(1, n)).toFixed(1); mk.setAttribute('x1', x); mk.setAttribute('x2', x); }
+  }
+
+  function wall() {
+    const rows = [];
+    for (let i = 0; i < B; i++) if (EARN[i]) rows.push({ i, p: EARN[i] / N });
+    rows.sort((a, b) => a.p - b.p);
+    // The one-earner badges are all the same wait, so listing a dozen of them says
+    // nothing. Count them once, then show the rarest that are not in that group.
+    const solo = rows.filter(r => EARN[r.i] === 1);
+    const rest = rows.filter(r => EARN[r.i] > 1);
+    $('wall').innerHTML =
+      (solo.length ? `<p class="small muted"><b>${solo.length} badges are earned by exactly one
+        number</b> in the whole range - ${solo.slice(0, 6).map(r => META[r.i][0]).join(', ')} and
+        ${solo.length - 6} more. Each is a 1-in-${fmt(N)} roll on its own, and between them they set
+        the floor on everything below.</p>` : '') +
+      rest.slice(0, 12).map(r =>
+        `<a class="mrow" href="/badges#${META[r.i][5]}"><span class="me">${META[r.i][1]}</span>
+          <span class="ml">${META[r.i][0]}<em>${fmt(EARN[r.i])} numbers earn it</em></span>
+          <span class="mv">${compact(1 / r.p)} rolls</span></a>`).join('');
+  }
+
+  function completion() {
+    const n = T.length;
+    const q = f => T[Math.min(n - 1, Math.floor(f * n))];
+    $('done').innerHTML = `
+      <div class="stat stat-lg"><span class="k">Typical</span><span class="v">${compact(q(0.5))}</span>
+        <span class="sub">rolls to earn all ${reachable()}</span></div>
+      <div class="stat stat-lg"><span class="k">Lucky 10%</span><span class="v">${compact(q(0.1))}</span>
+        <span class="sub">rolls or fewer</span></div>
+      <div class="stat stat-lg"><span class="k">Unlucky 10%</span><span class="v">${compact(q(0.9))}</span>
+        <span class="sub">rolls or more</span></div>
+      <div class="stat stat-lg"><span class="k">At one a day</span><span class="v">${
+        fmt(q(0.5) / 365)}</span><span class="sub">years, typically</span></div>`;
+
+    // Histogram of the simulated completion times, linear in rolls.
+    const BINS = 40, lo = T[0], hi = T[n - 1], span = (hi - lo) || 1;
+    const bins = new Float64Array(BINS);
+    for (let i = 0; i < n; i++) bins[Math.min(BINS - 1, ((T[i] - lo) / span * BINS) | 0)]++;
+    const mx = Math.max(...bins);
+    $('dhist').innerHTML = Array.from(bins, v =>
+      `<i style="height:${(100 * v / mx).toFixed(1)}%"></i>`).join('');
+    $('dhistax').innerHTML = `<span>${compact(lo)}</span><span>${compact(hi)}</span>`;
+  }
+
+  function coverHTML(cover, uncovered) {
+    $('cover').innerHTML = `
+      <div class="stat stat-lg"><span class="k">Numbers needed</span><span class="v">${cover.length}</span>
+        <span class="sub">to earn all ${reachable()} between them${uncovered ? ` (${uncovered} unreachable)` : ''}</span></div>
+      <div class="stat stat-lg"><span class="k">Versus rolling</span><span class="v">${
+        compact(T[T.length >> 1] / cover.length)}x</span><span class="sub">fewer numbers than the typical run</span></div>`;
+    $('coverlist').innerHTML = cover.map(([n, gain], i) =>
+      `<a class="crow" href="/?n=${n}"><span class="ci">${i + 1}</span>
+        <span class="cn">${n.toLocaleString()}</span>
+        <span class="cg">+${gain}</span></a>`).join('');
+  }
+
+  $('nrolls').addEventListener('input', atRolls);
+
+  betaBoot(WORKER_SRC).then(({ data }) => {
+    EARN = new Float64Array(data.earn); N = data.N; T = new Float64Array(data.times);
+    $('page').classList.add('on');
+    CX = curve();
+    wall(); completion(); atRolls(); coverHTML(data.cover, data.uncovered);
+    $('rareinfo').textContent =
+      `${data.rare.length} badges are earned by ${data.RARE_MAX.toLocaleString()} numbers or fewer; ` +
+      `${data.U.toLocaleString()} numbers in the range carry at least one of them.`;
+  });
+}
+
+function renderCollector(ctx) {
+  const { BADGES, TIER_PALETTE, tierFromScore } = ctx;
+  const meta = BADGES.map(([id, label, emoji, ep]) => [label, emoji, ep, tierFromScore(ep), 0, id]);
+  const pal = Object.fromEntries(Object.entries(TIER_PALETTE).map(([k, v]) => [k, v.accent]));
+
+  const css = `
+  #page { display:none; }
+  #page.on { display:block; }
+  .card { margin-bottom:.9rem; }
+  .card > p.small { margin:-.35rem 0 .8rem; font-size:.8rem; color:var(--muted); line-height:1.6; }
+  .small { font-size:.8rem; line-height:1.6; }
+  svg { width:100%; height:auto; display:block; }
+  .grid { stroke:var(--border); stroke-width:1; }
+  .ax { fill:var(--faint); font-size:10px; font-family:var(--mono); }
+  .axl { fill:var(--muted); font-size:11px; }
+  .cline { fill:none; stroke:var(--accent); stroke-width:1.8; }
+  .cmark { stroke:var(--hl); stroke-width:1.2; stroke-dasharray:3 3; }
+
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:.5rem; }
+  .tiles .stat { min-width:0; overflow-wrap:anywhere; }
+  .slider { display:flex; align-items:center; gap:.7rem; margin:.9rem 0 .8rem; }
+  .slider input { flex:1; }
+  .slider b { font-family:var(--mono); min-width:5rem; text-align:right; }
+  .two { display:grid; grid-template-columns:repeat(auto-fit, minmax(320px,1fr)); gap:.9rem; }
+
+  .mrow, .crow { display:flex; align-items:center; gap:.55rem; padding:.32rem .3rem; text-decoration:none;
+    border-radius:var(--r-sm); color:var(--dim); }
+  .mrow:hover, .crow:hover { background:var(--surface-2); color:var(--text); }
+  .mrow .me { flex:0 0 auto; }
+  .mrow .ml { flex:1; min-width:0; font-size:.85rem; display:flex; flex-direction:column; }
+  .mrow .ml em { font-style:normal; font-size:.72rem; color:var(--faint); font-family:var(--mono); }
+  .mrow .mv { flex:0 0 auto; font-family:var(--mono); font-size:.78rem; color:var(--hl-lt);
+    font-variant-numeric:tabular-nums; }
+  .crow .ci { flex:0 0 1.6rem; font-family:var(--mono); font-size:.72rem; color:var(--faint); }
+  .crow .cn { flex:1; font-family:var(--mono); font-size:.88rem; }
+  .crow .cg { font-family:var(--mono); font-size:.76rem; color:var(--ok); }
+  #coverlist { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px,1fr)); gap:0 .5rem;
+    margin-top:.7rem; }
+
+  #dhist { display:flex; align-items:flex-end; gap:1px; height:90px; padding:.2rem; margin-top:.8rem;
+    background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-sm); }
+  #dhist i { flex:1; background:var(--accent); border-radius:1px 1px 0 0; min-height:1px; }
+  #dhistax { display:flex; justify-content:space-between; margin-top:.25rem; font-size:.7rem;
+    color:var(--faint); font-family:var(--mono); }`;
+
+  const body = `<div class="wrap">
+  <div class="tool-head">
+    <h1>The Collector <span class="beta-tag">beta</span></h1>
+    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <p class="tag">How many rolls it takes to earn every badge - and how few numbers it would take if you
+    could choose them.</p>
+
+  <div id="page">
+    <section class="card">
+      <h2>Rolling at random</h2>
+      <p class="small">Simulated by drawing from the badges' real earner sets, not from independent
+        odds: a family's members mostly arrive on the same number, and pretending otherwise gets this
+        badly wrong. <span id="rareinfo" class="muted"></span></p>
+      <div class="tiles" id="done"></div>
+      <div id="dhist"></div>
+      <div id="dhistax"></div>
+    </section>
+
+    <section class="card">
+      <h2>The collection curve</h2>
+      <p class="small">Expected distinct badges after n rolls. This one is exact - expectation is
+        linear, so the dependence between badges does not matter here at all. The curve is brutal at
+        the top: most of the set arrives in the first few hundred rolls, and the last few take longer
+        than all the rest put together.</p>
+      <div id="curve"></div>
+      <div class="slider"><span class="muted">Rolls</span>
+        <input id="nrolls" type="range" min="0" max="140" value="60">
+        <b id="nrollsv">-</b></div>
+      <div class="two">
+        <div class="tiles" id="atn"></div>
+        <div><h2 class="eyebrow">Probably still missing</h2><div id="missing"></div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>The wall</h2>
+      <p class="small">The badges that decide the whole thing, by how long you would wait for each on
+        its own.</p>
+      <div id="wall"></div>
+    </section>
+
+    <section class="card">
+      <h2>If you could choose</h2>
+      <p class="small">The same collection as a set cover: greedily pick the number that adds the most
+        missing badges, repeat. This is an upper bound found over the sweep's per-badge examples, not a
+        proof of the minimum - but the gap against rolling is the point.</p>
+      <div class="tiles" id="cover"></div>
+      <div id="coverlist"></div>
+    </section>
+  </div>
+
+  <footer>
+    The <b>expected count</b> after n rolls is the sum over badges of 1 - (1 - p)^n, computed from each
+    badge's exact share of the range. The <b>completion time</b> is simulated 240 times over the numbers
+    that actually carry the rare badges, so co-occurring badges arrive together the way they really do;
+    badges earned by more than 2,000 numbers are left out of that simulation because they arrive within
+    a few hundred rolls and never decide the finish.
+  </footer>
+</div>
+${overlayHTML('Then simulating collections and searching for a covering set.')}`;
+
+  const script = `${BETA_BOOT_JS}
+const __W = ${JSON.stringify(workerSrc(collectorWorker))};
+(${collectorClient.toString()})(__W, ${JSON.stringify(meta)}, ${JSON.stringify(pal)});`;
+
+  return betaShell({ title: 'RNGdle - The Collector', width: '900px', slug: 'collector', css, body, script });
+}
+
+// ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
 
@@ -2976,4 +3360,5 @@ const RENDERERS = {
   spectrum: renderSpectrum,
   oracle: renderOracle,
   luck: renderLuck,
+  collector: renderCollector,
 };
