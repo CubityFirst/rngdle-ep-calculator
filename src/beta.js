@@ -116,7 +116,10 @@ function overlayHTML(what) {
 const BETA_BOOT_JS = `
 // Boots a tool worker and resolves with its 'ready' payload. Later messages go to
 // onMsg. The worker is returned on the promise so the page can keep talking to it.
-function betaBoot(workerSrc, onMsg) {
+// Anything in 'init' is merged into the opening message - that is how a tool hands
+// the worker server-rendered data (EP per badge, family map) it would otherwise
+// have to rebuild.
+function betaBoot(workerSrc, onMsg, init) {
   const ov = document.getElementById('ov');
   const bar = document.getElementById('ovbar');
   const head = document.getElementById('ovhead');
@@ -147,7 +150,7 @@ function betaBoot(workerSrc, onMsg) {
       reject(err);
     };
     w.onerror = e => fail(new Error(e.message || 'worker failed'));
-    w.postMessage({ cmd: 'init', origin: location.origin });
+    w.postMessage(Object.assign({ cmd: 'init', origin: location.origin }, init || {}));
   });
 }`;
 
@@ -1435,6 +1438,411 @@ const __W = ${JSON.stringify(workerSrc(atlasWorker))};
 }
 
 // ---------------------------------------------------------------------------
+// /beta/economy - what a badge is actually worth.
+//
+// Plotting EP against how often each badge is earned turns up something the badge
+// table alone never shows: the points do not scatter around a trend, they sit ON a
+// line of slope exactly -1. Every badge in the game is priced at
+//
+//   EP = 100 / P(earn)
+//
+// to within a tenth of a percent - the residual is nothing but EP being rounded to a
+// whole number. So every badge, from Pair at 55% to Deep Void (5) at ten in a million,
+// is worth exactly 100 EP per roll in expectation. On price alone there are no good
+// badges and no bad ones.
+//
+// Which makes the interesting question the other one: what breaks that symmetry? Only
+// supersession does. A badge that loses its family scores nothing, so its real
+// expected value is 100 x (times it pays / times it is earned) - and THAT ranges from
+// 100 down to zero. Measuring it needs the co-earned set for every single number,
+// which is exactly what the sweep has and a per-badge rate does not.
+// ---------------------------------------------------------------------------
+
+function economyWorker() {
+  self.onmessage = async ev => {
+    if (ev.data.cmd !== 'init') return;
+    try {
+      const EP = new Float64Array(ev.data.ep);       // EP per badge
+      const FAM = new Int16Array(ev.data.fam);       // badge -> family index, -1 standalone
+      const swept = await betaSweep(ev.data.origin, 0.6);
+      const bits = swept.bits, ROW = swept.ROW, N = swept.ep.length, B = EP.length;
+
+      const earn = new Float64Array(B);              // numbers that earn it at all
+      const score = new Float64Array(B);             // numbers where it actually pays
+      const nFam = 1 + FAM.reduce((m, f) => Math.max(m, f), -1);
+      const top = new Int32Array(nFam);
+      const idx = new Int32Array(256);
+
+      for (let n = 0; n < N; n++) {
+        if ((n & 0x3ffff) === 0) {
+          self.postMessage({ type: 'progress', pct: 0.6 + 0.4 * (n / N), msg: 'Measuring what each badge really pays…' });
+        }
+        const k = betaEarned(bits, n * ROW, ROW, idx);
+        top.fill(-1);
+        for (let a = 0; a < k; a++) {
+          const i = idx[a];
+          earn[i]++;
+          const f = FAM[i];
+          if (f < 0) { score[i]++; continue; }
+          // Strict >, so the first of an EP tie wins - the same rule compute() uses.
+          if (top[f] < 0 || EP[i] > EP[top[f]]) top[f] = i;
+        }
+        for (let f = 0; f < nFam; f++) if (top[f] >= 0) score[top[f]]++;
+      }
+      self.postMessage({ type: 'ready', earn: earn.buffer, score: score.buffer, N },
+        [earn.buffer, score.buffer]);
+    } catch (e) {
+      self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
+    }
+  };
+}
+
+// META[i] = [label, emoji, ep, tier, familyIndex, id]; PAL = tier -> accent.
+function economyClient(WORKER_SRC, META, FAMS, PAL) {
+  const B = META.length;
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.round(n).toLocaleString();
+  const pctf = p => p === 0 ? '0%' : p >= 1 ? p.toFixed(2) + '%' : p >= 0.01 ? p.toFixed(3) + '%' : p.toFixed(4) + '%';
+
+  let EARN = null, SCORE = null, N = 0, FIT = null, ROWS = [];
+
+  // --- chart: the price law ----------------------------------------------
+  const W = 720, H = 440, M = { l: 62, r: 18, t: 18, b: 46 };
+  const px = v => M.l + (v - FIT.x0) / (FIT.x1 - FIT.x0) * (W - M.l - M.r);
+  const py = v => H - M.b - (v - FIT.y0) / (FIT.y1 - FIT.y0) * (H - M.t - M.b);
+
+  function chart() {
+    const g = [];
+    const xt = [], yt = [];
+    for (let e = Math.ceil(FIT.x0); e <= Math.floor(FIT.x1); e++) xt.push(e);
+    for (let e = Math.ceil(FIT.y0); e <= Math.floor(FIT.y1); e++) yt.push(e);
+
+    for (const e of xt) {
+      const x = px(e);
+      // Exactly as many decimals as this decade needs: 1e-6 of the range is 0.0001%,
+      // and a fixed precision would print that as either 0.0000% or 1.00000000%.
+      const share = (Math.pow(10, e) * 100).toFixed(Math.max(0, -(e + 2)));
+      g.push(`<line class="grid" x1="${x}" y1="${M.t}" x2="${x}" y2="${H - M.b}"/>`);
+      g.push(`<text class="ax" x="${x}" y="${H - M.b + 16}" text-anchor="middle">${share}%</text>`);
+    }
+    for (const e of yt) {
+      const y = py(e), v = Math.pow(10, e);
+      g.push(`<line class="grid" x1="${M.l}" y1="${y}" x2="${W - M.r}" y2="${y}"/>`);
+      g.push(`<text class="ax" x="${M.l - 8}" y="${y + 3.5}" text-anchor="end">${
+        v >= 1e6 ? (v / 1e6) + 'M' : v >= 1e3 ? (v / 1e3) + 'k' : v}</text>`);
+    }
+
+    // No confidence band: the points are ON the line to four figures, so a band wide
+    // enough to draw would only imply a scatter that is not there. The linear residual
+    // chart below is what shows how tight the fit really is.
+    g.push(`<path class="fit" d="M ${px(FIT.x0)} ${py(FIT.a + FIT.b * FIT.x0)} L ${px(FIT.x1)} ${py(FIT.a + FIT.b * FIT.x1)}"/>`);
+
+    const maxShare = Math.max(...ROWS.map(r => r.epShare));
+    for (const r of ROWS) {
+      const rad = 2.2 + 7 * Math.sqrt(r.epShare / (maxShare || 1));
+      g.push(`<circle class="pt${r.score === 0 ? ' dead' : ''}" data-i="${r.i}" cx="${px(r.lx).toFixed(1)}"
+        cy="${py(r.ly).toFixed(1)}" r="${rad.toFixed(2)}" fill="${PAL[META[r.i][3]]}"/>`);
+    }
+    $('chart').innerHTML =
+      `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Badge EP plotted against how often the badge is earned">
+        ${g.join('')}
+        <text class="axl" x="${M.l + (W - M.l - M.r) / 2}" y="${H - 6}" text-anchor="middle">share of all numbers that earn it</text>
+        <text class="axl" transform="translate(14 ${M.t + (H - M.t - M.b) / 2}) rotate(-90)" text-anchor="middle">EP paid</text>
+      </svg>`;
+  }
+
+  // --- tables ------------------------------------------------------------
+  const row = (r, right, sub) => `<a class="erow" href="/badges#${META[r.i][5]}">
+    <span class="ee">${META[r.i][1]}</span>
+    <span class="el">${META[r.i][0]}${sub ? `<em>${sub}</em>` : ''}</span>
+    <span class="ev">${right}</span></a>`;
+
+  // --- chart: the residual, on a linear axis -----------------------------
+  //
+  // The log-log plot is convincing but forgiving - at that scale a badge could be 30%
+  // off the law and still look like it is on the line. This one is the proof: EP x P
+  // per badge, on an axis that spans half a percent, with one lane per rarity tier so
+  // the points do not pile up.
+  function residualChart() {
+    const RW = 720, RH = 168, RM = { l: 84, r: 18, t: 14, b: 34 };
+    const vals = ROWS.map(r => r.ev);
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const pad = (hi - lo) * 0.12 || 0.1;
+    const x0 = lo - pad, x1 = hi + pad;
+    const rx = v => RM.l + (v - x0) / (x1 - x0) * (RW - RM.l - RM.r);
+    const lanes = ['trash', 'common', 'uncommon', 'rare', 'epic', 'anomaly', 'mythic'];
+    const ry = t => RM.t + (lanes.indexOf(t) + 0.5) * ((RH - RM.t - RM.b) / lanes.length);
+
+    // Five ticks across whatever range the data actually spans - which is tiny, so
+    // there is no sensible round-number step to pick in advance.
+    const g = [], ticks = [];
+    for (let k = 0; k <= 4; k++) ticks.push(x0 + k * (x1 - x0) / 4);
+    for (const t of ticks) {
+      g.push(`<line class="grid" x1="${rx(t).toFixed(1)}" y1="${RM.t}" x2="${rx(t).toFixed(1)}" y2="${RH - RM.b}"/>`);
+      g.push(`<text class="ax" x="${rx(t).toFixed(1)}" y="${RH - RM.b + 15}" text-anchor="middle">${t.toFixed(2)}</text>`);
+    }
+    g.push(`<line class="fit" x1="${rx(100)}" y1="${RM.t}" x2="${rx(100)}" y2="${RH - RM.b}"/>`);
+    for (const t of lanes) {
+      g.push(`<text class="ax lane" x="${RM.l - 8}" y="${(ry(t) + 3).toFixed(1)}" text-anchor="end">${t}</text>`);
+    }
+    for (const r of ROWS) {
+      g.push(`<circle class="pt" data-i="${r.i}" cx="${rx(r.ev).toFixed(1)}" cy="${ry(META[r.i][3]).toFixed(1)}"
+        r="3.2" fill="${PAL[META[r.i][3]]}"/>`);
+    }
+    $('resid').innerHTML = `<svg viewBox="0 0 ${RW} ${RH}" role="img"
+      aria-label="EP times earn rate per badge, all within a fraction of a percent of 100">
+      ${g.join('')}
+      <text class="axl" x="${RM.l + (RW - RM.l - RM.r) / 2}" y="${RH - 4}" text-anchor="middle">EP x P(earn)</text>
+    </svg>`;
+  }
+
+  function tables() {
+    // Real expected value per roll: the 100 EP the price law promises, discounted by
+    // how often a family sibling takes the payout instead.
+    // score === 0 is its own card next door, so leave those out here rather than
+    // list the same two badges twice.
+    const taxed = ROWS.filter(r => r.earn >= 20 && r.score > 0 && r.score < r.earn)
+      .sort((a, b) => a.keep - b.keep).slice(0, 14);
+    const dead = ROWS.filter(r => r.earn > 0 && r.score === 0).sort((a, b) => b.earn - a.earn);
+    const clean = ROWS.filter(r => r.score === r.earn).length;
+
+    // Per family: EP its members earn on paper against EP they are actually paid. A
+    // standalone badge can never lose, so the whole 6.3% comes out of these 40 rows.
+    const fams = new Map();
+    for (const r of ROWS) {
+      const f = META[r.i][4];
+      if (f < 0) continue;
+      const e = fams.get(f) || { f, n: 0, gross: 0, paid: 0 };
+      e.n++; e.gross += r.ep * r.earn; e.paid += r.ep * r.score;
+      fams.set(f, e);
+    }
+    const totalLost = [...fams.values()].reduce((s, e) => s + (e.gross - e.paid), 0);
+    const worst = [...fams.values()].sort((a, b) => (b.gross - b.paid) - (a.gross - a.paid)).slice(0, 12);
+    const topLost = worst.length ? worst[0].gross - worst[0].paid : 1;
+    $('families').innerHTML = worst.map(e => {
+      const lost = e.gross - e.paid;
+      return `<div class="frow">
+        <span class="fl">${FAMS[e.f]}<em>${e.n} badges · ${(100 * e.paid / e.gross).toFixed(1)}% of their EP survives</em></span>
+        <span class="fbar"><i style="width:${(100 * lost / topLost).toFixed(2)}%"></i></span>
+        <span class="fv">${(100 * lost / totalLost).toFixed(1)}%</span></div>`;
+    }).join('');
+
+    $('taxed').innerHTML = taxed.map(r => row(r,
+      (100 * r.keep).toFixed(1) + ' EP',
+      `${(100 * r.keep).toFixed(1)}% of the time it is the family's top badge`)).join('') ||
+      '<p class="muted small">No badge ever loses its family.</p>';
+    $('dead').innerHTML = dead.length
+      ? dead.map(r => row(r, fmt(r.earn) + ' wasted', `${FAMS[META[r.i][4]]} family - outranked every time`)).join('')
+      : '<p class="muted small">None - every badge is the top scorer of its family somewhere.</p>';
+    $('deadn').textContent = dead.length;
+    $('cleann').textContent = clean;
+  }
+
+  function stats(totalEP) {
+    const dead = ROWS.filter(r => r.earn > 0 && r.score === 0).length;
+    const evs = ROWS.map(r => r.ev).sort((a, b) => a - b);
+    const spread = evs[evs.length - 1] - evs[0];
+    const mean = totalEP / N;
+    // What a roll would be worth if every earned badge paid - i.e. with families
+    // switched off. The gap between that and the measured mean is the whole cost.
+    const gross = ROWS.reduce((s, r) => s + r.ep * r.earn, 0) / N;
+    $('stats').innerHTML = `
+      <div class="stat stat-lg"><span class="k">EP x P(earn)</span><span class="v">${evs[evs.length >> 1].toFixed(2)}</span>
+        <span class="sub">for all ${B} badges, spread of ${spread.toFixed(2)} EP end to end</span></div>
+      <div class="stat stat-lg"><span class="k">Mean EP per roll</span><span class="v">${fmt(mean)}</span>
+        <span class="sub">measured over all ${fmt(N)} rolls</span></div>
+      <div class="stat stat-lg"><span class="k">Lost to supersession</span><span class="v">${
+        (100 * (1 - mean / gross)).toFixed(1)}%</span>
+        <span class="sub">of the ${fmt(gross)} EP a roll earns on paper</span></div>
+      <div class="stat stat-lg"><span class="k">Never pay out</span><span class="v">${dead}</span>
+        <span class="sub">earned, but superseded every time</span></div>`;
+  }
+
+  // --- tooltip -----------------------------------------------------------
+  const tip = $('tip');
+  $('chart').addEventListener('mouseover', e => {
+    const c = e.target.closest('[data-i]');
+    if (!c) return;
+    const r = ROWS[ROWS.findIndex(x => x.i === Number(c.dataset.i))];
+    const m = META[r.i];
+    tip.innerHTML = `<b>${m[1]} ${m[0]}</b>
+      <span>${fmt(m[2])} EP · earned by ${pctf(100 * r.earn / N)} of numbers</span>
+      <span>EP x P = ${r.ev.toFixed(2)}</span>
+      <span>${r.score === 0 ? 'never pays - always superseded'
+        : `pays on ${(100 * r.keep).toFixed(1)}% of its earns · ${(100 * r.epShare).toFixed(2)}% of all EP`}</span>`;
+    tip.style.display = 'block';
+    const b = c.getBoundingClientRect();
+    tip.style.left = Math.min(window.innerWidth - tip.offsetWidth - 8, b.left) + 'px';
+    tip.style.top = Math.max(8, b.top - tip.offsetHeight - 8) + 'px';
+  });
+  $('chart').addEventListener('mouseout', e => {
+    if (e.target.closest('[data-i]')) tip.style.display = 'none';
+  });
+
+  // --- boot --------------------------------------------------------------
+  const ep = Float64Array.from(META, m => m[2]);
+  const fam = Int16Array.from(META, m => m[4]);
+  betaBoot(WORKER_SRC, null, { ep: ep.buffer, fam: fam.buffer }).then(({ data }) => {
+    EARN = new Float64Array(data.earn); SCORE = new Float64Array(data.score); N = data.N;
+
+    let totalEP = 0;
+    for (let i = 0; i < B; i++) totalEP += SCORE[i] * META[i][2];
+
+    ROWS = [];
+    for (let i = 0; i < B; i++) {
+      if (!EARN[i]) continue;                      // no data point without a rate
+      const ep = META[i][2];
+      ROWS.push({
+        i, ep, earn: EARN[i], score: SCORE[i],
+        ev: ep * (EARN[i] / N),                    // the price law's constant, per badge
+        keep: SCORE[i] / EARN[i],                  // share of earns that actually pay
+        lx: Math.log10(EARN[i] / N), ly: Math.log10(Math.max(1, ep)),
+        epShare: totalEP ? (SCORE[i] * ep) / totalEP : 0,
+      });
+    }
+
+    // Least squares on (log rate, log EP). The law it recovers is EP = 100 / P, but
+    // fitting rather than asserting it means the page still reads correctly - and
+    // visibly stops saying "law" - if the game ever rebalances away from it.
+    let sx = 0, sy = 0, sxy = 0, sxx = 0;
+    for (const r of ROWS) { sx += r.lx; sy += r.ly; sxy += r.lx * r.ly; sxx += r.lx * r.lx; }
+    const n = ROWS.length, b = (n * sxy - sx * sy) / (n * sxx - sx * sx), a = (sy - b * sx) / n;
+    for (const r of ROWS) r.resid = r.ly - (a + b * r.lx);
+
+    const xs = ROWS.map(r => r.lx), ys = ROWS.map(r => r.ly);
+    FIT = { a, b, x0: Math.floor(Math.min(...xs)), x1: Math.ceil(Math.max(...xs)),
+      y0: Math.floor(Math.min(...ys)), y1: Math.ceil(Math.max(...ys)) };
+
+    $('slope').textContent = b.toFixed(3);
+    $('konst').textContent = Math.pow(10, a).toFixed(1);
+    chart(); residualChart(); tables(); stats(totalEP);
+    $('report').classList.add('on');
+  });
+}
+
+function renderEconomy(ctx) {
+  const { BADGES, FAMILIES, FAMILY_NAMES, TIER_PALETTE, tierFromScore } = ctx;
+  const famOf = new Map();
+  FAMILIES.forEach((fam, fi) => { for (const id of fam) famOf.set(id, fi); });
+  const meta = BADGES.map(([id, label, emoji, ep]) =>
+    [label, emoji, ep, tierFromScore(ep), famOf.has(id) ? famOf.get(id) : -1, id]);
+  const pal = Object.fromEntries(Object.entries(TIER_PALETTE).map(([k, v]) => [k, v.accent]));
+
+  const css = `
+  #report { display:none; }
+  #report.on { display:block; }
+  #stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px,1fr)); gap:.6rem; margin-bottom:1.2rem; }
+
+  .chartcard { padding:1rem 1.1rem 1.2rem; margin-bottom:1.2rem; }
+  #chart svg { width:100%; height:auto; display:block; }
+  .grid { stroke:var(--border); stroke-width:1; }
+  .ax { fill:var(--faint); font-size:10px; font-family:var(--mono); }
+  .axl { fill:var(--muted); font-size:11px; }
+  .fit { stroke:var(--hl); stroke-width:1.4; stroke-dasharray:5 4; fill:none; }
+  .band { fill:color-mix(in srgb, var(--hl) 7%, transparent); stroke:none; }
+  .pt { cursor:pointer; fill-opacity:.85; stroke:#08090c; stroke-width:.6; }
+  .pt:hover { fill-opacity:1; stroke:var(--text); stroke-width:1.2; }
+  .pt.dead { fill-opacity:.18; stroke:var(--faint); stroke-width:1; }
+  .ax.lane { font-family:var(--font); font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; }
+  .chart-note { margin:.7rem 0 0; font-size:.8rem; color:var(--muted); line-height:1.6; }
+  .chart-note b { color:var(--dim); font-weight:600; }
+  .swatch { display:inline-block; width:22px; border-top:1.4px dashed var(--hl); vertical-align:.25em; }
+
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit, minmax(330px,1fr)); gap:.8rem; margin-bottom:.8rem; }
+  .card > p.small { margin:-.35rem 0 .7rem; font-size:.78rem; color:var(--muted); line-height:1.55; }
+  .erow { display:flex; align-items:center; gap:.55rem; padding:.34rem .3rem; text-decoration:none;
+    border-radius:var(--r-sm); color:var(--dim); }
+  .erow:hover { background:var(--surface-2); color:var(--text); }
+  .erow .ee { flex:0 0 auto; }
+  .erow .el { flex:1; min-width:0; font-size:.85rem; display:flex; flex-direction:column; }
+  .erow .el em { font-style:normal; font-size:.72rem; color:var(--faint); font-family:var(--mono); }
+  .erow .ev { flex:0 0 auto; font-family:var(--mono); font-size:.78rem; color:var(--hl-lt);
+    font-variant-numeric:tabular-nums; }
+
+  .frow { display:flex; align-items:center; gap:.7rem; padding:.32rem .3rem; }
+  .frow .fl { flex:0 0 250px; min-width:0; font-size:.85rem; display:flex; flex-direction:column; color:var(--dim); }
+  .frow .fl em { font-style:normal; font-size:.72rem; color:var(--faint); }
+  .frow .fbar { flex:1; min-width:40px; height:8px; border-radius:var(--r-pill); background:var(--surface-2); overflow:hidden; }
+  .frow .fbar i { display:block; height:100%; background:var(--hl); }
+  .frow .fv { flex:0 0 auto; width:3.2rem; text-align:right; font-family:var(--mono); font-size:.78rem;
+    color:var(--hl-lt); font-variant-numeric:tabular-nums; }
+  @media (max-width:620px) { .frow .fl { flex-basis:150px; } }
+
+  #tip { position:fixed; z-index:20; display:none; pointer-events:none; padding:.5rem .65rem; max-width:20rem;
+    background:#06070a; border:1px solid var(--border-2); border-radius:var(--r-ctl); font-size:.78rem;
+    box-shadow:0 10px 30px rgba(0,0,0,.6); }
+  #tip b { display:block; font-size:.84rem; margin-bottom:.15rem; }
+  #tip span { display:block; color:var(--muted); font-size:.74rem; line-height:1.5; }`;
+
+  const body = `<div class="wrap">
+  <div class="tool-head">
+    <h1>Badge Economy <span class="beta-tag">beta</span></h1>
+    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <p class="tag">Every badge is priced at exactly 100 / its own odds - so what makes one worth more
+    than another?</p>
+
+  <div id="report">
+    <div id="stats"></div>
+
+    <section class="card chartcard">
+      <h2>Price against rarity</h2>
+      <div id="chart"></div>
+      <p class="chart-note">Every badge, plotted by how often it is earned against what it pays; both axes
+        logarithmic. The points do not scatter around the <span class="swatch"></span> line, they sit on it.
+        The slope is <b id="slope">-</b> and the intercept <b id="konst">-</b>, which is to say every badge is
+        priced at <b>EP = 100 / P(earn)</b>. Point size is the badge's share of all EP ever awarded; hollow
+        points never pay out at all. Click any point for its rule.</p>
+    </section>
+
+    <section class="card chartcard">
+      <h2>How exact is that?</h2>
+      <div id="resid"></div>
+      <p class="chart-note">The same 230 badges, but now each one's <b>EP x P(earn)</b> on a linear axis
+        spanning a fraction of a percent, split into lanes by rarity. Every badge in the game lands on
+        100.00, and what little spread there is comes from EP being rounded to a whole number.
+        <b>So no badge is worth more than any other per roll</b> - a mythic is exactly as valuable as
+        a common, it just arrives a hundred thousand times less often.</p>
+    </section>
+
+    <div class="grid2">
+      <section class="card"><h2>What actually varies <em>supersession</em></h2>
+        <p class="small">The one thing that breaks the flat 100 EP: within a family only the
+          highest-EP earned badge scores. These are earned constantly and paid rarely, so their real
+          expected value per roll is well under 100 EP. <span id="cleann">-</span> badges are never
+          superseded and keep the full 100.</p>
+        <div id="taxed"></div></section>
+      <section class="card"><h2>Never pay out <em>(<span id="deadn">-</span>)</em></h2>
+        <p class="small">Earned somewhere in the range, yet outranked by a family sibling on every single
+          number that earns them. Worth exactly nothing: they can be collected, never scored.</p>
+        <div id="dead"></div></section>
+    </div>
+
+    <section class="card"><h2>Which families cost the most</h2>
+      <p class="small">Supersession only bites inside a family, so the entire shortfall comes out of these
+        40 groups - the other 69 badges are standalone and always keep their 100 EP. Share of all EP
+        earned-but-never-paid, by family.</p>
+      <div id="families"></div></section>
+  </div>
+
+  <div id="tip"></div>
+  <footer>
+    The <b>price law</b> is not assumed - the line is a least-squares fit of log EP against log earn-rate
+    over all 230 badges, and it recovers slope -1 and constant 100 on its own. <b>Earn</b> and
+    <b>score</b> counts both come from the live sweep: a badge is earned when its rule matches, and
+    scores only when it wins its family, so a rebalance would show up here immediately.
+  </footer>
+</div>
+${overlayHTML('Then re-running family supersession on every number to see which badges actually pay.')}`;
+
+  const script = `${BETA_BOOT_JS}
+const __W = ${JSON.stringify(workerSrc(economyWorker))};
+(${economyClient.toString()})(__W, ${JSON.stringify(meta)}, ${JSON.stringify(FAMILY_NAMES)}, ${JSON.stringify(pal)});`;
+
+  return betaShell({ title: 'RNGdle - Badge Economy', width: '1000px', slug: 'economy', css, body, script });
+}
+
+// ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
 
@@ -1458,4 +1866,5 @@ export function handleBeta(path, ctx) {
 const RENDERERS = {
   atlas: renderAtlas,
   pairs: renderPairs,
+  economy: renderEconomy,
 };
