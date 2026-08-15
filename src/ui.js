@@ -95,7 +95,10 @@ export const COMPONENTS_CSS = `
     border:1px solid var(--border); background:var(--surface); color:var(--text);
     font-variant-numeric:tabular-nums; -webkit-appearance:none; appearance:none; }
   select { cursor:pointer; }
-  select option { color:#000; }
+  /* The drop-down list is painted by the browser on its own backplate, which doesn't
+     inherit the control's dark surface - so name both colours here, or the options
+     come out as black text on the UA's light grey. */
+  select option { background:var(--surface); color:var(--text); }
   ::placeholder { color:var(--faint); }
   input:focus, select:focus, textarea:focus, .field:focus {
     outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
@@ -166,6 +169,7 @@ const ICON = {
   badges: '<circle cx="12" cy="8" r="6"/><path d="m15.48 12.89 1.52 9.11-5-3-5 3 1.52-9.11"/>',
   chains: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98M15.41 6.51 8.59 10.49"/>',
   profiles: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  beta: '<path d="M9 3h6M10 3v6.5L4.6 18a2 2 0 0 0 1.7 3h11.4a2 2 0 0 0 1.7-3L14 9.5V3"/><path d="M7.5 15h9"/>',
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
   open: '<path d="m13 17 5-5-5-5M6 17l5-5-5-5"/>',
   close: '<path d="m11 17-5-5 5-5M18 17l-5-5 5-5"/>',
@@ -185,6 +189,7 @@ export const NAV_GROUPS = [
   ['Data vis', [
     ['grid', '/grid', 'Grid', 'grid'],
     ['chains', '/chains', 'Chains', 'chains'],
+    ['beta', '/beta', 'Beta lab', 'beta'],
   ]],
 ];
 export const NAV_LINKS = NAV_GROUPS.flatMap(([, links]) => links);

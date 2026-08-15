@@ -22,6 +22,9 @@ import { PROBABILITIES } from './probabilities.gen.js';
 // Shared design system: one token set, one set of primitives (.btn/.field/.pill/.card/
 // .stat/.kv/.progress) and one site nav, used by every page below. See src/ui.js.
 import { pageShell } from './ui.js';
+// /beta - the experimental data-vis lab. Its pages render from the same badge table and
+// the same client-side sweep as everything else; betaCtx() below is the one hand-off.
+import { handleBeta } from './beta.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -2667,7 +2670,7 @@ function renderHTML(result) {
       }
       timer = setTimeout(function () {                      // debounced score lookup
         var q = v;
-        fetch('/beta?n=' + q).then(function (r) { return r.json(); }).then(function (d) {
+        fetch('/api/card?n=' + q).then(function (r) { return r.json(); }).then(function (d) {
           if (input.value.replace(/\D/g, '') !== q) return; // stale response
           bn.dataset.tier = d.tier;
           bn.style.setProperty('--accent', d.accent);
@@ -4738,18 +4741,16 @@ function renderBadgeIndex() {
 
   const body = `<div class="wrap">
   <h1>Badge Index</h1>
-  <p class="tag">All ${BADGES.length} badges - how to earn each one, its rarity, EP score, and how many numbers hit it.
-    Example numbers open the calculator; <b>map</b> highlights every earning number on the grid.</p>
   ${newBox}
   <div class="bar">
     <input id="q" type="search" placeholder="Search ${BADGES.length} badges (name, rule, rarity)…" autocomplete="off">
     ${chips}
-    <select id="sort" title="Sort badges">
-      <option value="ep-desc">Highest EP</option>
-      <option value="ep-asc">Lowest EP</option>
-      <option value="prob-asc">Rarest first</option>
-      <option value="prob-desc">Most common first</option>
-      <option value="name">A&ndash;Z</option>
+    <select id="sort" title="Sort badges" aria-label="Sort badges">
+      <option value="ep-desc">Sort: Highest EP</option>
+      <option value="ep-asc">Sort: Lowest EP</option>
+      <option value="prob-asc">Sort: Rarest first</option>
+      <option value="prob-desc">Sort: Most common first</option>
+      <option value="name">Sort: A&ndash;Z</option>
     </select>
     <div id="count"></div>
   </div>
@@ -5104,8 +5105,7 @@ function profileMultiForm(names, label) {
 function renderProfileForm(prefill) {
   return profilePage('RNGdle - Player Profile', `<div class="wrap">
   <h1>Player Profile</h1>
-  <p class="tag">Enter a rngdle.com username to compute their collection summary - tier spread, badges collected,
-    total EP and best roll - scored locally with this tool.</p>
+  <p class="tag">Enter a rngdle.com username to compute their collection summary.</p>
   ${profileForm(prefill)}
   <div class="or">or combine players</div>
   <p class="tag" style="margin-bottom:0">List up to ${MAX_COMBINE} usernames, one per line, to pool their rolls into a
@@ -5388,6 +5388,15 @@ function renderCombined(names, sum, failed, dropped) {
 
 export { compute, BADGES, FAMILIES, engineModuleSource, CARD_TIERS, cardTier };
 
+// Everything src/beta.js renders from, passed in rather than imported, so beta.js has no
+// import edge back into this file (which would be a cycle - index.js imports beta.js).
+function betaCtx() {
+  return {
+    BADGES, FAMILIES, FAMILY_NAMES, DESCRIPTIONS, PROBABILITIES, EXAMPLES,
+    TIER_PALETTE, CARD_TIERS, CARD_TIER_NAMES, tierFromScore, esc, fmtProb,
+  };
+}
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -5423,8 +5432,10 @@ export default {
       });
     }
 
-    // Live data for the beta renderer's click-to-type card (number + tier + badges).
-    if (url.pathname === '/beta') {
+    // Live data for the calculator's click-to-type card (number + tier + badges).
+    // `/beta?n=` is the original spelling of this endpoint and still answers, because
+    // /beta itself is now the beta lab's index page; /api/card is the name to use.
+    if (url.pathname === '/api/card' || (url.pathname === '/beta' && raw !== null)) {
       const n = parseN(raw);
       if (n === null || Number.isNaN(n)) {
         return new Response(JSON.stringify({ error: 'Provide n as an integer from 0 to 1000000.' }), {
@@ -5434,6 +5445,12 @@ export default {
       return new Response(JSON.stringify(betaData(compute(n), n)), {
         headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
       });
+    }
+
+    // /beta - the experimental data-vis lab, and /beta/<tool> for each experiment.
+    if (url.pathname === '/beta' || url.pathname.startsWith('/beta/')) {
+      const html = handleBeta(url.pathname, betaCtx());
+      if (html) return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
 
     // Hidden interactive 1,000,000-number map; click a cell to open it on /.
