@@ -1843,6 +1843,381 @@ const __W = ${JSON.stringify(workerSrc(economyWorker))};
 }
 
 // ---------------------------------------------------------------------------
+// /beta/spectrum - every badge as a density stripe across the range.
+//
+// One row per badge, one column per block of 1,000 numbers, brightness = how many of
+// that block earn it. Laid out together the rules sort themselves into visible kinds:
+// digit-length rules step at 10, 100, 1,000...; "contains" rules give even wash;
+// last-digit and modular rules give fine vertical banding; and the exact-value badges
+// are a single lit pixel in 230,000.
+//
+// Per-badge stripes are cheap (one pass, no pair loop), so the sweep dominates and the
+// whole thing lands about as fast as the cache can hand the sweep over.
+// ---------------------------------------------------------------------------
+
+function spectrumWorker() {
+  self.onmessage = async ev => {
+    if (ev.data.cmd !== 'init') return;
+    try {
+      const BLK = 1000;                            // columns; each covers 1,000 numbers
+      const swept = await betaSweep(ev.data.origin, 0.75);
+      const bits = swept.bits, ROW = swept.ROW, N = swept.ep.length;
+      const B = E.BADGE_META.length;
+
+      const dens = new Uint32Array(B * BLK);
+      const first = new Int32Array(B).fill(-1);
+      const last = new Int32Array(B).fill(-1);
+      const gap = new Int32Array(B);               // longest run of non-earners
+      const byLen = new Uint32Array(B * 7);        // earners per digit length, 1..7
+      const idx = new Int32Array(256);
+
+      for (let n = 0; n < N; n++) {
+        if ((n & 0x3ffff) === 0) {
+          self.postMessage({ type: 'progress', pct: 0.75 + 0.25 * (n / N), msg: 'Building the stripes…' });
+        }
+        const k = betaEarned(bits, n * ROW, ROW, idx);
+        const col = Math.min(BLK - 1, (n / 1000) | 0);
+        const len = n === 0 ? 1 : Math.floor(Math.log10(n)) + 1;
+        for (let a = 0; a < k; a++) {
+          const i = idx[a];
+          dens[i * BLK + col]++;
+          byLen[i * 7 + (len - 1)]++;
+          if (first[i] < 0) first[i] = n;
+          else if (n - last[i] - 1 > gap[i]) gap[i] = n - last[i] - 1;
+          last[i] = n;
+        }
+      }
+      // A trailing run counts too: a badge whose last earner is early has a huge gap
+      // to the end of the range, and that is exactly the interesting case.
+      for (let i = 0; i < B; i++) if (last[i] >= 0 && N - 1 - last[i] > gap[i]) gap[i] = N - 1 - last[i];
+
+      self.postMessage({ type: 'ready', dens: dens.buffer, first: first.buffer, last: last.buffer,
+        gap: gap.buffer, byLen: byLen.buffer, B, BLK, N },
+        [dens.buffer, first.buffer, last.buffer, gap.buffer, byLen.buffer]);
+    } catch (e) {
+      self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
+    }
+  };
+}
+
+// META[i] = [label, emoji, ep, tier, familyIndex, id]
+function spectrumClient(WORKER_SRC, META, FAMS, PAL) {
+  const B = META.length;
+  const $ = id => document.getElementById(id);
+  const fmt = n => n.toLocaleString();
+  const pctf = p => p === 0 ? '0%' : p >= 1 ? p.toFixed(2) + '%' : p >= 0.01 ? p.toFixed(3) + '%' : p.toFixed(4) + '%';
+
+  let D = null, FIRST = null, LAST = null, GAP = null, BYLEN = null, BLK = 1000, N = 0;
+  let order = [], rowMax = null, total = null, sel = -1, hover = -1;
+  let norm = 'row', sort = 'family';
+
+  const cv = $('spec'), ctx = cv.getContext('2d');
+  const off = document.createElement('canvas');
+  const RH = 4;                                   // on-screen pixels per badge row
+
+  // --- derived per-badge measures ----------------------------------------
+  // Normalised entropy of the block distribution: 1 = spread evenly over the whole
+  // range, 0 = every earner in one block. The single most useful sort here, because it
+  // separates "rule that fires everywhere" from "rule that fires in one place".
+  function spread(i) {
+    const base = i * BLK, t = total[i];
+    if (!t) return 0;
+    let h = 0;
+    for (let c = 0; c < BLK; c++) {
+      const p = D[base + c] / t;
+      if (p > 0) h -= p * Math.log(p);
+    }
+    return h / Math.log(BLK);
+  }
+
+  function reorder() {
+    const all = Array.from({ length: B }, (_, i) => i);
+    if (sort === 'ep') order = all.sort((a, b) => META[b][2] - META[a][2] || a - b);
+    else if (sort === 'rate') order = all.sort((a, b) => total[b] - total[a] || a - b);
+    else if (sort === 'spread') order = all.sort((a, b) => SPREAD[b] - SPREAD[a] || a - b);
+    else if (sort === 'first') order = all.sort((a, b) => (FIRST[a] < 0 ? 2e9 : FIRST[a]) - (FIRST[b] < 0 ? 2e9 : FIRST[b]));
+    else if (sort === 'alpha') order = all.sort((a, b) => META[a][0].localeCompare(META[b][0]));
+    else order = all.sort((a, b) => {
+      const fa = META[a][4] < 0 ? 999 : META[a][4], fb = META[b][4] < 0 ? 999 : META[b][4];
+      return fa - fb || META[b][2] - META[a][2] || a - b;
+    });
+    draw();
+  }
+  let SPREAD = null;
+
+  // --- drawing -----------------------------------------------------------
+  function draw() {
+    if (!D) return;
+    const w = BLK, h = B;
+    off.width = w; off.height = h;
+    const octx = off.getContext('2d');
+    const img = octx.createImageData(w, h);
+    const px = img.data;
+    for (let r = 0; r < B; r++) {
+      const i = order[r], base = i * BLK;
+      const cap = norm === 'row' ? (rowMax[i] || 1) : 1000;
+      for (let c = 0; c < w; c++) {
+        const v = D[base + c];
+        const k = (r * w + c) * 4;
+        if (!v) { px[k] = 10; px[k + 1] = 11; px[k + 2] = 15; px[k + 3] = 255; continue; }
+        // log within the row's own range: a stripe that runs 1..3 per block and one
+        // that runs 1..900 both need to show their shape, not just their level.
+        const t = Math.log1p(v) / Math.log1p(cap);
+        const rgb = ramp(t);
+        px[k] = rgb[0]; px[k + 1] = rgb[1]; px[k + 2] = rgb[2]; px[k + 3] = 255;
+      }
+    }
+    octx.putImageData(img, 0, 0);
+
+    const gut = 12;                                // family colour gutter on the left
+    // Floor the width: the first draw can land before the card is laid out, and a
+    // zero-width canvas silently keeps its 300px default rather than erroring.
+    const cw = Math.max(280, cv.parentElement.clientWidth - 2);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.style.width = cw + 'px'; cv.style.height = (B * RH) + 'px';
+    cv.width = cw * dpr; cv.height = B * RH * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#0a0b0f'; ctx.fillRect(0, 0, cw, B * RH);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, w, h, gut, 0, cw - gut, B * RH);
+    for (let r = 0; r < B; r++) {
+      ctx.fillStyle = META[order[r]][4] < 0 ? '#2a2d36' : `hsl(${(META[order[r]][4] * 47) % 360} 45% ${META[order[r]][4] % 2 ? 42 : 56}%)`;
+      ctx.fillRect(0, r * RH, gut - 3, RH);
+    }
+    const mark = (b, colour, wdt) => {
+      const r = order.indexOf(b);
+      if (r < 0) return;
+      ctx.strokeStyle = colour; ctx.lineWidth = wdt;
+      ctx.strokeRect(gut - .5, r * RH - .5, cw - gut + 1, RH + 1);
+    };
+    if (hover >= 0 && hover !== sel) mark(hover, 'rgba(255,255,255,.35)', 1);
+    if (sel >= 0) mark(sel, '#e8924e', 1.4);
+  }
+
+  const STOPS = [[10, 11, 15], [24, 33, 58], [40, 84, 130], [92, 148, 214], [193, 212, 245], [255, 250, 238]];
+  function ramp(t) {
+    t = t <= 0 ? 0 : t >= 1 ? 1 : t;
+    const x = t * (STOPS.length - 1), i = Math.min(STOPS.length - 2, x | 0), f = x - i;
+    const a = STOPS[i], b = STOPS[i + 1];
+    return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+  }
+
+  // --- detail panel ------------------------------------------------------
+  function detail(i) {
+    const box = $('detail');
+    if (i < 0) {
+      box.innerHTML = `<div class="card"><h2>Pick a stripe</h2>
+        <p class="muted small">Hover any row for its name, click for where in the range it fires,
+        how it splits by digit length, and the longest stretch of numbers that never earn it.</p></div>`;
+      return;
+    }
+    const m = META[i], base = i * BLK, t = total[i];
+    const lens = [];
+    for (let L = 0; L < 7; L++) {
+      const c = BYLEN[i * 7 + L];
+      if (!c) continue;
+      // Numbers with exactly L+1 digits in 0..1,000,000: 10^L .. 10^(L+1)-1, except
+      // length 1 which includes 0, and length 7 which is the single 1,000,000.
+      const pool = L === 0 ? 10 : L === 6 ? 1 : 9 * Math.pow(10, L);
+      lens.push({ L: L + 1, c, share: c / pool });
+    }
+    const maxShare = Math.max(...lens.map(x => x.share), 1e-9);
+
+    // The stripe again, but as a profile the eye can read a shape off.
+    const W = 520, H = 90;
+    const cap = rowMax[i] || 1;
+    const pts = [];
+    for (let c = 0; c < BLK; c++) {
+      pts.push(`${(c / (BLK - 1) * W).toFixed(1)},${(H - (D[base + c] / cap) * H).toFixed(1)}`);
+    }
+
+    box.innerHTML = `
+      <div class="card" style="--tc:${PAL[m[3]]}">
+        <div class="dh"><span class="de">${m[1]}</span>
+          <div class="dn"><b>${m[0]}</b><span>${m[4] >= 0 ? FAMS[m[4]] + ' family' : 'standalone'}</span></div>
+          <span class="pill">${m[3].toUpperCase()}</span></div>
+        <svg class="prof" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+          <polyline points="${pts.join(' ')}"/></svg>
+        <div class="pxax"><span>0</span><span>500,000</span><span>1,000,000</span></div>
+        <div class="dstats">
+          <div class="stat"><span class="k">Earned by</span><span class="v">${pctf(100 * t / N)}</span>
+            <span class="sub">${fmt(t)} numbers</span></div>
+          <div class="stat"><span class="k">Spread</span><span class="v">${(SPREAD[i] * 100).toFixed(0)}%</span>
+            <span class="sub">of an even wash</span></div>
+          <div class="stat"><span class="k">Longest gap</span><span class="v">${fmt(GAP[i])}</span>
+            <span class="sub">with none in a row</span></div>
+        </div>
+        <div class="drange">First <a href="/?n=${FIRST[i]}">${fmt(FIRST[i])}</a> ·
+          last <a href="/?n=${LAST[i]}">${fmt(LAST[i])}</a> ·
+          <a href="/grid#${encodeURIComponent(m[0])}">map on /grid</a> ·
+          <a href="/badges#${m[5]}">rule</a></div>
+      </div>
+      <div class="card"><h2>By digit length</h2>
+        <p class="muted small">Share of all numbers of each length that earn it - which is where the
+          hard steps in the stripe come from.</p>
+        ${lens.map(x => `<div class="lrow">
+          <span class="ll">${x.L} digit${x.L === 1 ? '' : 's'}</span>
+          <span class="lbar"><i style="width:${(100 * x.share / maxShare).toFixed(2)}%"></i></span>
+          <span class="lv">${pctf(100 * x.share)}</span></div>`).join('')}
+      </div>`;
+  }
+
+  // --- events ------------------------------------------------------------
+  function rowAt(ev) {
+    const r = cv.getBoundingClientRect();
+    const row = Math.floor((ev.clientY - r.top) / RH);
+    return row >= 0 && row < B ? order[row] : -1;
+  }
+  const tip = $('tip');
+  cv.addEventListener('mousemove', ev => {
+    const i = rowAt(ev);
+    if (i !== hover) { hover = i; draw(); }
+    if (i < 0) { tip.style.display = 'none'; return; }
+    const r = cv.getBoundingClientRect();
+    const gut = 12, cw = r.width;
+    const col = Math.max(0, Math.min(BLK - 1, Math.floor((ev.clientX - r.left - gut) / (cw - gut) * BLK)));
+    const lo = col * 1000;
+    tip.innerHTML = `<b>${META[i][1]} ${META[i][0]}</b>
+      <span>${fmt(D[i * BLK + col])} of the 1,000 numbers ${fmt(lo)}-${fmt(lo + 999)}</span>
+      <span>${pctf(100 * total[i] / N)} of the range overall</span>`;
+    tip.style.display = 'block';
+    tip.style.left = Math.min(window.innerWidth - tip.offsetWidth - 8, ev.clientX + 14) + 'px';
+    tip.style.top = Math.max(8, ev.clientY - tip.offsetHeight - 12) + 'px';
+  });
+  cv.addEventListener('mouseleave', () => { tip.style.display = 'none'; hover = -1; draw(); });
+  cv.addEventListener('click', ev => { sel = rowAt(ev); detail(sel); draw(); });
+  $('sort').addEventListener('change', e => { sort = e.target.value; reorder(); });
+  $('norm').addEventListener('change', e => { norm = e.target.value; draw(); });
+  addEventListener('resize', draw);
+
+  // --- boot --------------------------------------------------------------
+  betaBoot(WORKER_SRC).then(({ data }) => {
+    D = new Uint32Array(data.dens); FIRST = new Int32Array(data.first);
+    LAST = new Int32Array(data.last); GAP = new Int32Array(data.gap);
+    BYLEN = new Uint32Array(data.byLen); BLK = data.BLK; N = data.N;
+
+    rowMax = new Uint32Array(B); total = new Float64Array(B);
+    for (let i = 0; i < B; i++) {
+      let mx = 0, t = 0;
+      for (let c = 0; c < BLK; c++) { const v = D[i * BLK + c]; t += v; if (v > mx) mx = v; }
+      rowMax[i] = mx; total[i] = t;
+    }
+    SPREAD = new Float64Array(B);
+    for (let i = 0; i < B; i++) SPREAD[i] = spread(i);
+    $('page').classList.add('on');                 // must be visible before draw() measures
+    reorder(); detail(-1);
+  });
+}
+
+function renderSpectrum(ctx) {
+  const { BADGES, FAMILIES, FAMILY_NAMES, TIER_PALETTE, tierFromScore } = ctx;
+  const famOf = new Map();
+  FAMILIES.forEach((fam, fi) => { for (const id of fam) famOf.set(id, fi); });
+  const meta = BADGES.map(([id, label, emoji, ep]) =>
+    [label, emoji, ep, tierFromScore(ep), famOf.has(id) ? famOf.get(id) : -1, id]);
+  const pal = Object.fromEntries(Object.entries(TIER_PALETTE).map(([k, v]) => [k, v.accent]));
+
+  const css = `
+  #page { display:none; }
+  #page.on { display:block; }
+  .bar { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; margin-bottom:.9rem; }
+  .bar label { font-size:.78rem; color:var(--muted); }
+  .bar select { font-size:.85rem; padding:.4rem .5rem; }
+
+  .cols { display:grid; grid-template-columns:minmax(0,1fr) 330px; gap:1rem; align-items:start; }
+  @media (max-width:1000px) { .cols { grid-template-columns:1fr; } }
+  .speccard { padding:.7rem; position:relative; }
+  #spec { display:block; cursor:crosshair; border-radius:var(--r-sm); }
+  .xax { display:flex; justify-content:space-between; margin:.4rem 0 0 12px; font-size:.7rem;
+    color:var(--faint); font-family:var(--mono); }
+
+  /* min-width:0 on the column and minmax(0,1fr) on the stat row: without both, a long
+     stat caption sets a min-content floor that widens the whole grid track. */
+  #detail { min-width:0; display:flex; flex-direction:column; gap:.7rem; position:sticky; top:1rem; }
+  .dh { display:flex; align-items:center; gap:.55rem; margin-bottom:.6rem; }
+  .de { font-size:1.3rem; }
+  .dn { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .dn b { font-size:1rem; font-weight:600; }
+  .dn span { font-size:.74rem; color:var(--muted); }
+  .prof { width:100%; height:90px; display:block; background:var(--surface-2); border-radius:var(--r-sm);
+    border:1px solid var(--border); }
+  .prof polyline { fill:none; stroke:var(--accent); stroke-width:1.2; vector-effect:non-scaling-stroke; }
+  .pxax { display:flex; justify-content:space-between; margin:.25rem 0 .7rem; font-size:.68rem;
+    color:var(--faint); font-family:var(--mono); }
+  .dstats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.4rem; }
+  .dstats .stat { min-width:0; overflow-wrap:anywhere; }
+  .drange { margin-top:.7rem; font-size:.78rem; color:var(--muted); line-height:1.7; }
+  .small { font-size:.78rem; line-height:1.5; margin:-.35rem 0 .6rem; }
+
+  .lrow { display:flex; align-items:center; gap:.6rem; padding:.22rem 0; }
+  .lrow .ll { flex:0 0 4.6rem; font-size:.8rem; color:var(--dim); }
+  .lrow .lbar { flex:1; height:8px; border-radius:var(--r-pill); background:var(--surface-2); overflow:hidden; }
+  .lrow .lbar i { display:block; height:100%; background:var(--accent); }
+  .lrow .lv { flex:0 0 4.4rem; text-align:right; font-family:var(--mono); font-size:.74rem;
+    color:var(--muted); font-variant-numeric:tabular-nums; }
+
+  #tip { position:fixed; z-index:20; display:none; pointer-events:none; padding:.45rem .6rem;
+    background:#06070a; border:1px solid var(--border-2); border-radius:var(--r-ctl); font-size:.78rem;
+    box-shadow:0 10px 30px rgba(0,0,0,.6); }
+  #tip b { display:block; font-size:.84rem; font-weight:600; }
+  #tip span { display:block; color:var(--muted); font-size:.74rem; margin-top:.15rem;
+    font-variant-numeric:tabular-nums; }`;
+
+  const body = `<div class="wrap">
+  <div class="tool-head">
+    <h1>Badge Spectrum <span class="beta-tag">beta</span></h1>
+    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <p class="tag">All 230 badges at once: one row each, one column per thousand numbers, brightness for
+    how many of them earn it.</p>
+
+  <div id="page">
+    <div class="bar">
+      <label for="sort">Order</label>
+      <select id="sort">
+        <option value="family">Family</option>
+        <option value="spread">Spread - even wash first</option>
+        <option value="rate">How often earned</option>
+        <option value="first">First earner</option>
+        <option value="ep">EP</option>
+        <option value="alpha">Name</option>
+      </select>
+      <label for="norm">Brightness</label>
+      <select id="norm">
+        <option value="row">Per badge - each row uses its own range</option>
+        <option value="abs">Absolute - comparable between rows</option>
+      </select>
+    </div>
+
+    <div class="cols">
+      <section class="card speccard">
+        <canvas id="spec" aria-label="230 badge density stripes across the number range"></canvas>
+        <div class="xax"><span>0</span><span>250,000</span><span>500,000</span><span>750,000</span><span>1,000,000</span></div>
+      </section>
+      <div id="detail"></div>
+    </div>
+  </div>
+
+  <div id="tip"></div>
+  <footer>
+    <b>Per badge</b> brightness rescales every row to its own busiest block, so a rule earned ten times
+    in the whole range still shows its shape; <b>absolute</b> puts every row on the same scale, which
+    makes the common badges glow and the rare ones vanish. <b>Spread</b> is the entropy of a badge's
+    block distribution as a fraction of a perfectly even wash - 100% means it fires uniformly across the
+    range, and a low number means it is concentrated somewhere. The colour gutter down the left edge is
+    the badge's family.
+  </footer>
+</div>
+${overlayHTML('Then counting, for each badge, how many of every thousand numbers earn it.')}`;
+
+  const script = `${BETA_BOOT_JS}
+const __W = ${JSON.stringify(workerSrc(spectrumWorker))};
+(${spectrumClient.toString()})(__W, ${JSON.stringify(meta)}, ${JSON.stringify(FAMILY_NAMES)}, ${JSON.stringify(pal)});`;
+
+  return betaShell({ title: 'RNGdle - Badge Spectrum', width: '1180px', slug: 'spectrum', css, body, script });
+}
+
+// ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
 
@@ -1867,4 +2242,5 @@ const RENDERERS = {
   atlas: renderAtlas,
   pairs: renderPairs,
   economy: renderEconomy,
+  spectrum: renderSpectrum,
 };
