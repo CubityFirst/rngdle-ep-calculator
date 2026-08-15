@@ -844,6 +844,597 @@ const __W = ${JSON.stringify(workerSrc(pairsWorker))};
 }
 
 // ---------------------------------------------------------------------------
+// /beta/atlas - the EP landscape as terrain.
+//
+// /grid already lays the range out as a 1000x1000 image (number n at x = n % 1000,
+// y = n / 1000) and paints EP as brightness. Lifting that same field into the third
+// dimension turns it into a place: the ridges are the multiples-of-1111 diagonals,
+// the plateaus are digit-length boundaries, and the isolated spires are the handful
+// of numbers carrying a mythic badge.
+//
+// Everything is drawn from ONE mesh with no vertex attributes at all - the vertex
+// shader derives its grid position from gl_VertexID and fetches height, EP and badge
+// count out of a single RGBA32F texture. So switching colour mode or exaggeration is
+// a uniform change, and switching resolution only swaps the index buffer.
+// ---------------------------------------------------------------------------
+
+function atlasWorker() {
+  self.onmessage = async ev => {
+    if (ev.data.cmd !== 'init') return;
+    try {
+      const swept = await betaSweep(ev.data.origin, 0.9);
+      // The square face of the range is 0..999,999; 1,000,000 is the one 7-digit roll
+      // and has no cell, exactly as on /grid.
+      const N = 1000000;
+      self.postMessage({ type: 'progress', pct: 0.92, msg: 'Building the height field…' });
+
+      const ep = new Float32Array(N);
+      let max = 0, sum = 0;
+      for (let i = 0; i < N; i++) { const v = swept.ep[i]; ep[i] = v; sum += v; if (v > max) max = v; }
+      const cnt = new Uint8Array(N);
+      cnt.set(swept.cnt.subarray(0, N));
+
+      // The tallest points, so the tool can offer to fly you to them.
+      const peaks = [];
+      for (let i = 0; i < N; i++) {
+        if (peaks.length < 12) { peaks.push(i); if (peaks.length === 12) peaks.sort((a, b) => swept.ep[b] - swept.ep[a]); continue; }
+        if (swept.ep[i] > swept.ep[peaks[11]]) {
+          peaks[11] = i;
+          for (let k = 11; k > 0 && swept.ep[peaks[k]] > swept.ep[peaks[k - 1]]; k--) {
+            const t = peaks[k]; peaks[k] = peaks[k - 1]; peaks[k - 1] = t;
+          }
+        }
+      }
+      self.postMessage({ type: 'ready', ep: ep.buffer, cnt: cnt.buffer, max, mean: sum / N, peaks },
+        [ep.buffer, cnt.buffer]);
+    } catch (e) {
+      self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
+    }
+  };
+}
+
+// TIERS = [{ name, label, accent, lo }] ascending, lo = inclusive EP floor.
+function atlasClient(WORKER_SRC, TIERS) {
+  const $ = id => document.getElementById(id);
+  const SIDE = 1000;                                  // cells per side at full detail
+  const cv = $('gl');
+  const gl = cv.getContext('webgl2', { antialias: true, powerPreference: 'high-performance' });
+  if (!gl) {
+    $('ovhead').textContent = 'WebGL2 not available';
+    $('ovtext').textContent = 'This tool needs WebGL2. Everything else in the lab works without it.';
+    return;
+  }
+
+  let EP = null, CNT = null, MAXEP = 1, PEAKS = [];
+  let S = 1000, mode = 0, exag = 1, hsrc = 'log', showGrid = true;
+  let mesh = null, tex = null, prog = null, vao = null, uni = {};
+  let sel = -1, hoverCell = -1;
+
+  // --- shaders -----------------------------------------------------------
+  const VS = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+uniform mat4 uMVP;
+uniform sampler2D uT;        // (height 0..1, EP, badge count, -)
+uniform int uS;
+uniform float uY;            // vertical exaggeration, in world units
+out float vH; out float vEP; out float vC; out vec2 vUV; out vec3 vN; out vec3 vP;
+float hAt(ivec2 p) { return texelFetch(uT, clamp(p, ivec2(0), ivec2(uS - 1)), 0).r; }
+void main() {
+  int gx = gl_VertexID % uS, gy = gl_VertexID / uS;
+  vec4 t = texelFetch(uT, ivec2(gx, gy), 0);
+  vH = t.r; vEP = t.g; vC = t.b;
+  float d = 2.0 / float(uS - 1);
+  // Central differences on the four neighbours - cheap, and the only lighting cue
+  // that makes the ridge structure legible at a glance.
+  vec3 n = vec3((hAt(ivec2(gx - 1, gy)) - hAt(ivec2(gx + 1, gy))) * uY, 2.0 * d,
+                (hAt(ivec2(gx, gy - 1)) - hAt(ivec2(gx, gy + 1))) * uY);
+  vN = normalize(n);
+  vUV = vec2(float(gx), float(gy)) / float(uS - 1);
+  vP = vec3(vUV.x * 2.0 - 1.0, t.r * uY, vUV.y * 2.0 - 1.0);
+  gl_Position = uMVP * vec4(vP, 1.0);
+}`;
+
+  const FS = `#version 300 es
+precision highp float;
+precision highp int;
+in float vH; in float vEP; in float vC; in vec2 vUV; in vec3 vN; in vec3 vP;
+uniform vec3 uTier[7];
+uniform float uCut[6];
+uniform int uMode;           // 0 tier, 1 height ramp, 2 badge count
+uniform float uMaxC;
+uniform int uGrid;
+uniform int uS;
+uniform vec3 uEye;
+uniform vec2 uSel;           // selected cell, or (-1,-1)
+out vec4 o;
+
+vec3 tierColour(float ep) {
+  vec3 c = uTier[0];
+  for (int i = 0; i < 6; i++) if (ep >= uCut[i]) c = uTier[i + 1];
+  return c;
+}
+vec3 ramp(float t) {
+  t = clamp(t, 0.0, 1.0);
+  vec3 a = vec3(.043,.055,.086), b = vec3(.09,.18,.35), c = vec3(.20,.47,.72),
+       d = vec3(.55,.75,.85), e = vec3(1.0,.95,.85);
+  return t < .25 ? mix(a, b, t / .25) : t < .5 ? mix(b, c, (t - .25) / .25)
+       : t < .75 ? mix(c, d, (t - .5) / .25) : mix(d, e, (t - .75) / .25);
+}
+void main() {
+  vec3 base = uMode == 0 ? tierColour(vEP)
+            : uMode == 1 ? ramp(vH)
+            : ramp(vC / max(uMaxC, 1.0));
+  vec3 L = normalize(vec3(.45, .8, .35));
+  float lam = max(dot(normalize(vN), L), 0.0);
+  vec3 col = base * (.30 + .78 * lam);
+  // Rim light along the silhouette, so ridges read against the background.
+  vec3 V = normalize(uEye - vP);
+  col += base * pow(1.0 - max(dot(normalize(vN), V), 0.0), 3.0) * .30;
+
+  // Cell grid every 100 rows/columns, i.e. every 100,000 numbers down and every
+  // 100 along - the only way to keep your bearings once the camera is tilted.
+  if (uGrid == 1) {
+    vec2 g = vUV * 10.0;
+    vec2 w = fwidth(g);
+    vec2 f = abs(fract(g - .5) - .5) / max(w, vec2(1e-5));
+    float line = 1.0 - min(min(f.x, f.y), 1.0);
+    col = mix(col, vec3(.75, .82, .95), line * .16);
+  }
+  if (uSel.x >= 0.0) {
+    vec2 d = abs(vUV * float(uS - 1) - uSel);
+    if (max(d.x, d.y) < 2.0) col = mix(col, vec3(1.0, .62, .25), .8);
+  }
+  // Distance haze towards the page background, for depth.
+  float fog = clamp((length(uEye - vP) - 2.0) / 4.5, 0.0, 1.0);
+  o = vec4(mix(col, vec3(.031,.035,.047), fog * .8), 1.0);
+}`;
+
+  // Picking is a second pass of the same mesh, but through a projection that blows the
+  // pixel under the cursor up to fill a 1x1 framebuffer - so every other triangle is
+  // clipped and the pass costs almost nothing.
+  const PICK_FS = `#version 300 es
+precision highp float;
+precision highp int;
+in vec2 vUV; in float vH; in float vEP; in float vC; in vec3 vN; in vec3 vP;
+uniform int uS;
+out vec4 o;
+void main() {
+  vec2 c = floor(vUV * float(uS - 1) + .5);
+  float id = c.y * float(uS) + c.x;
+  o = vec4(mod(id, 256.0), mod(floor(id / 256.0), 256.0), floor(id / 65536.0), 255.0) / 255.0;
+}`;
+
+  function compile(src, type) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  function link(vs, fs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(vs, gl.VERTEX_SHADER));
+    gl.attachShader(p, compile(fs, gl.FRAGMENT_SHADER));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  }
+
+  // --- maths -------------------------------------------------------------
+  function mul(a, b) {
+    const r = new Float32Array(16);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+      let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + j] * b[i * 4 + k];
+      r[i * 4 + j] = s;
+    }
+    return r;
+  }
+  function perspective(fov, asp, near, far) {
+    const f = 1 / Math.tan(fov / 2), d = near - far;
+    return new Float32Array([f / asp, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) / d, -1, 0, 0, 2 * far * near / d, 0]);
+  }
+  function lookAt(eye, at, up) {
+    const z = norm(sub(eye, at)), x = norm(cross(up, z)), y = cross(z, x);
+    return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
+      -dot(x, eye), -dot(y, eye), -dot(z, eye), 1]);
+  }
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+
+  // --- camera ------------------------------------------------------------
+  const cam = { az: 0.65, el: 0.62, dist: 3.4, tx: 0, tz: 0 };
+  function eyePos() {
+    const ce = Math.cos(cam.el);
+    return [cam.tx + cam.dist * ce * Math.sin(cam.az), cam.dist * Math.sin(cam.el),
+      cam.tz + cam.dist * ce * Math.cos(cam.az)];
+  }
+  function viewProj(pick) {
+    const asp = cv.width / cv.height;
+    let p = perspective(0.9, asp, 0.02, 40);
+    if (pick) {
+      // Pick matrix: scale NDC so the one pixel under the cursor fills the viewport.
+      const sx = cv.width / 1, sy = cv.height / 1;
+      const ox = -(2 * pick[0] / cv.width - 1) * sx, oy = -(2 * (1 - pick[1] / cv.height) - 1) * sy;
+      p = mul(new Float32Array([sx, 0, 0, 0, 0, sy, 0, 0, 0, 0, 1, 0, ox, oy, 0, 1]), p);
+    }
+    return mul(p, lookAt(eyePos(), [cam.tx, 0.12, cam.tz], [0, 1, 0]));
+  }
+
+  // --- mesh + texture ----------------------------------------------------
+  // Max-pool down from the full 1000x1000: averaging would erase the spires, which
+  // are the whole point - a single mythic number must survive at every LOD.
+  function buildTexture() {
+    const step = SIDE / S;
+    const data = new Float32Array(S * S * 4);
+    const lg = v => Math.log10(1 + v);
+    // Raw EP spans six orders of magnitude (a single digit scores ~186M, a typical
+    // six-digit roll a few thousand), so linear height is one spike and a flat plain.
+    // Log is the default; badge count is the flattest, most readable surface of the
+    // three because it is bounded and roughly normal.
+    const MAXC = 48;
+    const height = (ep, c) => hsrc === 'count' ? Math.min(1, c / MAXC)
+      : hsrc === 'lin' ? ep / MAXEP : lg(ep) / lg(MAXEP);
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        let best = 0, bc = 0;
+        for (let dy = 0; dy < step; dy++) {
+          const row = (y * step + dy) * SIDE + x * step;
+          for (let dx = 0; dx < step; dx++) {
+            const v = EP[row + dx];
+            if (v > best) { best = v; bc = CNT[row + dx]; }
+          }
+        }
+        const k = (y * S + x) * 4;
+        data[k] = height(best, bc);
+        data[k + 1] = best; data[k + 2] = bc; data[k + 3] = 0;
+      }
+    }
+    if (!tex) {
+      tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    }
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, S, S, 0, gl.RGBA, gl.FLOAT, data);
+  }
+
+  function buildMesh() {
+    const q = S - 1, idx = new Uint32Array(q * q * 6);
+    let k = 0;
+    for (let y = 0; y < q; y++) {
+      for (let x = 0; x < q; x++) {
+        const a = y * S + x, b = a + 1, c = a + S, d = c + 1;
+        idx[k++] = a; idx[k++] = c; idx[k++] = b;
+        idx[k++] = b; idx[k++] = c; idx[k++] = d;
+      }
+    }
+    if (!mesh) mesh = gl.createBuffer();
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+    return idx.length;
+  }
+
+  let indexCount = 0, pickProg = null, pickFbo = null, pickTex = null;
+
+  function setResolution(next) {
+    S = next;
+    buildTexture();
+    indexCount = buildMesh();
+    render();
+  }
+
+  // --- render ------------------------------------------------------------
+  function resize() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.floor(cv.clientWidth * dpr), h = Math.floor(cv.clientHeight * dpr);
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  }
+
+  function setCommon(p, mvp) {
+    gl.useProgram(p);
+    gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uMVP'), false, mvp);
+    gl.uniform1i(gl.getUniformLocation(p, 'uS'), S);
+    gl.uniform1f(gl.getUniformLocation(p, 'uY'), 0.55 * exag);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(gl.getUniformLocation(p, 'uT'), 0);
+  }
+
+  let needsDraw = false;
+  function render() { if (!needsDraw) { needsDraw = true; requestAnimationFrame(frame); } }
+  function frame() {
+    needsDraw = false;
+    if (!EP || !indexCount) return;
+    resize();
+    gl.viewport(0, 0, cv.width, cv.height);
+    gl.enable(gl.DEPTH_TEST);
+    gl.clearColor(0.031, 0.035, 0.047, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    const mvp = viewProj(null);
+    setCommon(prog, mvp);
+    gl.uniform1i(uni.mode, mode);
+    gl.uniform1i(uni.grid, showGrid ? 1 : 0);
+    gl.uniform1f(uni.maxc, 40);
+    gl.uniform3fv(uni.eye, new Float32Array(eyePos()));
+    gl.uniform2f(uni.sel, sel < 0 ? -1 : (sel % SIDE) * (S / SIDE), sel < 0 ? -1 : Math.floor(sel / SIDE) * (S / SIDE));
+    gl.bindVertexArray(vao);
+    gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_INT, 0);
+  }
+
+  function pick(px, py) {
+    if (!EP || !indexCount) return -1;
+    if (!pickFbo) {
+      pickTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, pickTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      const rb = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, 1, 1);
+      pickFbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, pickFbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pickTex, 0);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rb);
+    }
+    const dpr = cv.width / cv.clientWidth;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, pickFbo);
+    gl.viewport(0, 0, 1, 1);
+    gl.enable(gl.DEPTH_TEST);
+    gl.clearColor(1, 1, 1, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    setCommon(pickProg, viewProj([px * dpr, py * dpr]));
+    gl.bindVertexArray(vao);
+    gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_INT, 0);
+    const buf = new Uint8Array(4);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (buf[0] === 255 && buf[1] === 255 && buf[2] === 255) return -1;   // background
+    const id = buf[0] + buf[1] * 256 + buf[2] * 65536;
+    const gx = id % S, gy = Math.floor(id / S), step = SIDE / S;
+    if (gy >= S) return -1;
+    // Inside a pooled cell, the number worth reporting is the one that made the peak.
+    let best = -1, bv = -1;
+    for (let dy = 0; dy < step; dy++) for (let dx = 0; dx < step; dx++) {
+      const n = (gy * step + dy) * SIDE + gx * step + dx;
+      if (EP[n] > bv) { bv = EP[n]; best = n; }
+    }
+    return best;
+  }
+
+  // --- HUD ---------------------------------------------------------------
+  const fmt = n => n.toLocaleString();
+  function tierOf(ep) { let t = TIERS[0]; for (const x of TIERS) if (ep >= x.lo) t = x; return t; }
+
+  function showCell(n) {
+    const box = $('read');
+    if (n < 0) { box.classList.remove('on'); return; }
+    const t = tierOf(EP[n]);
+    box.classList.add('on');
+    box.innerHTML = `<div class="rd-top"><span class="rd-n">${fmt(n)}</span>
+        <span class="pill" style="--tc:${t.accent}">${t.label}</span></div>
+      <div class="rd-row"><span>EP</span><b>${fmt(Math.round(EP[n]))}</b></div>
+      <div class="rd-row"><span>Badges</span><b>${CNT[n]}</b></div>
+      <div class="rd-row"><span>Cell</span><b>${n % SIDE}, ${Math.floor(n / SIDE)}</b></div>
+      <a class="rd-open" href="/?n=${n}">Open on the calculator &rarr;</a>`;
+  }
+
+  function flyTo(n) {
+    sel = n;
+    cam.tx = ((n % SIDE) / SIDE) * 2 - 1;
+    cam.tz = (Math.floor(n / SIDE) / SIDE) * 2 - 1;
+    cam.dist = Math.min(cam.dist, 1.1);
+    showCell(n); render();
+  }
+
+  // --- interaction -------------------------------------------------------
+  let drag = null;
+  cv.addEventListener('pointerdown', e => {
+    cv.setPointerCapture(e.pointerId);
+    drag = { x: e.clientX, y: e.clientY, moved: 0, pan: e.shiftKey || e.button === 1 };
+  });
+  cv.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    drag.x = e.clientX; drag.y = e.clientY; drag.moved += Math.abs(dx) + Math.abs(dy);
+    if (drag.pan) {
+      const s = cam.dist * 0.0016;
+      cam.tx -= (dx * Math.cos(cam.az) - dy * Math.sin(cam.az) * Math.sin(cam.el)) * s;
+      cam.tz += (dx * Math.sin(cam.az) + dy * Math.cos(cam.az) * Math.sin(cam.el)) * s;
+    } else {
+      cam.az -= dx * 0.006;
+      cam.el = Math.max(0.05, Math.min(1.52, cam.el + dy * 0.005));
+    }
+    render();
+  });
+  cv.addEventListener('pointerup', e => {
+    const wasClick = drag && drag.moved < 5;
+    drag = null;
+    if (!wasClick) return;
+    const r = cv.getBoundingClientRect();
+    const n = pick(e.clientX - r.left, e.clientY - r.top);
+    sel = n; showCell(n); render();
+  });
+  cv.addEventListener('wheel', e => {
+    e.preventDefault();
+    cam.dist = Math.max(0.25, Math.min(9, cam.dist * Math.exp(e.deltaY * 0.0012)));
+    render();
+  }, { passive: false });
+
+  $('res').addEventListener('change', e => setResolution(Number(e.target.value)));
+  $('mode').addEventListener('change', e => { mode = Number(e.target.value); render(); });
+  $('exag').addEventListener('input', e => {
+    exag = Number(e.target.value);
+    $('exagv').textContent = exag.toFixed(2).replace(/0$/, '') + 'x';
+    render();
+  });
+  $('hsrc').addEventListener('change', e => { hsrc = e.target.value; buildTexture(); render(); });
+  $('grid').addEventListener('change', e => { showGrid = e.target.checked; render(); });
+  $('top').addEventListener('click', () => { cam.az = 0; cam.el = 1.5; cam.dist = 2.6; cam.tx = cam.tz = 0; render(); });
+  $('reset').addEventListener('click', () => {
+    cam.az = 0.65; cam.el = 0.62; cam.dist = 3.4; cam.tx = cam.tz = 0; sel = -1;
+    showCell(-1); render();
+  });
+  $('goto').addEventListener('submit', e => {
+    e.preventDefault();
+    const v = Math.max(0, Math.min(999999, parseInt($('gn').value.replace(/\D/g, ''), 10) || 0));
+    flyTo(v);
+  });
+  addEventListener('resize', render);
+
+  // --- boot --------------------------------------------------------------
+  betaBoot(WORKER_SRC).then(({ data }) => {
+    EP = new Float32Array(data.ep); CNT = new Uint8Array(data.cnt);
+    MAXEP = data.max; PEAKS = data.peaks;
+
+    prog = link(VS, FS);
+    pickProg = link(VS, PICK_FS);
+    vao = gl.createVertexArray();
+    uni = {
+      mode: gl.getUniformLocation(prog, 'uMode'), grid: gl.getUniformLocation(prog, 'uGrid'),
+      maxc: gl.getUniformLocation(prog, 'uMaxC'), eye: gl.getUniformLocation(prog, 'uEye'),
+      sel: gl.getUniformLocation(prog, 'uSel'),
+    };
+    gl.useProgram(prog);
+    gl.uniform3fv(gl.getUniformLocation(prog, 'uTier'),
+      new Float32Array(TIERS.flatMap(t => {
+        const h = t.accent.slice(1);
+        return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
+      })));
+    gl.uniform1fv(gl.getUniformLocation(prog, 'uCut'), new Float32Array(TIERS.slice(1).map(t => t.lo)));
+
+    setResolution(S);
+    $('peaks').innerHTML = PEAKS.slice(0, 8).map(n =>
+      `<button type="button" class="peak" data-n="${n}">${fmt(n)}<em>${fmt(Math.round(EP[n]))} EP</em></button>`).join('');
+    $('peaks').addEventListener('click', e => {
+      const b = e.target.closest('[data-n]');
+      if (b) flyTo(Number(b.dataset.n));
+    });
+    $('hud').classList.add('on');
+  });
+}
+
+function renderAtlas(ctx) {
+  const { CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE } = ctx;
+  const tiers = CARD_TIER_NAMES.map((key, i) => ({
+    name: key, label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
+    lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
+  }));
+
+  const css = `
+  body { -webkit-user-select:none; user-select:none; }
+  #gl { position:fixed; top:0; left:var(--rail-w); width:calc(100% - var(--rail-w)); height:100%;
+    display:block; cursor:grab; touch-action:none; }
+  #gl:active { cursor:grabbing; }
+  .glass { position:fixed; z-index:5; background:rgba(12,14,22,.86); border:1px solid rgba(255,255,255,.12);
+    border-radius:var(--r-card); backdrop-filter:blur(6px); }
+
+  #hud { top:12px; left:calc(var(--rail-w) + 12px); width:250px; padding:12px; display:none;
+    flex-direction:column; gap:.7rem; max-height:calc(100vh - 24px); overflow:auto; }
+  #hud.on { display:flex; }
+  #hud h1 { font-size:14px; font-weight:650; margin:0; }
+  #hud .sub { font-size:11.5px; color:var(--muted); line-height:1.5; }
+  #hud a.back { font-size:11.5px; color:var(--muted); text-decoration:none; }
+  #hud a.back:hover { color:var(--text); }
+  .ctl { display:flex; flex-direction:column; gap:.25rem; }
+  .ctl > span { font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); font-weight:600; }
+  .ctl > span em { font-style:normal; color:var(--muted); font-family:var(--mono); letter-spacing:0; }
+  .ctl select, .ctl input[type=range] { width:100%; }
+  .ctl select { font-size:12px; padding:.35rem .45rem; background:rgba(255,255,255,.06);
+    border-color:rgba(255,255,255,.14); }
+  .chk { display:flex; align-items:center; gap:.45rem; font-size:12px; color:var(--dim); cursor:pointer; }
+  .row2 { display:flex; gap:6px; }
+  .row2 button { flex:1; font-size:12px; padding:.4rem .5rem; background:rgba(255,255,255,.06);
+    border-color:rgba(255,255,255,.14); }
+  #goto { display:flex; gap:6px; }
+  #gn { flex:1; min-width:0; font-size:12px; padding:.35rem .45rem; background:rgba(255,255,255,.06);
+    border-color:rgba(255,255,255,.14); }
+  #goto button { flex:0 0 auto; font-size:12px; padding:.35rem .6rem; background:rgba(255,255,255,.06);
+    border-color:rgba(255,255,255,.14); }
+  #peaks { display:flex; flex-direction:column; gap:1px; }
+  .peak { display:flex; justify-content:space-between; align-items:baseline; gap:.5rem; width:100%;
+    padding:.28rem .4rem; font-size:12px; font-weight:400; font-family:var(--mono); color:var(--dim);
+    background:transparent; border:0; border-radius:var(--r-sm); }
+  .peak:hover { background:rgba(255,255,255,.08); border:0; color:var(--text); }
+  .peak em { font-style:normal; font-size:11px; color:var(--faint); }
+
+  #read { top:12px; right:12px; width:210px; padding:11px 12px; display:none; flex-direction:column; gap:.3rem; }
+  #read.on { display:flex; }
+  .rd-top { display:flex; align-items:center; justify-content:space-between; gap:.5rem; margin-bottom:.3rem; }
+  .rd-n { font-family:var(--mono); font-size:1.05rem; font-weight:600; letter-spacing:-.02em; }
+  .rd-row { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); }
+  .rd-row b { font-family:var(--mono); font-weight:600; color:var(--text); }
+  .rd-open { margin-top:.45rem; font-size:11.5px; text-decoration:none; }
+
+  #legend { bottom:12px; right:12px; padding:9px 12px; display:flex; flex-wrap:wrap; gap:.35rem .8rem;
+    max-width:min(420px, 60vw); font-size:11.5px; color:var(--dim); }
+  #legend i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:.35rem; }
+  #help { bottom:12px; left:calc(var(--rail-w) + 12px); padding:7px 11px; font-size:11.5px; color:var(--muted); }
+  #help b { color:var(--dim); font-weight:600; }
+  @media (max-width:760px) { #legend, #help { display:none; } #hud { width:210px; } }`;
+
+  const legend = tiers.slice().reverse().map(t =>
+    `<span><i style="background:${t.accent}"></i>${t.label}</span>`).join('');
+
+  const body = `<canvas id="gl"></canvas>
+<div id="hud" class="glass">
+  <div>
+    <h1>EP Atlas <span class="beta-tag">beta</span></h1>
+    <div class="sub">All 1,000,000 numbers as terrain - across is n mod 1000, back is n / 1000,
+      up is EP.</div>
+    <a class="back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <label class="ctl"><span>Colour</span>
+    <select id="mode">
+      <option value="0">Card tier</option>
+      <option value="1">Height</option>
+      <option value="2">Badges earned</option>
+    </select></label>
+  <label class="ctl"><span>Height from</span>
+    <select id="hsrc">
+      <option value="log">EP - log scale</option>
+      <option value="lin">EP - linear</option>
+      <option value="count">Badges earned</option>
+    </select></label>
+  <label class="ctl"><span>Detail</span>
+    <select id="res">
+      <option value="250">250 x 250 - fast</option>
+      <option value="500">500 x 500</option>
+      <option value="1000" selected>1000 x 1000 - every number</option>
+    </select></label>
+  <label class="ctl"><span>Exaggeration <em id="exagv">1x</em></span>
+    <input id="exag" type="range" min=".25" max="3" step=".05" value="1"></label>
+  <label class="chk"><input id="grid" type="checkbox" checked> 100k gridlines</label>
+  <div class="row2"><button type="button" id="top">Top down</button>
+    <button type="button" id="reset">Reset</button></div>
+  <form id="goto"><input id="gn" type="text" inputmode="numeric" placeholder="Fly to number…"
+    autocomplete="off"><button type="submit">Go</button></form>
+  <div class="ctl"><span>Tallest points</span><div id="peaks"></div></div>
+</div>
+<div id="read" class="glass"></div>
+<div id="legend" class="glass">${legend}</div>
+<div id="help" class="glass"><b>Drag</b> to orbit · <b>Shift-drag</b> to pan · <b>Wheel</b> to zoom ·
+  <b>Click</b> a point to read it</div>
+${overlayHTML('Then lifting the 1000x1000 map into a height field.')}`;
+
+  const script = `${BETA_BOOT_JS}
+const __W = ${JSON.stringify(workerSrc(atlasWorker))};
+(${atlasClient.toString()})(__W, ${JSON.stringify(tiers)});`;
+
+  return betaShell({
+    title: 'RNGdle - EP Atlas', slug: 'atlas', full: true, css, body, script,
+    viewport: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no',
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
 
@@ -865,5 +1456,6 @@ export function handleBeta(path, ctx) {
 // slug -> renderer. Every entry must have a matching BETA_TOOLS record (that is what
 // puts it on the index and makes the route resolve).
 const RENDERERS = {
+  atlas: renderAtlas,
   pairs: renderPairs,
 };
