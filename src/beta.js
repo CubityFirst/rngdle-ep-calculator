@@ -39,6 +39,12 @@ export const BETA_TOOLS = [
     note: 'Also measures the supersession tax - EP earned but never scored.',
   },
   {
+    slug: 'oracle', title: 'Digit Oracle', kind: 'Interactive',
+    blurb: 'Half a number is already worth something. Lock any digits and every ' +
+      'remaining choice is re-scored against the numbers that still match.',
+    note: 'Mean EP behind all 60 digit-position choices, conditional on what you know.',
+  },
+  {
     slug: 'spectrum', title: 'Badge Spectrum', kind: '2D',
     blurb: 'Every badge as a density stripe across the full range. Periodic rules ' +
       'show up as banding, digit-length rules as hard steps.',
@@ -206,6 +212,11 @@ const THUMBS = {
     <path d="M4 36 L60 4" stroke-dasharray="4 3" opacity=".5"/>`,
   spectrum: `<path d="M4 8h56M4 14h56M4 20h56M4 26h56M4 32h56" stroke-dasharray="2 5" opacity=".9"/>
     <path d="M4 11h56M4 17h56M4 23h56M4 29h56" stroke-dasharray="7 3" opacity=".35"/>`,
+  oracle: `<rect x="4" y="6" width="10" height="28" rx="2" opacity=".3"/>
+    <rect x="17" y="6" width="10" height="28" rx="2" opacity=".95"/>
+    <rect x="30" y="6" width="10" height="28" rx="2" opacity=".3"/>
+    <rect x="43" y="6" width="10" height="28" rx="2" opacity=".55"/>
+    <path d="M19 13h6M19 20h6M19 27h6" opacity=".9"/>`,
 };
 
 export function renderBetaIndex() {
@@ -2218,6 +2229,349 @@ const __W = ${JSON.stringify(workerSrc(spectrumWorker))};
 }
 
 // ---------------------------------------------------------------------------
+// /beta/oracle - which digit, in which position, is actually worth anything.
+//
+// Every other tool here looks at badges. This one looks at the digits, and asks the
+// question a player actually has: with the number half-known, what is the rest worth?
+//
+// Fix any digits you like and the worker rescans the 900,000 six-digit numbers that
+// still match, reporting the mean EP behind every remaining choice. Locking a digit
+// re-runs it against the survivors, so the board is always conditional on what is
+// already known - which is where the surprises are, because a digit that is worth
+// nothing on its own can be worth a great deal next to the right neighbour.
+//
+// Six-digit numbers only (100,000-999,999). They are 90% of the range, and mixing in
+// the shorter ones would mean a fixed leading 0 silently changing the rules that apply.
+// ---------------------------------------------------------------------------
+
+function oracleWorker() {
+  const LO = 100000, HI = 999999;
+  const DIV = [100000, 10000, 1000, 100, 10, 1];
+  const HB = 48;                                  // histogram bins, log EP
+  let EP = null, CNT = null, lgMax = 1, p99 = 0;
+
+  function query(fix) {
+    // Per (position, digit) accumulators for the six positions still free, plus the
+    // overall stats for whatever is left after the fixed digits are applied.
+    const cN = new Float64Array(60), cEP = new Float64Array(60), cTop = new Float64Array(60);
+    const hist = new Float64Array(HB);
+    let count = 0, sumEP = 0, sumC = 0, nTop = 0;
+    let best = -1, bestEP = -1, worst = -1, worstEP = Infinity;
+    const tops = [];
+
+    for (let n = LO; n <= HI; n++) {
+      let ok = true;
+      for (let p = 0; p < 6; p++) {
+        if (fix[p] >= 0 && ((n / DIV[p]) | 0) % 10 !== fix[p]) { ok = false; break; }
+      }
+      if (!ok) continue;
+      const e = EP[n];
+      count++; sumEP += e; sumC += CNT[n];
+      const isTop = e >= p99;
+      if (isTop) nTop++;
+      if (e > bestEP) { bestEP = e; best = n; }
+      if (e < worstEP) { worstEP = e; worst = n; }
+      hist[Math.min(HB - 1, (Math.log10(1 + e) / lgMax * HB) | 0)]++;
+      for (let p = 0; p < 6; p++) {
+        if (fix[p] >= 0) continue;
+        const k = p * 10 + ((n / DIV[p]) | 0) % 10;
+        cN[k]++; cEP[k] += e; if (isTop) cTop[k]++;
+      }
+      if (tops.length < 5 || e > tops[tops.length - 1][1]) {
+        tops.push([n, e]);
+        tops.sort((a, b) => b[1] - a[1]);
+        if (tops.length > 5) tops.length = 5;
+      }
+    }
+    return { type: 'q', fix, count, meanEP: count ? sumEP / count : 0, meanC: count ? sumC / count : 0,
+      pTop: count ? nTop / count : 0, best, bestEP, worst, worstEP, tops,
+      cN: cN.buffer, cEP: cEP.buffer, cTop: cTop.buffer, hist: hist.buffer };
+  }
+
+  self.onmessage = async ev => {
+    const m = ev.data;
+    if (m.cmd === 'init') {
+      try {
+        const swept = await betaSweep(m.origin, 0.85);
+        EP = swept.ep; CNT = swept.cnt;
+        self.postMessage({ type: 'progress', pct: 0.9, msg: 'Ranking the six-digit numbers…' });
+        let max = 0;
+        for (let n = LO; n <= HI; n++) if (EP[n] > max) max = EP[n];
+        lgMax = Math.log10(1 + max);
+        // The "top 1%" cutoff every cell is scored against, over six-digit numbers only.
+        const sorted = Float64Array.from(EP.subarray(LO, HI + 1)).sort();
+        p99 = sorted[Math.floor(sorted.length * 0.99)];
+        const q = query([-1, -1, -1, -1, -1, -1]);
+        self.postMessage(Object.assign({}, q, { type: 'ready', p99, max, HB }),
+          [q.cN, q.cEP, q.cTop, q.hist]);
+      } catch (e) {
+        self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
+      }
+      return;
+    }
+    if (m.cmd === 'query') {
+      const q = query(m.fix);
+      self.postMessage(q, [q.cN, q.cEP, q.cTop, q.hist]);
+    }
+  };
+}
+
+function oracleClient(WORKER_SRC, TIERS) {
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.round(n).toLocaleString();
+  // EP runs to nine figures at the top of the range and a stat tile is 150px wide.
+  const compact = n => n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M'
+    : n >= 1e4 ? (n / 1e3).toFixed(0) + 'k' : fmt(n);
+  let W = null, fix = [-1, -1, -1, -1, -1, -1], Q = null, P99 = 0, HB = 48, busy = false;
+  let metric = 'ep';
+
+  const METRICS = {
+    ep: { label: 'mean EP', val: (ep, n, t) => n ? ep / n : 0, fmt: v => fmt(v) },
+    top: { label: 'chance of a top 1% number', val: (ep, n, t) => n ? t / n : 0, fmt: v => (v * 100).toFixed(2) + '%' },
+  };
+
+  const RAMP = [[16, 18, 24], [30, 44, 74], [46, 96, 150], [104, 160, 224], [200, 220, 250], [255, 250, 238]];
+  function ramp(t) {
+    t = t <= 0 ? 0 : t >= 1 ? 1 : t;
+    const x = t * (RAMP.length - 1), i = Math.min(RAMP.length - 2, x | 0), f = x - i;
+    const a = RAMP[i], b = RAMP[i + 1];
+    return `rgb(${(a[0] + (b[0] - a[0]) * f) | 0},${(a[1] + (b[1] - a[1]) * f) | 0},${(a[2] + (b[2] - a[2]) * f) | 0})`;
+  }
+
+  // --- board -------------------------------------------------------------
+  function board() {
+    const M = METRICS[metric];
+    const cN = new Float64Array(Q.cN), cEP = new Float64Array(Q.cEP), cTop = new Float64Array(Q.cTop);
+    // One shared colour scale over every live cell, so a column's colours mean the
+    // same thing as its neighbour's - the comparison across positions is the point.
+    let lo = Infinity, hi = -Infinity;
+    for (let k = 0; k < 60; k++) {
+      if (fix[(k / 10) | 0] >= 0 || !cN[k]) continue;
+      const v = M.val(cEP[k], cN[k], cTop[k]);
+      if (v < lo) lo = v; if (v > hi) hi = v;
+    }
+    const span = hi - lo || 1;
+
+    const cols = [];
+    for (let p = 0; p < 6; p++) {
+      const cells = [];
+      for (let d = 0; d < 10; d++) {
+        if (p === 0 && d === 0) { cells.push('<div class="cell off" aria-hidden="true"></div>'); continue; }
+        const k = p * 10 + d;
+        if (fix[p] >= 0) {
+          cells.push(`<div class="cell ${fix[p] === d ? 'locked' : 'dim'}">${d}</div>`);
+          continue;
+        }
+        if (!cN[k]) { cells.push(`<div class="cell none" title="no number left with a ${d} here">${d}</div>`); continue; }
+        const v = M.val(cEP[k], cN[k], cTop[k]);
+        const t = (v - lo) / span;
+        cells.push(`<button type="button" class="cell live" data-p="${p}" data-d="${d}"
+          style="background:${ramp(t)};color:${t > .6 ? '#0a1220' : '#e7e8ea'}"
+          title="${d} here: ${M.fmt(v)} across ${fmt(cN[k])} numbers">${d}<em>${M.fmt(v)}</em></button>`);
+      }
+      cols.push(`<div class="col${fix[p] >= 0 ? ' fixed' : ''}">
+        <div class="chead">${fix[p] >= 0
+          ? `<button type="button" class="unlock" data-un="${p}" title="Unlock this position">${fix[p]}<span>&times;</span></button>`
+          : `<span class="q">?</span>`}</div>
+        <div class="cells">${cells.join('')}</div>
+        <div class="cfoot">${['100k', '10k', '1k', '100', '10', '1'][p]}</div>
+      </div>`);
+    }
+    $('board').innerHTML = cols.join('');
+  }
+
+  // --- summary -----------------------------------------------------------
+  function tierOf(ep) { let t = TIERS[0]; for (const x of TIERS) if (ep >= x.lo) t = x; return t; }
+
+  function summary() {
+    const pat = fix.map(d => d < 0 ? '<i>?</i>' : d).join('');
+    const bt = tierOf(Q.bestEP);
+    $('pattern').innerHTML = pat;
+    $('summary').innerHTML = `
+      <div class="stat stat-lg"><span class="k">Numbers left</span><span class="v">${fmt(Q.count)}</span>
+        <span class="sub">${(100 * Q.count / 900000).toFixed(Q.count < 900 ? 4 : 2)}% of the six-digit range</span></div>
+      <div class="stat stat-lg"><span class="k">Mean EP</span><span class="v">${fmt(Q.meanEP)}</span>
+        <span class="sub">${Q.meanC.toFixed(1)} badges on average</span></div>
+      <div class="stat stat-lg"><span class="k">Top 1% chance</span><span class="v">${(100 * Q.pTop).toFixed(2)}%</span>
+        <span class="sub">EP over ${fmt(P99)}</span></div>
+      <div class="stat stat-lg"><span class="k">Best case</span><span class="v">${compact(Q.bestEP)}</span>
+        <span class="sub">EP · <a href="/?n=${Q.best}">${Q.best.toLocaleString()}</a> · ${bt.label}</span></div>`;
+
+    $('tops').innerHTML = Q.tops.map(([n, e]) => {
+      const t = tierOf(e);
+      return `<a class="toprow" href="/?n=${n}"><span class="tn">${n.toLocaleString()}</span>
+        <span class="pill" style="--tc:${t.accent}">${t.label}</span>
+        <span class="te">${fmt(e)} EP</span></a>`;
+    }).join('');
+
+    // Distribution of the survivors, on the same log-EP axis every query uses, so the
+    // shape can be compared as digits are locked in rather than rescaling each time.
+    const hist = new Float64Array(Q.hist);
+    const mx = Math.max(...hist) || 1;
+    $('hist').innerHTML = Array.from(hist, (v, i) =>
+      `<i style="height:${(100 * v / mx).toFixed(1)}%" title="${fmt(v)} numbers"></i>`).join('');
+  }
+
+  // --- driving the worker -------------------------------------------------
+  function send() {
+    if (busy) return;
+    busy = true;
+    $('board').classList.add('working');
+    W.postMessage({ cmd: 'query', fix: fix.slice() });
+  }
+  function got(m) {
+    if (m.type !== 'q') return;
+    Q = m; busy = false;
+    $('board').classList.remove('working');
+    board(); summary();
+  }
+
+  document.addEventListener('click', e => {
+    const cell = e.target.closest('[data-p]');
+    if (cell) { fix[+cell.dataset.p] = +cell.dataset.d; send(); return; }
+    const un = e.target.closest('[data-un]');
+    if (un) { fix[+un.dataset.un] = -1; send(); return; }
+  });
+  $('reset').addEventListener('click', () => { fix = [-1, -1, -1, -1, -1, -1]; send(); });
+  $('greedy').addEventListener('click', () => {
+    // Lock the single best remaining choice, then let the next result drive the next
+    // step - each pick is conditional on the last, which is the whole point.
+    const M = METRICS[metric];
+    const cN = new Float64Array(Q.cN), cEP = new Float64Array(Q.cEP), cTop = new Float64Array(Q.cTop);
+    let bk = -1, bv = -Infinity;
+    for (let k = 0; k < 60; k++) {
+      if (fix[(k / 10) | 0] >= 0 || !cN[k]) continue;
+      const v = M.val(cEP[k], cN[k], cTop[k]);
+      if (v > bv) { bv = v; bk = k; }
+    }
+    if (bk < 0) return;
+    fix[(bk / 10) | 0] = bk % 10;
+    send();
+  });
+  $('metric').addEventListener('change', e => { metric = e.target.value; board(); });
+
+  betaBoot(WORKER_SRC, got).then(({ worker, data }) => {
+    W = worker; Q = data; P99 = data.p99; HB = data.HB;
+    $('page').classList.add('on');
+    board(); summary();
+  });
+}
+
+function renderOracle(ctx) {
+  const { CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE } = ctx;
+  const tiers = CARD_TIER_NAMES.map((key, i) => ({
+    label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
+    lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
+  }));
+
+  const css = `
+  #page { display:none; }
+  #page.on { display:block; }
+  .bar { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; margin-bottom:1rem; }
+  .bar label { font-size:.78rem; color:var(--muted); }
+  .bar select { font-size:.85rem; padding:.4rem .5rem; }
+  .bar .grow { flex:1; }
+
+  #pattern { font-family:var(--mono); font-size:2.1rem; font-weight:600; letter-spacing:.14em;
+    margin-bottom:.9rem; }
+  #pattern i { font-style:normal; color:var(--faint); }
+
+  .cols { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,320px); gap:1rem; align-items:start; }
+  @media (max-width:980px) { .cols { grid-template-columns:1fr; } }
+
+  #board { display:grid; grid-template-columns:repeat(6,1fr); gap:.5rem; transition:opacity .12s; }
+  #board.working { opacity:.55; }
+  .col { display:flex; flex-direction:column; gap:.3rem; min-width:0; }
+  .chead { height:34px; display:flex; align-items:center; justify-content:center; }
+  .chead .q { font-family:var(--mono); font-size:1.2rem; color:var(--faint); }
+  .unlock { padding:.15rem .5rem; font-family:var(--mono); font-size:1.05rem; font-weight:700;
+    color:var(--hl-lt); background:color-mix(in srgb, var(--hl) 18%, transparent);
+    border-color:color-mix(in srgb, var(--hl) 45%, transparent); }
+  .unlock span { color:var(--faint); font-size:.8rem; }
+  .cells { display:flex; flex-direction:column; gap:2px; }
+  .cell { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+    height:38px; border-radius:var(--r-sm); font-family:var(--mono); font-size:.95rem; font-weight:600;
+    border:1px solid transparent; background:var(--surface-2); color:var(--muted); padding:0; }
+  .cell em { font-style:normal; font-size:.6rem; font-weight:500; opacity:.85; letter-spacing:-.02em; }
+  .cell.live { cursor:pointer; }
+  .cell.live:hover { border-color:var(--text); }
+  .cell.off { background:transparent; }
+  .cell.none { background:var(--surface); color:var(--faint); opacity:.35; }
+  .cell.dim { background:var(--surface); color:var(--faint); opacity:.3; }
+  .cell.locked { background:var(--hl); color:var(--on-accent); border-color:var(--hl); }
+  .cfoot { text-align:center; font-size:.66rem; color:var(--faint); font-family:var(--mono); }
+  @media (max-width:640px) { .cell { height:30px; font-size:.82rem; } .cell em { display:none; } }
+
+  #side { display:flex; flex-direction:column; gap:.7rem; }
+  #summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; }
+  #summary .stat { min-width:0; overflow-wrap:anywhere; }
+  #hist { display:flex; align-items:flex-end; gap:1px; height:78px; padding:.2rem;
+    background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-sm); }
+  #hist i { flex:1; background:var(--accent); border-radius:1px 1px 0 0; min-height:1px; }
+  .histax { display:flex; justify-content:space-between; margin-top:.25rem; font-size:.68rem;
+    color:var(--faint); font-family:var(--mono); }
+  .toprow { display:flex; align-items:center; gap:.5rem; padding:.3rem .35rem; text-decoration:none;
+    border-radius:var(--r-sm); color:var(--dim); }
+  .toprow:hover { background:var(--surface-2); color:var(--text); }
+  .toprow .tn { flex:1; font-family:var(--mono); font-size:.88rem; }
+  .toprow .te { font-family:var(--mono); font-size:.75rem; color:var(--faint); }
+  .small { font-size:.78rem; line-height:1.5; margin:-.35rem 0 .6rem; }`;
+
+  const body = `<div class="wrap">
+  <div class="tool-head">
+    <h1>Digit Oracle <span class="beta-tag">beta</span></h1>
+    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <p class="tag">Lock a digit and every remaining choice is re-scored against the numbers that still
+    match. Six-digit numbers only.</p>
+
+  <div id="page">
+    <div class="bar">
+      <label for="metric">Score by</label>
+      <select id="metric">
+        <option value="ep">Mean EP</option>
+        <option value="top">Chance of a top 1% number</option>
+      </select>
+      <span class="grow"></span>
+      <button type="button" id="greedy" class="btn-sm">Lock the best one</button>
+      <button type="button" id="reset" class="btn-sm btn-ghost">Reset</button>
+    </div>
+
+    <div id="pattern"></div>
+
+    <div class="cols">
+      <section class="card"><div id="board"></div></section>
+      <div id="side">
+        <div id="summary"></div>
+        <section class="card"><h2>Where the survivors score</h2>
+          <p class="muted small">EP of every number that still matches, on a log axis.</p>
+          <div id="hist"></div>
+          <div class="histax"><span>low EP</span><span>high EP</span></div>
+        </section>
+        <section class="card"><h2>Best still reachable</h2>
+          <div id="tops"></div></section>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Each cell is the mean over every six-digit number that matches the digits already locked
+    <b>and</b> has that digit in that position - so the board changes meaning with every lock, and a
+    digit worth little on its own can be worth a lot beside the right neighbour. The <b>100k</b> column
+    is the leading digit and <b>1</b> the last. Numbers below 100,000 are left out: fixing a leading
+    zero would quietly change which rules apply.
+  </footer>
+</div>
+${overlayHTML('Then scoring every digit in every position against the 900,000 six-digit numbers.')}`;
+
+  const script = `${BETA_BOOT_JS}
+const __W = ${JSON.stringify(workerSrc(oracleWorker))};
+(${oracleClient.toString()})(__W, ${JSON.stringify(tiers)});`;
+
+  return betaShell({ title: 'RNGdle - Digit Oracle', width: '1080px', slug: 'oracle', css, body, script });
+}
+
+// ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
 
@@ -2243,4 +2597,5 @@ const RENDERERS = {
   pairs: renderPairs,
   economy: renderEconomy,
   spectrum: renderSpectrum,
+  oracle: renderOracle,
 };
