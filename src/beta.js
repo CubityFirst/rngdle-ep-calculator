@@ -147,6 +147,10 @@ const BETA_BOOT_JS = `
 // Anything in 'init' is merged into the opening message - that is how a tool hands
 // the worker server-rendered data (EP per badge, family map) it would otherwise
 // have to rebuild.
+//
+// On failure this reports into the overlay and never settles: there is nothing for
+// the tool to carry on with, and rejecting would only add an unhandled-rejection log
+// on top of the message already on screen.
 function betaBoot(workerSrc, onMsg, init) {
   const ov = document.getElementById('ov');
   const bar = document.getElementById('ovbar');
@@ -155,7 +159,7 @@ function betaBoot(workerSrc, onMsg, init) {
   const url = URL.createObjectURL(new Blob([workerSrc], { type: 'text/javascript' }));
   const w = new Worker(url, { type: 'module' });
   URL.revokeObjectURL(url);
-  return new Promise((resolve, reject) => {
+  return new Promise(resolve => {
     w.onmessage = ev => {
       const m = ev.data;
       if (m.type === 'progress') {
@@ -175,7 +179,7 @@ function betaBoot(workerSrc, onMsg, init) {
       if (head) head.textContent = 'Could not build the data set';
       if (text) text.textContent = String(err && err.message || err);
       if (bar) bar.style.background = 'var(--bad)';
-      reject(err);
+      w.terminate();
     };
     w.onerror = e => fail(new Error(e.message || 'worker failed'));
     w.postMessage(Object.assign({ cmd: 'init', origin: location.origin }, init || {}));
@@ -957,7 +961,7 @@ function atlasClient(WORKER_SRC, TIERS) {
   let EP = null, CNT = null, MAXEP = 1, PEAKS = [];
   let S = 1000, mode = 0, exag = 1, hsrc = 'log', showGrid = true;
   let mesh = null, tex = null, prog = null, vao = null, uni = {};
-  let sel = -1, hoverCell = -1;
+  let sel = -1;
 
   // --- shaders -----------------------------------------------------------
   const VS = `#version 300 es
@@ -1709,7 +1713,7 @@ function economyClient(WORKER_SRC, META, FAMS, PAL) {
   $('chart').addEventListener('mouseover', e => {
     const c = e.target.closest('[data-i]');
     if (!c) return;
-    const r = ROWS[ROWS.findIndex(x => x.i === Number(c.dataset.i))];
+    const r = ROWS.find(x => x.i === Number(c.dataset.i));
     const m = META[r.i];
     tip.innerHTML = `<b>${m[1]} ${m[0]}</b>
       <span>${fmt(m[2])} EP · earned by ${pctf(100 * r.earn / N)} of numbers</span>
@@ -1933,9 +1937,13 @@ function spectrumWorker() {
           last[i] = n;
         }
       }
-      // A trailing run counts too: a badge whose last earner is early has a huge gap
-      // to the end of the range, and that is exactly the interesting case.
-      for (let i = 0; i < B; i++) if (last[i] >= 0 && N - 1 - last[i] > gap[i]) gap[i] = N - 1 - last[i];
+      // The runs at both ends count too: a badge that starts late or stops early has a
+      // huge gap there, and those are exactly the interesting cases.
+      for (let i = 0; i < B; i++) {
+        if (first[i] < 0) continue;
+        if (first[i] > gap[i]) gap[i] = first[i];
+        if (N - 1 - last[i] > gap[i]) gap[i] = N - 1 - last[i];
+      }
 
       self.postMessage({ type: 'ready', dens: dens.buffer, first: first.buffer, last: last.buffer,
         gap: gap.buffer, byLen: byLen.buffer, B, BLK, N },
@@ -2339,7 +2347,7 @@ function oracleWorker() {
         const sorted = Float64Array.from(EP.subarray(LO, HI + 1)).sort();
         p99 = sorted[Math.floor(sorted.length * 0.99)];
         const q = query([-1, -1, -1, -1, -1, -1]);
-        self.postMessage(Object.assign({}, q, { type: 'ready', p99, max, HB }),
+        self.postMessage(Object.assign({}, q, { type: 'ready', p99, max }),
           [q.cN, q.cEP, q.cTop, q.hist]);
       } catch (e) {
         self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
@@ -2359,7 +2367,7 @@ function oracleClient(WORKER_SRC, TIERS) {
   // EP runs to nine figures at the top of the range and a stat tile is 150px wide.
   const compact = n => n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M'
     : n >= 1e4 ? (n / 1e3).toFixed(0) + 'k' : fmt(n);
-  let W = null, fix = [-1, -1, -1, -1, -1, -1], Q = null, P99 = 0, HB = 48, busy = false;
+  let W = null, fix = [-1, -1, -1, -1, -1, -1], Q = null, P99 = 0, busy = false;
   let metric = 'ep';
 
   const METRICS = {
@@ -2488,7 +2496,7 @@ function oracleClient(WORKER_SRC, TIERS) {
   $('metric').addEventListener('change', e => { metric = e.target.value; board(); });
 
   betaBoot(WORKER_SRC, got).then(({ worker, data }) => {
-    W = worker; Q = data; P99 = data.p99; HB = data.HB;
+    W = worker; Q = data; P99 = data.p99;
     $('page').classList.add('on');
     board(); summary();
   });
@@ -3097,7 +3105,7 @@ function collectorClient(WORKER_SRC, META, PAL) {
   const $ = id => document.getElementById(id);
   const fmt = n => Math.round(n).toLocaleString();
   const compact = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(0) + 'k' : fmt(n);
-  let EARN = null, N = 0, T = null, D = null;
+  let EARN = null, N = 0, T = null;
 
   // Exact expected number of distinct badges after n rolls - no simulation needed,
   // because expectation is linear even though the badges are wildly dependent.
