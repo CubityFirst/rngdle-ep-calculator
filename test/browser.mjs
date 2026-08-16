@@ -75,8 +75,8 @@ function findChromium() {
 
 // --- the pages and what to poke on them ------------------------------------
 const PAGES = ['/beta', '/beta/atlas', '/beta/projections', '/beta/spectrum', '/beta/contact',
-  '/beta/pairs', '/beta/oracle', '/beta/nearmiss', '/beta/luck', '/beta/collector',
-  '/beta/anatomy', '/beta/economy', '/beta/species'];
+  '/beta/pairs', '/beta/oracle', '/beta/nearmiss', '/beta/collection', '/beta/luck',
+  '/beta/collector', '/beta/anatomy', '/beta/economy', '/beta/species'];
 
 const INTERACTIONS = {
   '/beta/pairs': [
@@ -194,6 +194,19 @@ const INTERACTIONS = {
       .then(() => p.textContent('#title .tn'))],
     ['type a number', p => p.fill('#n', '80085').then(() => p.click('#go button'))
       .then(() => p.textContent('#title .tn'))],
+  ],
+  // The username path is left alone here as well - it calls rngdle's API. Pasted rolls
+  // exercise the same engine scoring and the same rendering.
+  '/beta/collection': [
+    ['score rolls', async p => {
+      await p.fill('#paste', '696969, 123456, 100000, 777777, 42');
+      await p.click('#paste-go');
+      await p.waitForFunction(() => document.getElementById('out').classList.contains('on'),
+        null, { timeout: 20000 });
+      return p.$eval('#stats .stat .v', e => e.textContent + ' badges');
+    }],
+    ['order', p => p.selectOption('#group', 'missing').then(() => p.$eval('#grid .cb', e => e.textContent.trim()))],
+    ['next up', p => p.$eval('#next', e => e.children.length + ' rows')],
   ],
   '/beta/atlas': [
     ['colour', p => p.selectOption('#mode', '2').then(() => 'ok')],

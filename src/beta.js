@@ -71,6 +71,12 @@ export const BETA_TOOLS = [
     note: 'Peaks, valleys, and how much of the range is one digit from a mythic.',
   },
   {
+    slug: 'collection', see: ['collector', 'luck'], title: 'Your Collection', kind: 'Player',
+    blurb: 'Which of the 230 badges you actually have, which you do not, and how long ' +
+      'the ones you are missing would realistically take to turn up.',
+    note: 'The one tool here that needs no sweep - it loads instantly.',
+  },
+  {
     slug: 'luck', see: ['collector', 'species'], title: 'Luck Lab', kind: 'Odds',
     blurb: 'What a roll is worth before you make it. Exact tier odds, what your best ' +
       'should look like after N rolls, and how lucky a real player actually got.',
@@ -314,6 +320,9 @@ const THUMBS = {
     <rect x="4" y="22" width="15" height="14" rx="2" opacity=".35"/>
     <rect x="23" y="22" width="15" height="14" rx="2" opacity=".55"/>
     <rect x="42" y="22" width="15" height="14" rx="2" opacity=".35"/>`,
+  collection: `<rect x="4" y="6" width="16" height="12" rx="2"/><rect x="24" y="6" width="16" height="12" rx="2" opacity=".3"/>
+    <rect x="44" y="6" width="16" height="12" rx="2"/><rect x="4" y="22" width="16" height="12" rx="2" opacity=".3"/>
+    <rect x="24" y="22" width="16" height="12" rx="2"/><rect x="44" y="22" width="16" height="12" rx="2" opacity=".3"/>`,
   luck: `<path d="M4 34 C 14 34, 18 30, 22 20 S 28 4, 33 4 S 40 12, 45 22 S 54 34, 60 34"/>
     <path d="M45 34v-8M52 34v-4" opacity=".45"/>`,
   anatomy: `<path d="M6 8h40M6 15h28M6 22h48M6 29h16" stroke-width="5" stroke-linecap="round"/>
@@ -5460,6 +5469,261 @@ const __W = ${JSON.stringify(workerSrc(contactWorker))};
   return betaShell({ title: 'RNGdle - Contact Sheet', width: '1180px', slug: 'contact', css, body, script });
 }
 
+
+// ---------------------------------------------------------------------------
+// /beta/collection - which badges a player is actually missing.
+//
+// /u counts a player's distinct badges; nothing anywhere says WHICH. This does, and
+// then ranks the missing ones by how long the wait for each realistically is.
+//
+// The only tool here that does not sweep. It does not need to: a player has a few
+// hundred rolls, so scoring them one at a time through the engine is instant, and every
+// badge's exact share of the range is already committed in probabilities.gen.js. So it
+// loads in well under a second even on a cold browser, which for the one tool a player
+// is most likely to open first is worth more than consistency with the others.
+// ---------------------------------------------------------------------------
+
+// META[i] = [label, emoji, ep, tier, familyIndex, id, probPercent]
+function collectionClient(META, TIERS, PAL) {
+  const B = META.length;
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.round(n).toLocaleString();
+  const compact = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(0) + 'k' : fmt(n);
+  const pctf = p => p === 0 ? '0%' : p >= 1 ? p.toFixed(1) + '%' : p >= 0.01 ? p.toFixed(2) + '%' : p.toFixed(4) + '%';
+  const tierOf = ep => { let x = TIERS[0]; for (const y of TIERS) if (ep >= y.lo) x = y; return x; };
+  let E = null, group = 'rarity';
+  let have = null, rolls = 0, who = '';
+
+  async function engine() {
+    if (!E) E = await import(location.origin + '/engine.js');
+    return E;
+  }
+
+  function order() {
+    const all = Array.from({ length: B }, (_, i) => i);
+    if (group === 'family') {
+      return all.sort((a, b) => {
+        const fa = META[a][4] < 0 ? 999 : META[a][4], fb = META[b][4] < 0 ? 999 : META[b][4];
+        return fa - fb || META[b][2] - META[a][2] || a - b;
+      });
+    }
+    if (group === 'missing') {
+      // Rarest first among what you have, commonest first among what you do not - so
+      // the top of the list is your best badge and the bottom is the wall.
+      return all.sort((a, b) => (have[a] === have[b])
+        ? (have[a] ? META[b][2] - META[a][2] : META[a][2] - META[b][2])
+        : (have[b] ? 1 : -1) - (have[a] ? 1 : -1));
+    }
+    return all.sort((a, b) => META[b][2] - META[a][2] || a - b);   // rarity
+  }
+
+  function render() {
+    const got = [], missing = [];
+    for (let i = 0; i < B; i++) (have[i] ? got : missing).push(i);
+
+    $('grid').innerHTML = order().map(i => {
+      const m = META[i], mine = have[i];
+      return `<a class="cb${mine ? ' on' : ''}" href="/badges#${m[5]}" style="--tc:${PAL[m[3]]}"
+        title="${m[0]} - ${pctf(m[6])} of numbers earn it${mine ? '' : ' - not yet'}">
+        <span class="ce">${m[1]}</span><span class="cn">${m[0]}</span></a>`;
+    }).join('');
+
+    // Expected rolls for the next one of each missing badge is 1/p; the chance of
+    // getting it within another `rolls` is 1-(1-p)^rolls, which is the number that
+    // actually answers "is this ever happening".
+    const soon = missing.map(i => ({ i, p: META[i][6] / 100 }))
+      .sort((a, b) => b.p - a.p);
+    const again = Math.max(rolls, 1);
+    $('next').innerHTML = soon.slice(0, 12).map(x => `<a class="mrow" href="/badges#${META[x.i][5]}">
+      <span class="me">${META[x.i][1]}</span>
+      <span class="ml">${META[x.i][0]}<em>${pctf(META[x.i][6])} of numbers</em></span>
+      <span class="mv">${x.p > 0 ? compact(1 / x.p) + ' rolls' : 'unreachable'}
+        <i>${(100 * (1 - Math.pow(1 - x.p, again))).toFixed(0)}% in another ${fmt(again)}</i></span></a>`).join('')
+      || '<p class="muted small">Nothing left to collect.</p>';
+
+    const wall = soon.slice(-8).reverse();
+    $('wall').innerHTML = wall.map(x => `<a class="mrow" href="/badges#${META[x.i][5]}">
+      <span class="me">${META[x.i][1]}</span>
+      <span class="ml">${META[x.i][0]}<em>${pctf(META[x.i][6])} of numbers</em></span>
+      <span class="mv">${x.p > 0 ? compact(1 / x.p) + ' rolls' : 'unreachable'}</span></a>`).join('');
+
+    const rarest = got.slice().sort((a, b) => META[b][2] - META[a][2])[0];
+    const t = rarest === undefined ? null : tierOf(META[rarest][2]);
+    // Expected count after this many rolls, so "am I ahead or behind" has an answer.
+    let expect = 0;
+    for (let i = 0; i < B; i++) expect += 1 - Math.pow(1 - META[i][6] / 100, again);
+
+    $('stats').innerHTML = `
+      <div class="stat stat-lg"><span class="k">Collected</span><span class="v">${got.length}</span>
+        <span class="sub">of ${B} badges · ${(100 * got.length / B).toFixed(0)}%</span></div>
+      <div class="stat stat-lg"><span class="k">Par for ${fmt(rolls)} rolls</span><span class="v">${expect.toFixed(0)}</span>
+        <span class="sub">${got.length >= expect ? 'you are ahead of' : 'you are behind'} the average collection</span></div>
+      <div class="stat stat-lg"><span class="k">Rarest so far</span><span class="v">${
+        rarest === undefined ? '-' : pctf(META[rarest][6])}</span>
+        <span class="sub">${rarest === undefined ? 'nothing yet'
+          : `${META[rarest][1]} ${META[rarest][0]} · <span class="pill" style="--tc:${t.accent}">${t.label}</span>`}</span></div>
+      <div class="stat stat-lg"><span class="k">Still missing</span><span class="v">${missing.length}</span>
+        <span class="sub">${missing.filter(i => META[i][6] < 0.001).length} of them one-in-a-million</span></div>`;
+
+    $('who').innerHTML = `<span class="wn">${who}</span><span class="wr">${fmt(rolls)} rolls scored</span>`;
+    $('out').classList.add('on');
+  }
+
+  async function analyse(nums, label) {
+    const valid = nums.filter(n => Number.isInteger(n) && n >= 0 && n <= 1000000);
+    if (!valid.length) { $('msg').innerHTML = '<p class="err">No usable numbers.</p>'; return; }
+    $('msg').innerHTML = '<div class="loading"><span class="spinner"></span>Scoring…</div>';
+    const eng = await engine();
+    have = new Uint8Array(B);
+    for (const n of valid) for (const i of eng.computeLean(n).earned) have[i] = 1;
+    rolls = valid.length; who = label;
+    $('msg').innerHTML = '';
+    render();
+  }
+
+  $('user-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const u = ($('user').value.match(/[A-Za-z0-9_.-]+/) || [])[0];
+    if (!u) return;
+    $('msg').innerHTML = '<div class="loading"><span class="spinner"></span>Loading rolls…</div>';
+    try {
+      const r = await fetch('/api/profile?u=' + encodeURIComponent(u));
+      const d = await r.json();
+      if (!r.ok || !d.scored) throw new Error(d.error || 'could not load that player');
+      await analyse(d.scored.map(x => x.number), d.username || u);
+    } catch (err) {
+      $('msg').innerHTML = `<p class="err">${err.message}</p>`;
+    }
+  });
+  $('paste-go').addEventListener('click', () => {
+    analyse(($('paste').value.match(/\d+/g) || []).map(Number), 'Pasted rolls');
+  });
+  $('group').addEventListener('change', e => { group = e.target.value; if (have) render(); });
+
+  const u = new URLSearchParams(location.search).get('u');
+  if (u) { $('user').value = u; $('user-form').dispatchEvent(new Event('submit')); }
+}
+
+function renderCollection(ctx) {
+  const { BADGES, FAMILIES, PROBABILITIES, TIER_PALETTE, CARD_TIERS, CARD_TIER_NAMES, tierFromScore } = ctx;
+  const famOf = new Map();
+  FAMILIES.forEach((fam, fi) => { for (const id of fam) famOf.set(id, fi); });
+  const meta = BADGES.map(([id, label, emoji, ep]) =>
+    [label, emoji, ep, tierFromScore(ep), famOf.has(id) ? famOf.get(id) : -1, id, PROBABILITIES[id] ?? 0]);
+  const tiers = CARD_TIER_NAMES.map((key, i) => ({
+    label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
+    lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
+  }));
+  const pal = Object.fromEntries(Object.entries(TIER_PALETTE).map(([k, v]) => [k, v.accent]));
+
+  const css = `
+  .card { margin-bottom:.9rem; }
+  .card > p.small { margin:-.35rem 0 .8rem; font-size:.8rem; color:var(--muted); line-height:1.6; }
+  .small { font-size:.8rem; line-height:1.6; }
+  .inputs { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(280px,100%),1fr)); gap:.8rem; }
+  .inputs label { display:block; font-size:.72rem; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--faint); font-weight:600; margin-bottom:.3rem; }
+  #user-form { display:flex; gap:.5rem; }
+  #user { flex:1; min-width:0; }
+  #paste { width:100%; height:56px; resize:vertical; font-family:var(--mono); font-size:.8rem; }
+  #paste-go { margin-top:.4rem; }
+  #msg { margin-top:.7rem; }
+  .loading { display:flex; align-items:center; gap:.6rem; color:var(--muted); font-size:.86rem; }
+
+  #out { display:none; }
+  #out.on { display:block; }
+  #who { display:flex; align-items:baseline; gap:.7rem; margin:1.3rem 0 .8rem; }
+  #who .wn { font-size:1.15rem; font-weight:600; }
+  #who .wr { font-size:.82rem; color:var(--muted); }
+  #stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(190px,100%),1fr)); gap:.6rem;
+    margin-bottom:1.1rem; }
+  #stats .stat { min-width:0; overflow-wrap:anywhere; }
+
+  .bar { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; margin-bottom:.8rem; }
+  .bar label { font-size:.78rem; color:var(--muted); }
+  .bar select { font-size:.85rem; padding:.4rem .5rem; }
+  #grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(132px,100%),1fr)); gap:.3rem; }
+  .cb { display:flex; align-items:center; gap:.35rem; padding:.3rem .45rem; text-decoration:none;
+    border:1px solid var(--border); border-radius:var(--r-sm); background:var(--surface);
+    color:var(--faint); font-size:.75rem; opacity:.45; }
+  .cb.on { opacity:1; color:var(--text); border-color:color-mix(in srgb, var(--tc) 55%, transparent);
+    background:color-mix(in srgb, var(--tc) 12%, var(--surface)); }
+  .cb:hover { border-color:var(--tc); opacity:1; }
+  .cb .ce { flex:0 0 auto; }
+  .cb .cn { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  .two { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(340px,100%),1fr)); gap:.9rem; }
+  .mrow { display:flex; align-items:center; gap:.55rem; padding:.34rem .3rem; text-decoration:none;
+    border-radius:var(--r-sm); color:var(--dim); }
+  .mrow:hover { background:var(--surface-2); color:var(--text); }
+  .mrow .me { flex:0 0 auto; }
+  .mrow .ml { flex:1; min-width:0; font-size:.85rem; display:flex; flex-direction:column; }
+  .mrow .ml em { font-style:normal; font-size:.72rem; color:var(--faint); font-family:var(--mono); }
+  .mrow .mv { flex:0 0 auto; text-align:right; font-family:var(--mono); font-size:.78rem;
+    color:var(--hl-lt); font-variant-numeric:tabular-nums; }
+  .mrow .mv i { display:block; font-style:normal; font-size:.68rem; color:var(--faint); }`;
+
+  const body = `<div class="wrap">
+  <div class="tool-head">
+    <h1>Your Collection <span class="beta-tag">beta</span></h1>
+    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <p class="tag">Which of the 230 badges you have, which you do not, and how long the ones you are
+    missing would realistically take.</p>
+
+  <section class="card">
+    <div class="inputs">
+      <div><label for="user">rngdle player</label>
+        <form id="user-form"><input id="user" type="text" placeholder="username" autocomplete="off">
+          <button type="submit" class="btn-primary btn-sm">Look up</button></form></div>
+      <div><label for="paste">or paste rolls</label>
+        <textarea id="paste" placeholder="123456, 696969, 100000"></textarea>
+        <button type="button" id="paste-go" class="btn-sm">Score them</button></div>
+    </div>
+    <div id="msg"></div>
+  </section>
+
+  <div id="out">
+    <div id="who"></div>
+    <div id="stats"></div>
+
+    <div class="bar">
+      <label for="group">Order</label>
+      <select id="group">
+        <option value="rarity">Rarest first</option>
+        <option value="missing">Collected first, then the gaps</option>
+        <option value="family">Family</option>
+      </select>
+    </div>
+    <div id="grid"></div>
+
+    <div class="two" style="margin-top:1.2rem">
+      <section class="card"><h2>Closest to your next one</h2>
+        <p class="small">Missing badges you are most likely to pick up, with the expected wait for
+          each and the chance of it inside another run the length of the one you have had.</p>
+        <div id="next"></div></section>
+      <section class="card"><h2>The wall</h2>
+        <p class="small">The rarest things you do not have. These are the ones that decide whether
+          the set is ever finished.</p>
+        <div id="wall"></div></section>
+    </div>
+  </div>
+
+  <footer>
+    Rolls come from rngdle's public API and are scored here, in your browser, with the same engine
+    the rest of the site uses - so this reflects the live badge rules, not a stored collection.
+    <b>Expected wait</b> is 1 / the badge's exact share of the range, and the percentage beside it is
+    1 - (1 - p)^n for another n rolls. This is the one tool in the lab that does not need the full
+    sweep: a few hundred rolls score instantly, and every badge's rate is already known.
+  </footer>
+</div>`;
+
+  const script = `(${collectionClient.toString()})(${JSON.stringify(meta)}, ${JSON.stringify(tiers)},
+  ${JSON.stringify(pal)});`;
+
+  return betaShell({ title: 'RNGdle - Your Collection', width: '1080px', slug: 'collection', css, body, script });
+}
+
 // ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
@@ -5494,4 +5758,5 @@ const RENDERERS = {
   nearmiss: renderNearMiss,
   anatomy: renderAnatomy,
   contact: renderContact,
+  collection: renderCollection,
 };
