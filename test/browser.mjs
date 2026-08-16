@@ -74,11 +74,36 @@ function findChromium() {
 }
 
 // --- the pages and what to poke on them ------------------------------------
-const PAGES = ['/beta', '/beta/atlas', '/beta/projections', '/beta/spectrum', '/beta/contact',
+const PAGES = ['/', '/beta', '/beta/atlas', '/beta/projections', '/beta/spectrum', '/beta/contact',
   '/beta/pairs', '/beta/oracle', '/beta/nearmiss', '/beta/collection', '/beta/luck',
   '/beta/collector', '/beta/anatomy', '/beta/economy', '/beta/species'];
 
 const INTERACTIONS = {
+  // The calculator is not part of the lab, but it shares the badge renderer and the
+  // /api/card live-update path, so the superseded pills are worth holding in place.
+  '/': [
+    ['superseded pills', async p => {
+      const m = await p.evaluate(() => {
+        const sup = [...document.querySelectorAll('.bn-b.bn-sup')];
+        return { total: document.querySelectorAll('.bn-b').length, sup: sup.length,
+          struck: sup.filter(e => e.querySelector('em s')).length,
+          sub: document.querySelector('.bn-sub')?.textContent || '' };
+      });
+      if (!m.sup) throw new Error('999999 should have superseded badges');
+      if (m.struck !== m.sup) throw new Error('a superseded pill is missing its struck EP');
+      // The count line has always included superseded badges; now the pills must match it.
+      const said = Number((m.sub.match(/^(\d+) badge/) || [])[1]);
+      if (said !== m.total) throw new Error(`count line says ${said}, ${m.total} pills rendered`);
+      return `${m.total} pills, ${m.sup} superseded`;
+    }],
+    ['live re-render', async p => {
+      await p.fill('#bn-input', '');
+      await p.type('#bn-input', '111111');
+      await p.waitForTimeout(900);
+      return p.evaluate(() => `${document.querySelectorAll('.bn-b.bn-sup').length} superseded, ` +
+        `${document.querySelector('.bn-ep')?.textContent}`);
+    }],
+  ],
   '/beta/pairs': [
     ['metric', p => p.selectOption('#metric', 'cond').then(() => p.textContent('#leghi'))],
     ['cluster order', p => p.selectOption('#order', 'cluster').then(() => p.waitForTimeout(900))
@@ -317,7 +342,7 @@ for (const size of [{ name: 'desktop', width: 1440, height: 950 }, { name: 'phon
     const errs = [];
     page.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 200)); });
     page.on('pageerror', e => errs.push('pageerror: ' + String(e).slice(0, 200)));
-    await page.goto(base + path, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.goto(base + (path === '/' ? '/?n=999999' : path), { waitUntil: 'domcontentloaded', timeout: 60000 });
     const ready = await waitReady(page);
     const m = await page.evaluate(() => ({
       scrollW: document.documentElement.scrollWidth,
@@ -344,7 +369,9 @@ for (const [path, steps] of Object.entries(INTERACTIONS)) {
   const errs = [];
   page.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 160)); });
   page.on('pageerror', e => errs.push('pageerror: ' + String(e).slice(0, 160)));
-  await page.goto(base + path, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  // The calculator renders nothing without a number; 999999 has plenty of superseded
+  // badges, which is what its checks are about.
+  await page.goto(base + (path === '/' ? '/?n=999999' : path), { waitUntil: 'domcontentloaded', timeout: 60000 });
   await waitReady(page);
   console.log(`\n${path}`);
   for (const [label, fn] of steps) {

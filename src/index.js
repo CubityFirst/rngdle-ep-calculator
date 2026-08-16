@@ -2279,6 +2279,23 @@ function betaTier(result) {
   return { tier, pal: TIER_PALETTE[tier] };
 }
 
+// compute() zeroes a superseded badge's EP in the result, so the card needs the badge
+// table to say what it is worth on its own, and the family map to name what beat it.
+// Both are built once at module load.
+const BADGE_BY_ID = new Map(BADGES.map(b => [b[0], b]));
+const FAMILY_OF_ID = (() => {
+  const m = new Map();
+  FAMILIES.forEach((fam, i) => { for (const id of fam) m.set(id, i); });
+  return m;
+})();
+const nominalEP = (id) => (BADGE_BY_ID.get(id) || [, , , 0])[3];
+/** The scoring badge from the same family, i.e. the one that superseded `id`. */
+function supersededBy(result, id) {
+  const fam = FAMILY_OF_ID.get(id);
+  if (fam === undefined) return null;
+  return result.badges.find(b => b.ep > 0 && FAMILY_OF_ID.get(b.id) === fam) || null;
+}
+
 // The digit row (or the ?????? placeholder when nothing is entered).
 function betaNumberHTML(s) {
   if (!s) return `<span class="bn-ph">${BETA_PLACEHOLDER}</span>`;
@@ -2292,8 +2309,15 @@ function betaOutHTML(result) {
   const contrib = prodContributors(result.number);
   const { pal } = betaTier(result);
 
+  // Superseded badges (a family sibling out-scored them, so compute() zeroed their EP)
+  // are shown too, dimmed and after the scoring ones. They are genuinely earned - the
+  // count line has always included them - and hiding them made that number disagree
+  // with the pills underneath it.
   const scoring = result.badges.filter(b => b.ep > 0).slice().sort((a, b) => b.ep - a.ep);
-  const pills = scoring.map(b => {
+  const superseded = result.badges.filter(b => b.ep === 0).slice()
+    .sort((a, b) => nominalEP(b.id) - nominalEP(a.id));
+
+  const pill = (b, sup) => {
     let cells = contrib[b.label.toLowerCase()] || [];
     if (!cells.length) cells = fallbackCells(b.id, s);
     // Group badges (Metronome / Crescendo / Equation) light up every digit in the split
@@ -2322,11 +2346,18 @@ function betaOutHTML(result) {
     // keyed by this badge's own rarity tier (so anomaly reads orange, epic purple, etc.).
     const pal2 = TIER_PALETTE[b.rarity.toLowerCase()] || TIER_PALETTE.common;
     const req = b.desc || 'No description.';
-    const tip = esc(`${req}\n${b.rarity} · ${fmtProb(b.prob)} earn this · +${b.ep.toLocaleString()} EP`);
-    return `<button type="button" class="bn-b" style="--bc:${pal2.accent}"
+    // A superseded pill shows what the badge is worth on its own, struck through, and
+    // names the sibling that took the payout - "+0" would just look like a bug.
+    const worth = sup ? nominalEP(b.id) : b.ep;
+    const beat = sup ? supersededBy(result, b.id) : null;
+    const tip = esc(`${req}\n${b.rarity} · ${fmtProb(b.prob)} earn this · +${worth.toLocaleString()} EP` +
+      (sup ? `\nScores 0 here${beat ? ` - ${beat.label} wins the family` : ' - superseded'}` : ''));
+    return `<button type="button" class="bn-b${sup ? ' bn-sup' : ''}" style="--bc:${pal2.accent}"
        data-cells="${cells.join(',')}" data-hl="${pal2.hl}" data-tip="${tip}"${groupsAttr}${permAttr}${noteAttr}
-       aria-label="${esc(b.label)}. ${tip}">${b.emoji} <span>${esc(b.label)}</span> <em>+${b.ep.toLocaleString()}</em></button>`;
-  }).join('');
+       aria-label="${esc(b.label)}. ${tip}">${b.emoji} <span>${esc(b.label)}</span> <em>${
+         sup ? `<s>+${worth.toLocaleString()}</s>` : `+${worth.toLocaleString()}`}</em></button>`;
+  };
+  const pills = scoring.map(b => pill(b, false)).join('') + superseded.map(b => pill(b, true)).join('');
 
   // Exact percentile from rngdle.com's shipped table: % of all numbers 0..1,000,000
   // that score at or below this EP.
@@ -2342,7 +2373,8 @@ function betaOutHTML(result) {
       ${prTxt ? `<span class="bn-pct" title="exact percentile of all numbers 0-1,000,000 by EP">${prTxt}</span>` : ''}
       <span class="bn-ep">${result.totalEP.toLocaleString()} EP</span>
     </div>
-    <div class="bn-sub">${result.count} badge${result.count === 1 ? '' : 's'} · hover a badge to see where it scores</div>
+    <div class="bn-sub">${result.count} badge${result.count === 1 ? '' : 's'}${
+      superseded.length ? ` · ${superseded.length} superseded` : ''} · hover a badge to see where it scores</div>
     <div class="bn-note" id="bn-note" aria-live="polite"></div>
     <div class="bn-badges">${pills}</div>`;
 }
@@ -2520,11 +2552,22 @@ function renderHTML(result) {
     border:1px solid color-mix(in srgb, var(--bc) 55%, var(--border-2)); background:var(--surface-2); transition:background .12s, border-color .12s; }
   .bn-b:hover, .bn-b:focus-visible { outline:none; border-color:var(--bc); background:color-mix(in srgb, var(--bc) 16%, var(--surface-2)); }
   .bn-b em { font-style:normal; font-family:var(--mono); font-size:.72rem; color:var(--muted); }
+  /* Superseded: earned, but a family sibling took the EP. Dimmed rather than hidden,
+     and it brightens on hover so the tooltip explaining why is still worth reaching for. */
+  .bn-sup { opacity:.55; border-style:dashed; }
+  .bn-sup:hover, .bn-sup:focus-visible { opacity:1; }
+  .bn-sup em s { text-decoration-thickness:1px; opacity:.8; }
   .bn-b::after { content:attr(data-tip); white-space:pre-line; position:absolute; left:50%; transform:translateX(-50%);
     bottom:calc(100% + 8px); min-width:13rem; max-width:18rem; padding:.5rem .65rem; border-radius:var(--r-ctl); background:#06070a;
     border:1px solid var(--border-2); box-shadow:0 8px 24px rgba(0,0,0,.6); font-size:.75rem; font-weight:450; line-height:1.4;
     text-align:left; color:var(--text); opacity:0; pointer-events:none; transition:opacity .12s; z-index:10; }
   .bn-b:hover::after, .bn-b:focus-visible::after { opacity:1; }
+  /* The tooltip is laid out even at opacity 0, so its 13rem floor was widening the
+     document on a phone - 33px of sideways scroll on a 390px screen. Narrow viewports
+     get no floor and a viewport-relative cap. */
+  @media (max-width:640px) {
+    .bn-b::after { min-width:0; max-width:min(18rem, 74vw); }
+  }
   .bn-badges .none { color:var(--muted); }`;
 
   const page = `<div class="wrap">
