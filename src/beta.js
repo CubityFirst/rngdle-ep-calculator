@@ -302,10 +302,13 @@ const THUMBS = {
     <circle cx="28" cy="20" r="2.5"/><circle cx="34" cy="23" r="2.5"/><circle cx="41" cy="13" r="2.5"/>
     <circle cx="48" cy="16" r="2.5"/><circle cx="55" cy="7" r="2.5"/>
     <path d="M4 36 L60 4" stroke-dasharray="4 3" opacity=".5"/>`,
-  projections: `<rect x="4" y="6" width="24" height="28" rx="2" opacity=".85"/>
-    <path d="M8 10h16M8 16h16M8 22h16M8 28h16" opacity=".4"/>
-    <path d="M36 34c0-8 6-8 6-16s6-8 6-8" opacity=".9"/>
-    <path d="M36 20h8M48 26h8" opacity=".55"/><circle cx="58" cy="10" r="2"/>`,
+  projections: `<circle cx="6" cy="8" r="1.8"/><circle cx="14" cy="8" r="1.8"/><circle cx="22" cy="8" r="1.8"/>
+    <circle cx="6" cy="20" r="1.8"/><circle cx="14" cy="20" r="1.8"/><circle cx="22" cy="20" r="1.8"/>
+    <circle cx="6" cy="32" r="1.8"/><circle cx="14" cy="32" r="1.8"/><circle cx="22" cy="32" r="1.8"/>
+    <path d="M29 20h6m-2.5-2.5L35 20l-2.5 2.5" opacity=".6"/>
+    <path d="M42 34c0-9 4-9 4-16s5-9 12-9" opacity=".35"/>
+    <circle cx="42" cy="34" r="1.8"/><circle cx="43.5" cy="26" r="1.8"/><circle cx="46" cy="18" r="1.8"/>
+    <circle cx="48" cy="11" r="1.8"/><circle cx="54" cy="9" r="1.8"/><circle cx="60" cy="9" r="1.8"/>`,
   spectrum: `<path d="M4 8h56M4 14h56M4 20h56M4 26h56M4 32h56" stroke-dasharray="2 5" opacity=".9"/>
     <path d="M4 11h56M4 17h56M4 23h56M4 29h56" stroke-dasharray="7 3" opacity=".35"/>`,
   species: `<circle cx="14" cy="20" r="10" opacity=".9"/><circle cx="33" cy="20" r="6" opacity=".6"/>
@@ -314,15 +317,18 @@ const THUMBS = {
   collector: `<path d="M4 34 C 20 34, 26 12, 40 8 S 56 5, 60 5"/>
     <circle cx="16" cy="29" r="2.2" opacity=".6"/><circle cx="28" cy="17" r="2.2" opacity=".8"/>
     <circle cx="44" cy="7" r="2.2"/><path d="M4 34h56" opacity=".25"/>`,
-  nearmiss: `<rect x="4" y="4" width="15" height="14" rx="2" opacity=".35"/>
-    <rect x="23" y="4" width="15" height="14" rx="2" opacity=".95"/>
-    <rect x="42" y="4" width="15" height="14" rx="2" opacity=".35"/>
-    <rect x="4" y="22" width="15" height="14" rx="2" opacity=".35"/>
-    <rect x="23" y="22" width="15" height="14" rx="2" opacity=".55"/>
-    <rect x="42" y="22" width="15" height="14" rx="2" opacity=".35"/>`,
-  collection: `<rect x="4" y="6" width="16" height="12" rx="2"/><rect x="24" y="6" width="16" height="12" rx="2" opacity=".3"/>
-    <rect x="44" y="6" width="16" height="12" rx="2"/><rect x="4" y="22" width="16" height="12" rx="2" opacity=".3"/>
-    <rect x="24" y="22" width="16" height="12" rx="2"/><rect x="44" y="22" width="16" height="12" rx="2" opacity=".3"/>`,
+  nearmiss: `<circle cx="32" cy="20" r="5.5"/>
+    <path d="M32 14.5V7M32 25.5V33M26.5 20H17M37.5 20H47" opacity=".35"/>
+    <circle cx="32" cy="5" r="2.2" opacity=".8"/><circle cx="32" cy="35" r="2.2" opacity=".5"/>
+    <circle cx="15" cy="20" r="2.2" opacity=".5"/><circle cx="49" cy="20" r="2.2" opacity=".8"/>
+    <circle cx="20" cy="8" r="1.8" opacity=".35"/><circle cx="44" cy="32" r="1.8" opacity=".35"/>
+    <circle cx="44" cy="8" r="1.8" opacity=".35"/><circle cx="20" cy="32" r="1.8" opacity=".35"/>`,
+  collection: `<rect x="6" y="5" width="10" height="10" rx="2.5"/><path d="M8.5 10l2 2 3.5-4"/>
+    <path d="M22 10h34" opacity=".8"/>
+    <rect x="6" y="19" width="10" height="10" rx="2.5"/><path d="M8.5 24l2 2 3.5-4"/>
+    <path d="M22 24h26" opacity=".8"/>
+    <rect x="6" y="33" width="10" height="10" rx="2.5" opacity=".35"/>
+    <path d="M22 38h20" opacity=".3"/>`,
   luck: `<path d="M4 34 C 14 34, 18 30, 22 20 S 28 4, 33 4 S 40 12, 45 22 S 54 34, 60 34"/>
     <path d="M45 34v-8M52 34v-4" opacity=".45"/>`,
   anatomy: `<path d="M6 8h40M6 15h28M6 22h48M6 29h16" stroke-width="5" stroke-linecap="round"/>
@@ -412,12 +418,13 @@ export function renderBetaIndex() {
     1,000,001-number sweep.</p>
 
   <section class="lead">
-    <p>Each of these scores <b>every legal roll</b> - all 1,000,001 of them - in your browser, then
-      looks at the result from a different angle. Nothing is precomputed on the server, so they all
-      track the live badge rules exactly.</p>
-    <p>The sweep runs once, is shared across every tool here (and with <a href="/grid">Grid</a> and
+    <p>Nearly all of these score <b>every legal roll</b> - all 1,000,001 of them - in your browser,
+      then look at the result from a different angle. Nothing is precomputed on the server, so they
+      all track the live badge rules exactly.</p>
+    <p>That sweep runs once, is shared between them (and with <a href="/grid">Grid</a> and
       <a href="/chains">Chains</a>), and is cached in this browser afterwards. Expect a few seconds
-      the first time and none after that.</p>
+      the first time and none after that. <a href="/beta/collection">Your Collection</a> is the
+      exception and needs no sweep at all - it opens straight away.</p>
   </section>
 
   <div id="cards">${cards}</div>
