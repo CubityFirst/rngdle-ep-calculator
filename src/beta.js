@@ -2479,7 +2479,7 @@ function oracleWorker() {
   const LO = 100000, HI = 999999;
   const DIV = [100000, 10000, 1000, 100, 10, 1];
   const HB = 48;                                  // histogram bins, log EP
-  let EP = null, CNT = null, lgMax = 1, p99 = 0;
+  let EP = null, CNT = null, lgMax = 1, p99 = 0, BITS = null, ROW = 0, NB = 0;
 
   function query(fix) {
     // Per (position, digit) accumulators for the six positions still free, plus the
@@ -2489,6 +2489,9 @@ function oracleWorker() {
     let count = 0, sumEP = 0, sumC = 0, nTop = 0;
     let best = -1, bestEP = -1, worst = -1, worstEP = Infinity;
     const tops = [];
+    // Badges every surviving number earns: start all-ones and AND each one in, which
+    // answers "what do I already have, whatever the rest turns out to be".
+    const sure = new Uint8Array(ROW).fill(255);
 
     for (let n = LO; n <= HI; n++) {
       let ok = true;
@@ -2498,6 +2501,7 @@ function oracleWorker() {
       if (!ok) continue;
       const e = EP[n];
       count++; sumEP += e; sumC += CNT[n];
+      { const base = n * ROW; for (let b = 0; b < ROW; b++) sure[b] &= BITS[base + b]; }
       const isTop = e >= p99;
       if (isTop) nTop++;
       if (e > bestEP) { bestEP = e; best = n; }
@@ -2514,8 +2518,12 @@ function oracleWorker() {
         if (tops.length > 5) tops.length = 5;
       }
     }
+    const sureList = [];
+    if (count) {
+      for (let i = 0; i < NB; i++) if (sure[i >> 3] & (1 << (i & 7))) sureList.push(i);
+    }
     return { type: 'q', fix, count, meanEP: count ? sumEP / count : 0, meanC: count ? sumC / count : 0,
-      pTop: count ? nTop / count : 0, best, bestEP, worst, worstEP, tops,
+      pTop: count ? nTop / count : 0, best, bestEP, worst, worstEP, tops, sure: sureList,
       cN: cN.buffer, cEP: cEP.buffer, cTop: cTop.buffer, hist: hist.buffer };
   }
 
@@ -2524,7 +2532,8 @@ function oracleWorker() {
     if (m.cmd === 'init') {
       try {
         const swept = await betaSweep(m.origin, 0.85);
-        EP = swept.ep; CNT = swept.cnt;
+        EP = swept.ep; CNT = swept.cnt; BITS = swept.bits; ROW = swept.ROW;
+        NB = E.BADGE_META.length;
         self.postMessage({ type: 'progress', pct: 0.9, msg: 'Ranking the six-digit numbers…' });
         let max = 0;
         for (let n = LO; n <= HI; n++) if (EP[n] > max) max = EP[n];
@@ -2547,7 +2556,7 @@ function oracleWorker() {
   };
 }
 
-function oracleClient(WORKER_SRC, TIERS) {
+function oracleClient(WORKER_SRC, TIERS, META, PAL) {
   const $ = id => document.getElementById(id);
   const fmt = n => Math.round(n).toLocaleString();
   // EP runs to nine figures at the top of the range and a stat tile is 150px wide.
@@ -2635,6 +2644,18 @@ function oracleClient(WORKER_SRC, TIERS) {
         <span class="te">${fmt(e)} EP</span></a>`;
     }).join('');
 
+    const sure = Q.sure || [];
+    $('sure').innerHTML = sure.length
+      ? `<h2>Already guaranteed <em>${sure.length}</em></h2>
+         <p class="muted small">Earned by every number that still matches - these are yours whatever
+         the remaining digits turn out to be.</p>
+         <div class="pills">${sure.slice().sort((a, b) => META[b][2] - META[a][2]).map(i =>
+           `<a class="bpill" href="/badges#${META[i][5]}" style="--tc:${PAL[META[i][3]]}"
+             title="${META[i][0]} · ${fmt(META[i][2])} EP">${META[i][1]} ${META[i][0]}</a>`).join('')}</div>`
+      : `<h2>Already guaranteed</h2>
+         <p class="muted small">Nothing yet - no badge is earned by every number that still matches.
+         Lock some digits.</p>`;
+
     // Distribution of the survivors, on the same log-EP axis every query uses, so the
     // shape can be compared as digits are locked in rather than rescaling each time.
     const hist = new Float64Array(Q.hist);
@@ -2689,7 +2710,9 @@ function oracleClient(WORKER_SRC, TIERS) {
 }
 
 function renderOracle(ctx) {
-  const { CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE } = ctx;
+  const { BADGES, CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE, tierFromScore } = ctx;
+  const meta = BADGES.map(([id, label, emoji, ep]) => [label, emoji, ep, tierFromScore(ep), -1, id]);
+  const pal = Object.fromEntries(Object.entries(TIER_PALETTE).map(([k, v]) => [k, v.accent]));
   const tiers = CARD_TIER_NAMES.map((key, i) => ({
     label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
     lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
@@ -2746,7 +2769,14 @@ function renderOracle(ctx) {
   .toprow:hover { background:var(--surface-2); color:var(--text); }
   .toprow .tn { flex:1; font-family:var(--mono); font-size:.88rem; }
   .toprow .te { font-family:var(--mono); font-size:.75rem; color:var(--faint); }
-  .small { font-size:.78rem; line-height:1.5; margin:-.35rem 0 .6rem; }`;
+  .small { font-size:.78rem; line-height:1.5; margin:-.35rem 0 .6rem; }
+  #sure h2 em { font-style:normal; font-weight:500; letter-spacing:0; text-transform:none;
+    color:var(--faint); font-family:var(--mono); }
+  .pills { display:flex; flex-wrap:wrap; gap:.3rem; }
+  .bpill { font-size:.74rem; text-decoration:none; padding:.2rem .5rem; border-radius:var(--r-pill);
+    color:var(--text); background:color-mix(in srgb, var(--tc) 12%, var(--surface-2));
+    border:1px solid color-mix(in srgb, var(--tc) 40%, transparent); white-space:nowrap; }
+  .bpill:hover { background:color-mix(in srgb, var(--tc) 26%, var(--surface-2)); }`;
 
   const body = `<div class="wrap">
   <div class="tool-head">
@@ -2779,6 +2809,7 @@ function renderOracle(ctx) {
           <div id="hist"></div>
           <div class="histax"><span>low EP</span><span>high EP</span></div>
         </section>
+        <section class="card" id="sure"></section>
         <section class="card"><h2>Best still reachable</h2>
           <div id="tops"></div></section>
       </div>
@@ -2797,7 +2828,7 @@ ${overlayHTML('Then scoring every digit in every position against the 900,000 si
 
   const script = `${BETA_BOOT_JS}
 const __W = ${JSON.stringify(workerSrc(oracleWorker))};
-(${oracleClient.toString()})(__W, ${JSON.stringify(tiers)});`;
+(${oracleClient.toString()})(__W, ${JSON.stringify(tiers)}, ${JSON.stringify(meta)}, ${JSON.stringify(pal)});`;
 
   return betaShell({ title: 'RNGdle - Digit Oracle', width: '1080px', slug: 'oracle', css, body, script });
 }

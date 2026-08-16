@@ -109,6 +109,7 @@ const INTERACTIONS = {
     ['lock best', p => p.click('#greedy').then(() => p.waitForTimeout(600)).then(() => p.textContent('#pattern'))],
     ['metric', p => p.selectOption('#metric', 'top').then(() => p.$eval('#board .cell.live em', e => e.textContent))],
     ['click cell', p => p.click('#board .cell.live').then(() => p.waitForTimeout(600)).then(() => p.textContent('#pattern'))],
+    ['guaranteed', p => p.$eval('#sure h2', e => e.textContent.trim())],
     ['reset', p => p.click('#reset').then(() => p.waitForTimeout(600)).then(() => p.textContent('#pattern'))],
   ],
   // The player lookup is deliberately not exercised: it calls rngdle's public API, and
