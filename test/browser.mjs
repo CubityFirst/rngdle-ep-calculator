@@ -96,6 +96,32 @@ const INTERACTIONS = {
       if (said !== m.total) throw new Error(`count line says ${said}, ${m.total} pills rendered`);
       return `${m.total} pills, ${m.sup} superseded`;
     }],
+    // The formula caption sits directly above the badge grid, so any change in its
+    // height shifts every pill as you sweep the mouse across them. It must reserve a
+    // constant single line - empty, short note, or a Harshad breakdown too wide to fit.
+    ['note line holds its height', async p => {
+      const m = await p.evaluate(() => {
+        const el = document.getElementById('bn-note');
+        const grid = document.querySelector('.bn-badges');
+        const h = new Set(), top = new Set(), wide = [];
+        const sample = () => { h.add(el.getBoundingClientRect().height.toFixed(2));
+          top.add(grid.getBoundingClientRect().top.toFixed(2));
+          if (el.scrollWidth > el.clientWidth + 1) wide.push(el.textContent); };
+        sample();
+        const noted = [...document.querySelectorAll('[data-note]')];
+        for (const b of noted) {
+          b.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
+          sample();
+          b.dispatchEvent(new MouseEvent('mouseleave', { bubbles: false }));
+        }
+        return { h: [...h], top: [...top], wide, n: noted.length };
+      });
+      if (!m.n) throw new Error('no formula notes on 999999 - the fixture stopped covering this');
+      if (m.h.length !== 1) throw new Error(`note line height varies: ${m.h.join(', ')}`);
+      if (m.top.length !== 1) throw new Error(`badge grid moves: top ${m.top.join(', ')}`);
+      if (m.wide.length) throw new Error(`note overflows its line: "${m.wide[0]}"`);
+      return `${m.n} notes, all ${m.h[0]}px`;
+    }],
     ['live re-render', async p => {
       await p.fill('#bn-input', '');
       await p.type('#bn-input', '111111');

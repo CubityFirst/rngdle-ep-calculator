@@ -2536,8 +2536,13 @@ function renderHTML(result) {
   .bn-d.prm { position:relative; z-index:1;
     transition:background .12s, color .12s, box-shadow .12s, transform .38s cubic-bezier(.34,1.4,.5,1); }
   /* Formula caption for property badges (Harshad / Spy / …), shown on hover. */
-  .bn-note { min-height:1.2em; margin-top:.35rem; text-align:center; font-family:var(--mono);
-    font-size:.82rem; color:var(--accent); font-variant-numeric:tabular-nums; letter-spacing:.01em;
+  /* Fixed height, in rem rather than em, so the badge grid never moves as you sweep
+     across badges: an em box would track the shrink fitNote() applies to over-wide
+     formulas, and 1.2em under-reserved the real line box by 4px even at full size.
+     nowrap + a rem line-height keeps a shrunk formula on one vertically-centred line. */
+  .bn-note { height:1.25rem; line-height:1.25rem; margin-top:.35rem; text-align:center;
+    font-family:var(--mono); font-size:.82rem; color:var(--accent); white-space:nowrap;
+    overflow:hidden; font-variant-numeric:tabular-nums; letter-spacing:.01em;
     opacity:0; transition:opacity .12s; }
   .bn-note.show { opacity:1; }
   .bn[data-tier="empty"] .bn-card { border-style:dashed; }
@@ -2664,8 +2669,17 @@ function renderHTML(result) {
   }
   function clearPerm() { digits.forEach(function (d) { d.classList.remove('prm'); d.style.transform = ''; }); }
   // Formula caption (Harshad / Spy / …): show the badge's breakdown on hover.
-  function showNote(note) { var el = document.getElementById('bn-note'); if (!el) return; el.textContent = note || ''; el.classList.toggle('show', !!note); }
-  function clearNote() { var el = document.getElementById('bn-note'); if (el) { el.textContent = ''; el.classList.remove('show'); } }
+  // The line is a fixed height, so a formula wider than the card is scaled down to fit
+  // rather than wrapping - a wrap would shove the badge grid down a line mid-sweep.
+  // Only the longest Harshad breakdowns hit this, and only at phone widths.
+  function fitNote(el) {
+    el.style.fontSize = '';
+    if (!el.textContent || !el.clientWidth) return;
+    var over = el.scrollWidth / el.clientWidth;
+    if (over > 1) el.style.fontSize = (0.82 / over - 0.01).toFixed(3) + 'rem';
+  }
+  function showNote(note) { var el = document.getElementById('bn-note'); if (!el) return; el.textContent = note || ''; el.classList.toggle('show', !!note); fitNote(el); }
+  function clearNote() { var el = document.getElementById('bn-note'); if (el) { el.textContent = ''; el.style.fontSize = ''; el.classList.remove('show'); } }
   function wireBadges() {
     [].slice.call(outEl.querySelectorAll('.bn-b')).forEach(function (b) {
       var cells = (b.dataset.cells || '').split(',').filter(Boolean).map(Number);
