@@ -4967,9 +4967,65 @@ function contactClient(WORKER_SRC, META, PAL) {
   const $ = id => document.getElementById(id);
   const pctf = p => p === 0 ? '0%' : p >= 1 ? p.toFixed(1) + '%' : p >= 0.01 ? p.toFixed(2) + '%' : p.toFixed(4) + '%';
   let MAPS = null, TOTAL = null, T = 100, N = 0, norm = 'row', sort = 'family';
+  let similarOrder = null;
+
+  // Order by how much the pictures themselves look alike: reduce each map to a 20x20
+  // presence vector, take cosine similarity, and cluster with average linkage. The
+  // family order groups badges the game says are related; this groups the ones that
+  // actually fire in the same places, which is what the sheet is for.
+  function bySimilarity() {
+    if (similarOrder) return similarOrder;
+    const R = 20, step = T / R;                  // 100 -> 20, so 400 dims per badge
+    const V = new Float32Array(B * R * R);
+    for (let i = 0; i < B; i++) {
+      const base = i * T * T, out = i * R * R;
+      for (let y = 0; y < T; y++) {
+        for (let x = 0; x < T; x++) {
+          if (MAPS[base + y * T + x]) V[out + ((y / step) | 0) * R + ((x / step) | 0)] = 1;
+        }
+      }
+      let n2 = 0;
+      for (let k = 0; k < R * R; k++) n2 += V[out + k];
+      const inv = n2 ? 1 / Math.sqrt(n2) : 0;    // values are 0/1, so the norm is sqrt(count)
+      for (let k = 0; k < R * R; k++) V[out + k] *= inv;
+    }
+    const D = [];
+    for (let i = 0; i < B; i++) D.push(new Float32Array(B));
+    for (let i = 0; i < B; i++) {
+      for (let j = i + 1; j < B; j++) {
+        let dot = 0;
+        const a = i * R * R, b = j * R * R;
+        for (let k = 0; k < R * R; k++) dot += V[a + k] * V[b + k];
+        const d = 1 - dot;
+        D[i][j] = d; D[j][i] = d;
+      }
+    }
+    const groups = Array.from({ length: B }, (_, i) => [i]);
+    const live = Array.from({ length: B }, (_, i) => i);
+    while (live.length > 1) {
+      let bi = 0, bj = 1, best = Infinity;
+      for (let a = 0; a < live.length; a++) {
+        for (let b = a + 1; b < live.length; b++) {
+          const v = D[live[a]][live[b]];
+          if (v < best) { best = v; bi = a; bj = b; }
+        }
+      }
+      const gi = live[bi], gj = live[bj], ni = groups[gi].length, nj = groups[gj].length;
+      for (const g of live) {
+        if (g === gi || g === gj) continue;
+        const v = (D[gi][g] * ni + D[gj][g] * nj) / (ni + nj);
+        D[gi][g] = v; D[g][gi] = v;
+      }
+      groups[gi] = groups[gi].concat(groups[gj]);
+      live.splice(bj, 1);
+    }
+    similarOrder = groups[live[0]];
+    return similarOrder;
+  }
 
   function order() {
     const all = Array.from({ length: B }, (_, i) => i);
+    if (sort === 'similar') return bySimilarity().slice();
     if (sort === 'ep') return all.sort((a, b) => META[b][2] - META[a][2] || a - b);
     if (sort === 'rate') return all.sort((a, b) => TOTAL[b] - TOTAL[a] || a - b);
     if (sort === 'alpha') return all.sort((a, b) => META[a][0].localeCompare(META[b][0]));
@@ -5040,7 +5096,18 @@ function contactClient(WORKER_SRC, META, PAL) {
   }
 
   $('q').addEventListener('input', render);
-  $('sort').addEventListener('change', e => { sort = e.target.value; render(); });
+  $('sort').addEventListener('change', e => {
+    sort = e.target.value;
+    // The similarity clustering is a second or so the first time; let the select
+    // repaint as disabled rather than freezing on the old view with no explanation.
+    if (sort === 'similar' && !similarOrder) {
+      $('sort').disabled = true;
+      $('count').textContent = 'grouping by what the maps look like…';
+      setTimeout(() => { render(); $('sort').disabled = false; }, 16);
+      return;
+    }
+    render();
+  });
   $('norm').addEventListener('change', e => { norm = e.target.value; render(); });
 
   betaBoot(WORKER_SRC).then(({ data }) => {
@@ -5094,6 +5161,7 @@ function renderContact(ctx) {
       <label for="sort">Order</label>
       <select id="sort">
         <option value="family">Family</option>
+        <option value="similar">Similar maps together</option>
         <option value="rate">How often earned</option>
         <option value="ep">EP</option>
         <option value="alpha">Name</option>
@@ -5112,7 +5180,10 @@ function renderContact(ctx) {
     Each thumbnail is a 100x100 reduction of the full map: one cell per block of a hundred consecutive
     numbers, lit in proportion to how many of them earn the badge. <b>Per badge</b> scales each
     thumbnail to its own busiest block, which is what makes a rule earned ten times in the whole range
-    visible at all; <b>absolute</b> puts them on one scale. Badges lighting fewer than 60 of the 10,000
+    visible at all; <b>absolute</b> puts them on one scale. <b>Similar maps together</b> ignores the
+    game's taxonomy entirely and clusters the pictures themselves - each map reduced to a 20x20
+    presence vector, average linkage on cosine distance - so rules that fire in the same places end up
+    adjacent whatever family they were filed under. Badges lighting fewer than 60 of the 10,000
     cells have their marks <b>grown to 3x3</b> - the positions are still exact, but a single cell would
     be one dim pixel and read as an empty tile. Ordering by family puts each family's members next to
     each other, which is where the odd one out shows up. Click any tile for its full-resolution map on

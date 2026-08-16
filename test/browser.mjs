@@ -143,6 +143,11 @@ const INTERACTIONS = {
   '/beta/contact': [
     ['search', p => p.fill('#q', 'power').then(() => p.textContent('#count'))],
     ['order', p => p.selectOption('#sort', 'rate').then(() => p.$eval('#sheet .tl', e => e.textContent.trim()))],
+    ['cluster maps', async p => {
+      await p.selectOption('#sort', 'similar');
+      await p.waitForFunction(() => !document.getElementById('sort').disabled, null, { timeout: 20000 });
+      return p.$eval('#sheet .tl', e => e.textContent.trim());
+    }],
   ],
   '/beta/nearmiss': [
     ['random', p => p.click('#rand').then(() => p.textContent('#title .tn'))],
