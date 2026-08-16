@@ -130,6 +130,13 @@ const BETA_CSS = `
 /**
  * Wrap a beta tool in the site shell.
  * Same options as pageShell, plus `slug` (marks the current tool, adds the back link).
+ *
+ * The `__name` shim is not optional. Every tool ships its client to the browser as
+ * `fn.toString()`, and when this Worker is bundled for deploy (esbuild keepNames) that
+ * source comes out full of `__name(f, "f")` calls - a helper that exists only in the
+ * bundle's own scope. Unbundled, as `node serve.mjs` runs it, the source is clean and
+ * everything works; bundled, every page would throw "__name is not defined". Same
+ * reason /grid and /chains carry it, and workerSrc() adds it for the worker half.
  */
 function betaShell(o) {
   return pageShell({
@@ -137,6 +144,7 @@ function betaShell(o) {
     nav: 'beta',
     noindex: true,
     css: `${BETA_CSS}\n${o.css || ''}`,
+    script: o.script ? `var __name = (f) => f;\n${o.script}` : o.script,
   });
 }
 
