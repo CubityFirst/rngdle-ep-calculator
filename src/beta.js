@@ -1871,11 +1871,13 @@ function renderEconomy(ctx) {
 
   .chartcard { padding:1rem 1.1rem 1.2rem; margin-bottom:1.2rem; }
   #chart svg { width:100%; height:auto; display:block; }
+  /* Only the points are hit targets: a tick label sitting over a circle would
+     otherwise swallow the hover and the tooltip would never appear for it. */
+  .grid, .ax, .axl, .fit { pointer-events:none; }
   .grid { stroke:var(--border); stroke-width:1; }
   .ax { fill:var(--faint); font-size:10px; font-family:var(--mono); }
   .axl { fill:var(--muted); font-size:11px; }
   .fit { stroke:var(--hl); stroke-width:1.4; stroke-dasharray:5 4; fill:none; }
-  .band { fill:color-mix(in srgb, var(--hl) 7%, transparent); stroke:none; }
   .pt { cursor:pointer; fill-opacity:.85; stroke:#08090c; stroke-width:.6; }
   .pt:hover { fill-opacity:1; stroke:var(--text); stroke-width:1.2; }
   .pt.dead { fill-opacity:.18; stroke:var(--faint); stroke-width:1; }

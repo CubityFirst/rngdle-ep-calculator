@@ -367,6 +367,16 @@ export const NAV_BOOT_JS = `
  * @param {boolean}[o.noindex] emit <meta name="robots" content="noindex">
  * @param {string} [o.viewport] override the viewport meta (canvas pages lock pinch-zoom)
  */
+// Inline so the browser never requests /favicon.ico - the Worker has no route for it,
+// so every page load was logging a 404. Three dots on the shared surface colour, which
+// is as much as reads at 16px.
+const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+  '<rect width="32" height="32" rx="7" fill="#131419"/>' +
+  '<circle cx="10" cy="10" r="3" fill="#5b93d6"/>' +
+  '<circle cx="22" cy="16" r="3" fill="#e8924e"/>' +
+  '<circle cx="10" cy="22" r="3" fill="#5b93d6"/></svg>');
+
 export function pageShell(o) {
   const rail = o.nav == null ? '' : siteNav(o.nav);
   // Document pages reserve the collapsed rail with padding; full-bleed pages get out of
@@ -378,7 +388,8 @@ export function pageShell(o) {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="color-scheme" content="dark"><meta name="viewport" content="${o.viewport || 'width=device-width,initial-scale=1'}">
-${o.noindex ? '<meta name="robots" content="noindex">\n' : ''}<title>${o.title}</title>
+${o.noindex ? '<meta name="robots" content="noindex">\n' : ''}<link rel="icon" href="${FAVICON}">
+<title>${o.title}</title>
 <style>${TOKENS_CSS}
   :root { --wrap:${o.width || '960px'}; }
 ${BASE_CSS}
