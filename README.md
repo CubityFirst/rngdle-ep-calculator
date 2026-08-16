@@ -78,11 +78,14 @@ are the two halves of that protocol.
 | Route | What it is |
 | --- | --- |
 | `/beta/atlas` | The 1000×1000 map as WebGL2 **terrain** - EP or badge count as height, card tier as colour. One mesh with no vertex attributes: the vertex shader derives position from `gl_VertexID` and fetches everything from one `RGBA32F` texture. Picking renders a second pass through a projection that blows the pixel under the cursor up to fill a 1×1 framebuffer. |
+| `/beta/projections` | The same million numbers under five **layouts** - value order, nested decimal, Hilbert, Z-order, by score - as a WebGL2 point cloud that interpolates between them. Every layout is computed in the vertex shader from `gl_VertexID`, so switching is a uniform change. Sorted by score, each tier's *area* is its exact share of the range. |
 | `/beta/spectrum` | Every badge as a **density stripe** across the range - one row per badge, one column per thousand numbers. Digit-length rules step at each power of ten, modular rules band, exact badges are a single lit pixel. Orderable by an entropy measure of how evenly a rule is spread. |
 | `/beta/pairs` | **Badge affinity**: how often each of the ~26k badge pairs lands on the same number, read as lift, `P(B|A)`, Jaccard or a raw count. Orderable by family or by average-linkage cluster. |
 | `/beta/oracle` | **Digit oracle**: lock any digits of a six-digit number and all 60 digit-position choices are re-scored against only the numbers that still match. |
+| `/beta/nearmiss` | **Near misses**: the 54 numbers one digit away from any given one, what each would have scored, and across the range the local peaks, the local valleys, and how much of it sits one digit from a mythic. |
 | `/beta/luck` | **Roll odds**: the exact EP distribution, tier odds, closed-form best-of-N, and a luck reading for a real player's rolls (via `/api/profile`, scored locally). |
 | `/beta/collector` | **Coupon collector**: rolls needed to earn all 230 badges, simulated over the real earner sets, against a greedy cover of the same badge list. |
+| `/beta/anatomy` | **Plain properties against score**: digit sum, distinct digits, longest run, divisibility, palindromes - each measured as lift against the range average and ranked by how much spread it actually produces. |
 | `/beta/economy` | **Badge pricing**, written up as a finding: EP turns out to be exactly `100 / P(earn)` for every badge, so supersession is the only thing that varies. |
 | `/beta/species` | The range grouped by **exact badge set** - distinct kinds, their rank-size curve, and the numbers that score like nothing else. |
 

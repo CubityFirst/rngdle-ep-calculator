@@ -47,6 +47,12 @@ export const BETA_TOOLS = [
     note: 'Lift, P(B|A) and Jaccard, orderable by family or by cluster.',
   },
   {
+    slug: 'anatomy', title: 'Anatomy', kind: 'Report',
+    blurb: 'Which plain properties of a number actually move its score - digit sum, ' +
+      'repeats, runs, divisibility - and which sound like they should and do not.',
+    note: 'Ten properties, every one measured as lift against the range average.',
+  },
+  {
     slug: 'oracle', title: 'Digit Oracle', kind: 'Interactive',
     blurb: 'Half a number is already worth something. Lock any digits and every ' +
       'remaining choice is re-scored against the numbers that still match.',
@@ -268,6 +274,8 @@ const THUMBS = {
     <rect x="42" y="22" width="15" height="14" rx="2" opacity=".35"/>`,
   luck: `<path d="M4 34 C 14 34, 18 30, 22 20 S 28 4, 33 4 S 40 12, 45 22 S 54 34, 60 34"/>
     <path d="M45 34v-8M52 34v-4" opacity=".45"/>`,
+  anatomy: `<path d="M6 8h40M6 15h28M6 22h48M6 29h16" stroke-width="5" stroke-linecap="round"/>
+    <path d="M56 6v28" opacity=".3" stroke-dasharray="3 3"/>`,
   oracle: `<rect x="4" y="6" width="10" height="28" rx="2" opacity=".3"/>
     <rect x="17" y="6" width="10" height="28" rx="2" opacity=".95"/>
     <rect x="30" y="6" width="10" height="28" rx="2" opacity=".3"/>
@@ -4446,6 +4454,231 @@ const __W = ${JSON.stringify(workerSrc(nearmissWorker))};
 }
 
 // ---------------------------------------------------------------------------
+// /beta/anatomy - which properties of a number actually drive its score.
+//
+// The Digit Oracle answers this positionally: what is a 7 in the hundreds column
+// worth? This one answers it structurally - digit sum, how many distinct digits, the
+// longest run, divisibility, palindromes - and puts every property on the same axis
+// so they can be ranked by how much they matter at all.
+//
+// The measure is lift: the mean EP of a bucket over the mean of the whole range. A
+// property whose buckets all sit near 1.0 does nothing, however intuitive it sounds,
+// and the panels are ordered so those sink to the bottom on their own.
+// ---------------------------------------------------------------------------
+
+function anatomyWorker() {
+  const N = 1000001;
+
+  // [key, label, note, bucketCount, bucketLabel(i)] - the bucket function itself lives
+  // in the loop below, because doing it per feature would mean 14 passes over the range.
+  const FEATURES = [
+    ['len', 'Digit count', 'How many digits the number has', 7, i => (i + 1) + ''],
+    ['sum', 'Digit sum', 'Digits added together', 55, i => i + ''],
+    ['distinct', 'Distinct digits', 'How many different digits appear', 7, i => (i + 1) + ''],
+    ['maxrep', 'Most repeated digit', 'How many times the commonest digit appears', 7, i => (i + 1) + 'x'],
+    ['run', 'Longest run', 'Longest stretch of the same digit in a row', 7, i => (i + 1) + ' long'],
+    ['first', 'Leading digit', '', 10, i => i + ''],
+    ['last', 'Last digit', '', 10, i => i + ''],
+    ['shape', 'Digit shape', 'Whether the digits climb, fall, or neither', 4,
+      i => ['strictly up', 'strictly down', 'flat', 'mixed'][i]],
+    ['div', 'Divisible by', '', 6, i => ['2', '3', '5', '7', '11', 'nothing under 12'][i]],
+    ['pal', 'Palindrome', 'Reads the same both ways', 2, i => i ? 'yes' : 'no'],
+  ];
+
+  self.onmessage = async ev => {
+    if (ev.data.cmd !== 'init') return;
+    try {
+      const swept = await betaSweep(ev.data.origin, 0.7);
+      const ep = swept.ep;
+      self.postMessage({ type: 'progress', pct: 0.72, msg: 'Finding the top 1% cutoff…' });
+      const sorted = Float64Array.from(ep).sort();
+      const top1 = sorted[Math.floor(sorted.length * 0.99)];
+
+      const acc = FEATURES.map(f => ({
+        key: f[0], label: f[1], note: f[2],
+        n: new Float64Array(f[3]), ep: new Float64Array(f[3]), top: new Float64Array(f[3]),
+        labels: Array.from({ length: f[3] }, (_, i) => f[4](i)),
+      }));
+      const by = Object.fromEntries(acc.map(a => [a.key, a]));
+      const put = (a, b, e, isTop) => { a.n[b]++; a.ep[b] += e; if (isTop) a.top[b]++; };
+
+      let total = 0;
+      for (let n = 0; n < N; n++) {
+        if ((n & 0x3ffff) === 0) self.postMessage({ type: 'progress', pct: 0.78 + 0.22 * (n / N) });
+        const s = String(n), L = s.length, e = ep[n], isTop = e >= top1;
+        total += e;
+
+        let sum = 0, run = 1, best = 1, up = true, down = true;
+        const seen = new Uint8Array(10);
+        let distinct = 0, maxrep = 0;
+        const counts = new Uint8Array(10);
+        for (let i = 0; i < L; i++) {
+          const d = s.charCodeAt(i) - 48;
+          sum += d;
+          if (!seen[d]) { seen[d] = 1; distinct++; }
+          if (++counts[d] > maxrep) maxrep = counts[d];
+          if (i) {
+            const p = s.charCodeAt(i - 1) - 48;
+            if (d <= p) up = false;
+            if (d >= p) down = false;
+            if (d === p) { if (++run > best) best = run; } else run = 1;
+          }
+        }
+        put(by.len, L - 1, e, isTop);
+        put(by.sum, sum, e, isTop);
+        put(by.distinct, distinct - 1, e, isTop);
+        put(by.maxrep, maxrep - 1, e, isTop);
+        put(by.run, best - 1, e, isTop);
+        put(by.first, s.charCodeAt(0) - 48, e, isTop);
+        put(by.last, s.charCodeAt(L - 1) - 48, e, isTop);
+        put(by.shape, L === 1 ? 2 : up ? 0 : down ? 1 : (maxrep === L ? 2 : 3), e, isTop);
+        // Divisibility buckets overlap, so this one is counted per rule rather than
+        // partitioned - which is why it gets its own note on the page.
+        let any = false;
+        if (n % 2 === 0) { put(by.div, 0, e, isTop); any = true; }
+        if (n % 3 === 0) { put(by.div, 1, e, isTop); any = true; }
+        if (n % 5 === 0) { put(by.div, 2, e, isTop); any = true; }
+        if (n % 7 === 0) { put(by.div, 3, e, isTop); any = true; }
+        if (n % 11 === 0) { put(by.div, 4, e, isTop); any = true; }
+        if (!any) put(by.div, 5, e, isTop);
+        let pal = 1;
+        for (let i = 0, j = L - 1; i < j; i++, j--) if (s[i] !== s[j]) { pal = 0; break; }
+        put(by.pal, pal, e, isTop);
+      }
+
+      self.postMessage({ type: 'ready', N, mean: total / N, top1,
+        features: acc.map(a => ({ key: a.key, label: a.label, note: a.note, labels: a.labels,
+          n: Array.from(a.n), ep: Array.from(a.ep), top: Array.from(a.top) })) });
+    } catch (e) {
+      self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
+    }
+  };
+}
+
+function anatomyClient(WORKER_SRC) {
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.round(n).toLocaleString();
+  const compact = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(1) + 'k' : fmt(n);
+  let D = null, metric = 'ep';
+
+  function panels() {
+    const rows = D.features.map(f => {
+      const buckets = f.labels.map((lab, i) => {
+        if (!f.n[i]) return null;
+        const mean = f.ep[i] / f.n[i];
+        const pTop = f.top[i] / f.n[i];
+        return { lab, n: f.n[i], mean, pTop,
+          lift: metric === 'ep' ? mean / D.mean : pTop / 0.01 };
+      }).filter(Boolean);
+      // Rank on buckets big enough to be a property rather than an anecdote: "digit
+      // sum 0" is the single number 0, and its enormous score would otherwise put
+      // every panel containing one such bucket at the top. Small buckets are still
+      // shown - they are just marked, and left out of the ranking.
+      const MIN = D.N / 1000;
+      const solid = buckets.filter(b => b.n >= MIN && b.lift > 0).map(b => b.lift);
+      const spread = solid.length > 1 ? Math.max(...solid) / Math.min(...solid) : 1;
+      buckets.forEach(b => { b.thin = b.n < MIN; });
+      return { f, buckets, spread };
+    }).sort((a, b) => b.spread - a.spread);
+
+    $('panels').innerHTML = rows.map(({ f, buckets, spread }) => {
+      const maxLift = Math.max(...buckets.map(b => b.lift), 1);
+      return `<section class="card panel">
+        <h2>${f.label} <em>${spread >= 10 ? Math.round(spread) : spread.toFixed(1)}x spread</em></h2>
+        ${f.note ? `<p class="small">${f.note}</p>` : ''}
+        ${buckets.map(b => `<div class="brow${b.thin ? ' thin' : ''}"${
+          b.thin ? ' title="too few numbers to count towards the ranking"' : ''}>
+          <span class="bl">${b.lab}</span>
+          <span class="bbar"><i class="${b.lift >= 1 ? 'up' : 'dn'}"
+            style="width:${(100 * b.lift / maxLift).toFixed(2)}%"></i></span>
+          <span class="bv">${b.lift >= 10 ? Math.round(b.lift) : b.lift.toFixed(2)}x</span>
+          <span class="bn">${compact(b.n)}</span>
+        </div>`).join('')}
+      </section>`;
+    }).join('');
+  }
+
+  $('metric').addEventListener('change', e => { metric = e.target.value; panels(); });
+
+  betaBoot(WORKER_SRC).then(({ data }) => {
+    D = data;
+    $('page').classList.add('on');
+    $('lead').innerHTML = `Every bar is a <b>lift</b>: how a group's average compares with the range as a
+      whole. The mean roll is <b>${fmt(D.mean)} EP</b>, so 2x means that group averages twice that, and
+      1x means the property makes no difference at all. Panels are ordered by how much spread the
+      property produces, so the ones that matter come first.`;
+    panels();
+  });
+}
+
+function renderAnatomy() {
+  const css = `
+  #page { display:none; }
+  #page.on { display:block; }
+  #lead { font-size:.86rem; color:var(--dim); line-height:1.65; margin-bottom:1.2rem;
+    border-left:3px solid var(--hl); padding-left:.9rem; }
+  #lead b { color:var(--text); font-weight:600; }
+  .bar { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; margin-bottom:1rem; }
+  .bar label { font-size:.78rem; color:var(--muted); }
+  .bar select { font-size:.85rem; padding:.4rem .5rem; }
+
+  /* Columns, not grid: the panels are wildly different heights (digit sum has 55 rows,
+     palindrome has 2) and a grid would leave a screen of empty space beside the tall one. */
+  #panels { columns:340px; column-gap:.8rem; }
+  #panels .panel { break-inside:avoid; margin:0 0 .8rem; }
+  .panel h2 em { font-style:normal; font-weight:500; letter-spacing:0; text-transform:none;
+    color:var(--faint); font-family:var(--mono); float:right; }
+  .panel p.small { margin:-.4rem 0 .7rem; font-size:.76rem; color:var(--muted); line-height:1.5; }
+  .brow { display:grid; grid-template-columns:5.4rem 1fr 3.2rem 3.2rem; align-items:center; gap:.5rem;
+    padding:.16rem 0; font-size:.8rem; }
+  .brow .bl { color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .brow .bbar { height:9px; border-radius:var(--r-pill); background:var(--surface-2); overflow:hidden; }
+  .brow .bbar i { display:block; height:100%; }
+  .brow .bbar i.up { background:var(--accent); }
+  .brow .bbar i.dn { background:var(--border-3); }
+  .brow .bv { text-align:right; font-family:var(--mono); font-size:.76rem; color:var(--hl-lt);
+    font-variant-numeric:tabular-nums; }
+  .brow .bn { text-align:right; font-family:var(--mono); font-size:.7rem; color:var(--faint); }
+  .brow.thin { opacity:.45; }
+  .brow.thin .bv { color:var(--muted); }`;
+
+  const body = `<div class="wrap">
+  <div class="tool-head">
+    <h1>Anatomy <span class="beta-tag">beta</span></h1>
+    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <p class="tag">Which plain properties of a number actually move its score - and which ones sound
+    like they should and do not.</p>
+
+  <div id="page">
+    <div id="lead"></div>
+    <div class="bar">
+      <label for="metric">Measure</label>
+      <select id="metric">
+        <option value="ep">Mean EP, against the range average</option>
+        <option value="top">Chance of a top 1% roll, against 1 in 100</option>
+      </select>
+    </div>
+    <div id="panels"></div>
+  </div>
+
+  <footer>
+    Every group is measured over all 1,000,001 legal rolls. <b>Divisible by</b> is the one panel whose
+    groups overlap - a number can be divisible by both 2 and 3 - so its bars are per rule rather than a
+    partition, and its final row is the numbers divisible by nothing under 12. <b>Digit shape</b> counts
+    a repdigit as flat, and every single-digit number as flat by definition.
+  </footer>
+</div>
+${overlayHTML('Then measuring ten plain properties of every number against its score.')}`;
+
+  const script = `${BETA_BOOT_JS}
+const __W = ${JSON.stringify(workerSrc(anatomyWorker))};
+(${anatomyClient.toString()})(__W);`;
+
+  return betaShell({ title: 'RNGdle - Anatomy', width: '1080px', slug: 'anatomy', css, body, script });
+}
+
+// ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
 
@@ -4477,4 +4710,5 @@ const RENDERERS = {
   species: renderSpecies,
   projections: renderProjections,
   nearmiss: renderNearMiss,
+  anatomy: renderAnatomy,
 };
