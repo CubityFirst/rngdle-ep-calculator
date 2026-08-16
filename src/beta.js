@@ -3559,7 +3559,7 @@ const __W = ${JSON.stringify(workerSrc(collectorWorker))};
 // ---------------------------------------------------------------------------
 
 function speciesWorker() {
-  let bits = null, ROW = 0, N = 0, keyOf = null, species = null;
+  let bits = null, ROW = 0, N = 0, keyOf = null, species = null, EP = null;
 
   self.onmessage = async ev => {
     const m = ev.data;
@@ -3569,13 +3569,18 @@ function speciesWorker() {
       // Walking the range for members is O(N) but only on demand, and it avoids
       // holding a member list for all 1,000,001 numbers just to show eight of them.
       for (let n = 0; n < N && sample.length < 9; n++) if (keyOf[n] === keyOf[m.n]) sample.push(n);
-      self.postMessage({ type: 'found', n: m.n, size: s.count, rank: s.rank, sample });
+      // The badge set IS the species, so hand it back: it is the answer to "what do
+      // these numbers have in common", which a count alone never tells you.
+      const idx = new Int32Array(256);
+      const k = betaEarned(bits, m.n * ROW, ROW, idx);
+      self.postMessage({ type: 'found', n: m.n, size: s.count, rank: s.rank, sample,
+        ep: EP[m.n], badges: Array.from(idx.subarray(0, k)) });
       return;
     }
     if (m.cmd !== 'init') return;
     try {
       const swept = await betaSweep(m.origin, 0.6);
-      bits = swept.bits; ROW = swept.ROW; N = swept.ep.length;
+      bits = swept.bits; ROW = swept.ROW; N = swept.ep.length; EP = swept.ep;
 
       self.postMessage({ type: 'progress', pct: 0.65, msg: 'Grouping by badge set…' });
       const buckets = new Map();                  // hash -> [species index, ...]
@@ -3620,7 +3625,7 @@ function speciesWorker() {
   };
 }
 
-function speciesClient(WORKER_SRC, TIERS) {
+function speciesClient(WORKER_SRC, TIERS, META, PAL) {
   const $ = id => document.getElementById(id);
   const fmt = n => Math.round(n).toLocaleString();
   const compact = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(1) + 'k' : fmt(n);
@@ -3701,7 +3706,13 @@ function speciesClient(WORKER_SRC, TIERS) {
       </div>
       ${others.length ? `<div class="fsame">Same badge set: ${
         others.map(x => `<a href="/?n=${x}">${x.toLocaleString()}</a>`).join(' · ')}${
-        m.size > others.length + 1 ? ` and ${fmt(m.size - others.length - 1)} more` : ''}</div>` : ''}`;
+        m.size > others.length + 1 ? ` and ${fmt(m.size - others.length - 1)} more` : ''}</div>` : ''}
+      <div class="fset"><b>The set itself</b> - ${m.badges.length} badges, ${fmt(m.ep)} EP after
+        supersession. This exact combination is what defines the kind.
+        <div class="pills">${m.badges.slice().sort((a, b) => META[b][2] - META[a][2]).map(i =>
+          `<a class="bpill" href="/badges#${META[i][5]}" style="--tc:${PAL[META[i][3]]}"
+            title="${META[i][0]} · ${fmt(META[i][2])} EP">${META[i][1]} ${META[i][0]}</a>`).join('')}</div>
+      </div>`;
   }
 
   betaBoot(WORKER_SRC, m => { if (m.type === 'found') found(m); }).then(({ worker, data }) => {
@@ -3736,7 +3747,9 @@ function speciesClient(WORKER_SRC, TIERS) {
 }
 
 function renderSpecies(ctx) {
-  const { CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE } = ctx;
+  const { BADGES, CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE, tierFromScore } = ctx;
+  const meta = BADGES.map(([id, label, emoji, ep]) => [label, emoji, ep, tierFromScore(ep), -1, id]);
+  const pal = Object.fromEntries(Object.entries(TIER_PALETTE).map(([k, v]) => [k, v.accent]));
   const tiers = CARD_TIER_NAMES.map((key, i) => ({
     label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
     lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
@@ -3771,6 +3784,14 @@ function renderSpecies(ctx) {
   .fh { font-size:.92rem; margin-bottom:.7rem; }
   .fh b { font-family:var(--mono); }
   .fsame { margin-top:.7rem; font-size:.82rem; color:var(--muted); line-height:1.8; }
+  .fset { margin-top:.9rem; padding-top:.8rem; border-top:1px solid var(--border);
+    font-size:.82rem; color:var(--muted); line-height:1.6; }
+  .fset b { color:var(--dim); font-weight:600; }
+  .pills { display:flex; flex-wrap:wrap; gap:.3rem; margin-top:.6rem; }
+  .bpill { font-size:.74rem; text-decoration:none; padding:.2rem .5rem; border-radius:var(--r-pill);
+    color:var(--text); background:color-mix(in srgb, var(--tc) 12%, var(--surface-2));
+    border:1px solid color-mix(in srgb, var(--tc) 40%, transparent); white-space:nowrap; }
+  .bpill:hover { background:color-mix(in srgb, var(--tc) 26%, var(--surface-2)); }
   .loading { display:flex; align-items:center; gap:.6rem; color:var(--muted); font-size:.86rem; }
   #halfline { font-size:.86rem; color:var(--dim); margin:.8rem 0 0; }`;
 
@@ -3821,7 +3842,7 @@ ${overlayHTML('Then grouping all 1,000,001 numbers by their exact badge set.')}`
 
   const script = `${BETA_BOOT_JS}
 const __W = ${JSON.stringify(workerSrc(speciesWorker))};
-(${speciesClient.toString()})(__W, ${JSON.stringify(tiers)});`;
+(${speciesClient.toString()})(__W, ${JSON.stringify(tiers)}, ${JSON.stringify(meta)}, ${JSON.stringify(pal)});`;
 
   return betaShell({ title: 'RNGdle - Species', width: '900px', slug: 'species', css, body, script });
 }

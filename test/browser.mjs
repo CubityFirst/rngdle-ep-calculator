@@ -136,6 +136,7 @@ const INTERACTIONS = {
       await p.waitForTimeout(1800);
       return p.$eval('#found .fh', e => e.textContent.replace(/\s+/g, ' ').trim());
     }],
+    ['badge set', p => p.$eval('#found .pills', e => e.children.length + ' badge pills')],
   ],
   '/beta/anatomy': [
     ['metric', p => p.selectOption('#metric', 'top').then(() => p.$eval('#panels .panel h2', e => e.textContent.trim()))],
