@@ -175,6 +175,12 @@ const INTERACTIONS = {
     ['hilbert', p => p.click('[data-l="2"]').then(() => p.waitForTimeout(1200)).then(() => 'ok')],
     ['by score', p => p.click('[data-l="4"]').then(() => p.waitForTimeout(1200)).then(() => 'ok')],
     ['colour', p => p.selectOption('#mode', '1').then(() => 'ok')],
+    ['badge overlay', async p => {
+      await p.fill('#badge', 'Divisible by Three');
+      await p.$eval('#badge', e => e.dispatchEvent(new Event('change', { bubbles: true })));
+      await p.waitForTimeout(2500);
+      return p.textContent('#badgenote');
+    }],
   ],
 };
 

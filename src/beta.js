@@ -3844,10 +3844,21 @@ const __W = ${JSON.stringify(workerSrc(speciesWorker))};
 // ---------------------------------------------------------------------------
 
 function projectionsWorker() {
+  // The sweep bitmask stays here (~29MB); the page only ever wants one badge at a time.
+  let BITS = null, ROW = 0;
+
   self.onmessage = async ev => {
+    if (ev.data.cmd === 'badge') {
+      const i = ev.data.i, N = 1000000, byte = i >> 3, bit = 1 << (i & 7);
+      const mask = new Uint8Array(N);
+      for (let n = 0; n < N; n++) mask[n] = (BITS[n * ROW + byte] & bit) ? 255 : 0;
+      self.postMessage({ type: 'mask', i, mask: mask.buffer }, [mask.buffer]);
+      return;
+    }
     if (ev.data.cmd !== 'init') return;
     try {
       const swept = await betaSweep(ev.data.origin, 0.8);
+      BITS = swept.bits; ROW = swept.ROW;
       const N = 1000000;
       self.postMessage({ type: 'progress', pct: 0.85, msg: 'Ranking every number…' });
       const ep = new Float64Array(N);
@@ -3872,7 +3883,7 @@ function projectionsWorker() {
   };
 }
 
-function projectionsClient(WORKER_SRC, TIERS) {
+function projectionsClient(WORKER_SRC, TIERS, LABELS) {
   const $ = id => document.getElementById(id);
   const cv = $('gl');
   const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
@@ -3883,7 +3894,8 @@ function projectionsClient(WORKER_SRC, TIERS) {
   }
   const N = 1000000, SIDE = 1000;
 
-  let EP = null, CNT = null, RANK = null, BYRANK = null, MAXEP = 1;
+  let EP = null, CNT = null, RANK = null, BYRANK = null, MAXEP = 1, W = null;
+  let maskTex = null, maskBadge = -1, hasMask = false;
   let from = 0, to = 0, t = 1, animStart = 0, mode = 0, sel = -1;
   const view = { x: 0.5, y: 0.5, z: 1 };          // centre in layout space, plus zoom
 
@@ -3904,7 +3916,10 @@ uniform int uA, uB;           // layouts being interpolated
 uniform float uT;             // 0 = uA, 1 = uB
 uniform float uPt;
 uniform sampler2D uD;         // (normalised log EP, EP, badge count, rank)
+uniform sampler2D uK;         // badge overlay mask, 1 byte per number
+uniform int uMark;            // 1 when an overlay is loaded
 out vec4 vD;
+out float vK;
 flat out int vN;
 
 ivec2 decimalNest(int n) {
@@ -3946,22 +3961,27 @@ void main() {
   int n = gl_VertexID;
   vN = n;
   vD = texelFetch(uD, ivec2(n % 1000, n / 1000), 0);
+  vK = uMark == 1 ? texelFetch(uK, ivec2(n % 1000, n / 1000), 0).r : 0.0;
   vec2 p = mix(place(uA, n, vD.a), place(uB, n, vD.a), uT);
   vec3 c = uM * vec3(p, 1.0);
   gl_Position = vec4(c.xy, 0.0, 1.0);
-  gl_PointSize = uPt;
+  // Marked points are drawn fatter, or two thousand of them would be lost among a
+  // million one-pixel neighbours.
+  gl_PointSize = uMark == 1 && vK > 0.5 ? max(2.5, uPt * 2.2) : uPt;
 }`;
 
   const FS = `#version 300 es
 precision highp float;
 precision highp int;
 in vec4 vD;
+in float vK;
 flat in int vN;
 uniform vec3 uTier[7];
 uniform float uCut[6];
 uniform int uMode;            // 0 tier, 1 EP ramp, 2 badge count
 uniform float uMaxC;
 uniform int uSel;
+uniform int uMark;
 out vec4 o;
 vec3 ramp(float x) {
   x = clamp(x, 0.0, 1.0);
@@ -3976,6 +3996,7 @@ void main() {
   if (uMode == 0) { col = uTier[0]; for (int i = 0; i < 6; i++) if (vD.g >= uCut[i]) col = uTier[i + 1]; }
   else if (uMode == 1) col = ramp(vD.r);
   else col = ramp(vD.b / max(uMaxC, 1.0));
+  if (uMark == 1) col = vK > 0.5 ? vec3(1.0, .68, .30) : col * .16;
   o = vec4(col, 1.0);
 }`;
 
@@ -4100,6 +4121,7 @@ void main() {
     gl.uniform1i(U('uMode'), mode);
     gl.uniform1f(U('uMaxC'), 40);
     gl.uniform1i(U('uSel'), sel);
+    gl.uniform1i(U('uMark'), hasMask ? 1 : 0);
     // One device pixel per number at fit; bigger as you zoom in, so a single number
     // stays findable rather than vanishing between samples.
     const px = (Math.min(cv.width, cv.height) * view.z) / SIDE;
@@ -4193,9 +4215,51 @@ void main() {
   });
   $('mode').addEventListener('change', e => { mode = Number(e.target.value); render(); });
   $('fit').addEventListener('click', () => { view.x = view.y = 0.5; view.z = 1; render(); });
+  $('badge').addEventListener('change', e => {
+    const i = LABELS.indexOf(e.target.value);
+    if (i < 0) {
+      hasMask = false; maskBadge = -1;
+      $('badgenote').textContent = '';
+      render();
+      return;
+    }
+    if (i === maskBadge && hasMask) return;
+    maskBadge = i;
+    $('badgenote').textContent = 'Loading…';
+    W.postMessage({ cmd: 'badge', i });
+  });
+  $('badgeclear').addEventListener('click', () => {
+    $('badge').value = '';
+    $('badge').dispatchEvent(new Event('change'));
+  });
   addEventListener('resize', render);
 
-  betaBoot(WORKER_SRC).then(({ data }) => {
+  betaBoot(WORKER_SRC, m => {
+    if (m.type !== 'mask' || m.i !== maskBadge) return;
+    const mask = new Uint8Array(m.mask);
+    let lit = 0;
+    for (let n = 0; n < mask.length; n++) if (mask[n]) lit++;
+    // Its own R8 texture rather than a spare channel of the data one: all four of
+    // those are taken, and rebuilding a 16MB RGBA32F upload per badge would be silly.
+    if (!maskTex) {
+      maskTex = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, maskTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.useProgram(prog);
+      gl.uniform1i(U('uK'), 1);
+    }
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, maskTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1000, 1000, 0, gl.RED, gl.UNSIGNED_BYTE, mask);
+    hasMask = true;
+    $('badgenote').textContent = `${lit.toLocaleString()} numbers · ${
+      (100 * lit / mask.length).toFixed(lit < 1000 ? 4 : 2)}% of the map`;
+    render();
+  }).then(({ worker, data }) => {
+    W = worker;
     EP = new Float64Array(data.ep); CNT = new Uint8Array(data.cnt);
     RANK = new Uint32Array(data.rank); BYRANK = new Uint32Array(data.byRank);
     MAXEP = data.max;
@@ -4233,7 +4297,8 @@ void main() {
 }
 
 function renderProjections(ctx) {
-  const { CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE } = ctx;
+  const { BADGES, CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE, esc } = ctx;
+  const LABELS = BADGES.map(b => b[1]);
   const tiers = CARD_TIER_NAMES.map((key, i) => ({
     label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
     lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
@@ -4268,6 +4333,12 @@ function renderProjections(ctx) {
   .ctl select { width:100%; font-size:12px; padding:.35rem .45rem; background:rgba(255,255,255,.06);
     border-color:rgba(255,255,255,.14); }
   #fit { font-size:12px; padding:.4rem .5rem; background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.14); }
+  .badgerow { display:flex; gap:5px; }
+  #badge { flex:1; min-width:0; font-size:12px; padding:.35rem .45rem; background:rgba(255,255,255,.06);
+    border-color:rgba(255,255,255,.14); }
+  #badgeclear { flex:0 0 auto; padding:.35rem .5rem; font-size:13px; color:var(--muted);
+    background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.14); }
+  #badgenote { font-size:11px; color:var(--hl-lt); font-family:var(--mono); min-height:1.1em; }
 
   #read { top:12px; right:12px; width:210px; padding:11px 12px; display:none; flex-direction:column; gap:.3rem; }
   #read.on { display:flex; }
@@ -4304,6 +4375,14 @@ function renderProjections(ctx) {
       <option value="1">EP</option>
       <option value="2">Badges earned</option>
     </select></label>
+  <div class="ctl"><span>Light up a badge</span>
+    <div class="badgerow">
+      <input id="badge" list="badgelist" type="text" placeholder="any badge…" autocomplete="off">
+      <button type="button" id="badgeclear" title="Clear the overlay">&times;</button>
+    </div>
+    <div id="badgenote"></div>
+  </div>
+  <datalist id="badgelist">${LABELS.map(l => `<option value="${esc(l)}"></option>`).join('')}</datalist>
   <button type="button" id="fit">Fit</button>
 </div>
 <div id="read" class="glass"></div>
@@ -4313,7 +4392,7 @@ ${overlayHTML('Then ranking every number so the by-score layout has somewhere to
 
   const script = `${BETA_BOOT_JS}
 const __W = ${JSON.stringify(workerSrc(projectionsWorker))};
-(${projectionsClient.toString()})(__W, ${JSON.stringify(tiers)});`;
+(${projectionsClient.toString()})(__W, ${JSON.stringify(tiers)}, ${JSON.stringify(LABELS)});`;
 
   return betaShell({
     title: 'RNGdle - Projections', slug: 'projections', full: true, css, body, script,
