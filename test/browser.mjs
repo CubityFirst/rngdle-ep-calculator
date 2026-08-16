@@ -96,6 +96,7 @@ const INTERACTIONS = {
   // mouse.move, not hover(): playwright's actionability check does not settle on SVG
   // circles inside a scaled viewBox, though elementFromPoint hits them fine.
   '/beta/economy': [
+    ['dominance', p => p.$eval('#domtiers', e => e.children.length + ' tier rows')],
     ['hover point', async p => {
       const [x, y] = await p.$eval('#chart .pt', e => {
         const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2];
@@ -115,6 +116,7 @@ const INTERACTIONS = {
       return u.pathname + u.hash;
     }],
   ],
+
   '/beta/oracle': [
     ['lock best', p => p.click('#greedy').then(() => p.waitForTimeout(600)).then(() => p.textContent('#pattern'))],
     ['metric', p => p.selectOption('#metric', 'top').then(() => p.$eval('#board .cell.live em', e => e.textContent))],

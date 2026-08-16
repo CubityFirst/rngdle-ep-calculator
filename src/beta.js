@@ -1712,6 +1712,16 @@ function economyWorker() {
       const nFam = 1 + FAM.reduce((m, f) => Math.max(m, f), -1);
       const top = new Int32Array(nFam);
       const idx = new Int32Array(256);
+      // With price flat at 100/P, a badge's EP is just its rarity, so a number's score
+      // should be dominated by the single rarest badge it earns. Measure it: the share
+      // of each number's EP that comes from its biggest scorer.
+      const DOM = 20;
+      const domHist = new Float64Array(DOM);
+      let domSum = 0, domN = 0;
+      // Split by card tier as well: the interesting part turned out not to be the
+      // average but how sharply it changes as a number gets rarer.
+      const CUTS = ev.data.cuts, NT = CUTS.length + 1;
+      const tierSum = new Float64Array(NT), tierN = new Float64Array(NT);
 
       for (let n = 0; n < N; n++) {
         if ((n & 0x3ffff) === 0) {
@@ -1719,17 +1729,34 @@ function economyWorker() {
         }
         const k = betaEarned(bits, n * ROW, ROW, idx);
         top.fill(-1);
+        let tot = 0, mx = 0;
         for (let a = 0; a < k; a++) {
           const i = idx[a];
           earn[i]++;
           const f = FAM[i];
-          if (f < 0) { score[i]++; continue; }
+          if (f < 0) { score[i]++; tot += EP[i]; if (EP[i] > mx) mx = EP[i]; continue; }
           // Strict >, so the first of an EP tie wins - the same rule compute() uses.
           if (top[f] < 0 || EP[i] > EP[top[f]]) top[f] = i;
         }
-        for (let f = 0; f < nFam; f++) if (top[f] >= 0) score[top[f]]++;
+        for (let f = 0; f < nFam; f++) {
+          if (top[f] < 0) continue;
+          score[top[f]]++;
+          tot += EP[top[f]];
+          if (EP[top[f]] > mx) mx = EP[top[f]];
+        }
+        if (tot > 0) {
+          const share = mx / tot;
+          domSum += share; domN++;
+          domHist[Math.min(DOM - 1, (share * DOM) | 0)]++;
+          let ti = 0;
+          while (ti < CUTS.length && tot >= CUTS[ti]) ti++;
+          tierSum[ti] += share; tierN[ti]++;
+        }
       }
-      self.postMessage({ type: 'ready', earn: earn.buffer, score: score.buffer, N },
+      self.postMessage({ type: 'ready', earn: earn.buffer, score: score.buffer, N,
+        domHist: Array.from(domHist), domMean: domN ? domSum / domN : 0, domN,
+        tierShare: Array.from(tierSum, (v, i) => tierN[i] ? v / tierN[i] : 0),
+        tierN: Array.from(tierN) },
         [earn.buffer, score.buffer]);
     } catch (e) {
       self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
@@ -1738,7 +1765,8 @@ function economyWorker() {
 }
 
 // META[i] = [label, emoji, ep, tier, familyIndex, id]; PAL = tier -> accent.
-function economyClient(WORKER_SRC, META, FAMS, PAL) {
+function economyClient(WORKER_SRC, META, FAMS, PAL, TIERS) {
+  const CUTS = TIERS.slice(1).map(t => t.lo);
   const B = META.length;
   const $ = id => document.getElementById(id);
   const fmt = n => Math.round(n).toLocaleString();
@@ -1878,6 +1906,35 @@ function economyClient(WORKER_SRC, META, FAMS, PAL) {
     $('cleann').textContent = clean;
   }
 
+  // The price law's real consequence for a player: since EP is 100/P, the rarest
+  // badge on a number is worth more than everything else on it put together.
+  function dominance(d) {
+    const h = d.domHist, B2 = h.length;
+    const mx = Math.max(...h);
+    // Share of numbers whose biggest badge is most of their score.
+    let over = 0, tot = 0;
+    for (let i = 0; i < B2; i++) { tot += h[i]; if (i / B2 >= 0.5) over += h[i]; }
+    $('domstats').innerHTML = `
+      <div class="stat stat-lg"><span class="k">Typical share</span><span class="v">${
+        (100 * d.domMean).toFixed(1)}%</span>
+        <span class="sub">of a number's EP is its single biggest badge</span></div>
+      <div class="stat stat-lg"><span class="k">Carried by one badge</span><span class="v">${
+        (100 * over / tot).toFixed(1)}%</span>
+        <span class="sub">of numbers get over half their score from one</span></div>
+      <div class="stat stat-lg"><span class="k">At the top</span><span class="v">${
+        (100 * d.tierShare[d.tierShare.length - 1]).toFixed(1)}%</span>
+        <span class="sub">for ${TIERS[TIERS.length - 1].label.toLowerCase()} numbers</span></div>`;
+    $('domhist').innerHTML = h.map((v, i) =>
+      `<i style="height:${(100 * v / mx).toFixed(1)}%" title="${
+        (100 * i / B2).toFixed(0)}-${(100 * (i + 1) / B2).toFixed(0)}%: ${
+        Math.round(v).toLocaleString()} numbers"></i>`).join('');
+    // The average hides the mechanism; the trend across tiers is the mechanism.
+    $('domtiers').innerHTML = TIERS.map((t, i) => d.tierN[i] ? `<div class="frow">
+      <span class="fl"><span class="pill" style="--tc:${t.accent}">${t.label}</span></span>
+      <span class="fbar"><i style="width:${(100 * d.tierShare[i]).toFixed(1)}%;background:${t.accent}"></i></span>
+      <span class="fv">${(100 * d.tierShare[i]).toFixed(0)}%</span></div>` : '').join('');
+  }
+
   function stats(totalEP) {
     const dead = ROWS.filter(r => r.earn > 0 && r.score === 0).length;
     const evs = ROWS.map(r => r.ev).sort((a, b) => a - b);
@@ -1927,7 +1984,7 @@ function economyClient(WORKER_SRC, META, FAMS, PAL) {
   // --- boot --------------------------------------------------------------
   const ep = Float64Array.from(META, m => m[2]);
   const fam = Int16Array.from(META, m => m[4]);
-  betaBoot(WORKER_SRC, null, { ep: ep.buffer, fam: fam.buffer }).then(({ data }) => {
+  betaBoot(WORKER_SRC, null, { ep: ep.buffer, fam: fam.buffer, cuts: CUTS }).then(({ data }) => {
     EARN = new Float64Array(data.earn); SCORE = new Float64Array(data.score); N = data.N;
 
     let totalEP = 0;
@@ -1960,13 +2017,17 @@ function economyClient(WORKER_SRC, META, FAMS, PAL) {
 
     $('slope').textContent = b.toFixed(3);
     $('konst').textContent = Math.pow(10, a).toFixed(1);
-    chart(); residualChart(); tables(); stats(totalEP);
+    chart(); residualChart(); tables(); stats(totalEP); dominance(data);
     $('report').classList.add('on');
   });
 }
 
 function renderEconomy(ctx) {
-  const { BADGES, FAMILIES, FAMILY_NAMES, TIER_PALETTE, tierFromScore } = ctx;
+  const { BADGES, FAMILIES, FAMILY_NAMES, TIER_PALETTE, CARD_TIERS, CARD_TIER_NAMES, tierFromScore } = ctx;
+  const tiers = CARD_TIER_NAMES.map((key, i) => ({
+    label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
+    lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
+  }));
   const famOf = new Map();
   FAMILIES.forEach((fam, fi) => { for (const id of fam) famOf.set(id, fi); });
   const meta = BADGES.map(([id, label, emoji, ep]) =>
@@ -2005,6 +2066,16 @@ function renderEconomy(ctx) {
   .erow .el em { font-style:normal; font-size:.72rem; color:var(--faint); font-family:var(--mono); }
   .erow .ev { flex:0 0 auto; font-family:var(--mono); font-size:.78rem; color:var(--hl-lt);
     font-variant-numeric:tabular-nums; }
+
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(200px,100%),1fr)); gap:.5rem; }
+  .tiles .stat { min-width:0; overflow-wrap:anywhere; }
+  #domtiers { margin-top:.9rem; }
+  #domtiers .fl { flex:0 0 6.4rem; }
+  #domhist { display:flex; align-items:flex-end; gap:2px; height:96px; padding:.25rem; margin-top:.8rem;
+    background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-sm); }
+  #domhist i { flex:1; background:var(--hl); border-radius:1px 1px 0 0; min-height:1px; opacity:.85; }
+  .domax { display:flex; justify-content:space-between; margin-top:.25rem; font-size:.7rem;
+    color:var(--faint); }
 
   .frow { display:flex; align-items:center; gap:.7rem; padding:.32rem .3rem; }
   .frow .fl { flex:0 0 250px; min-width:0; font-size:.85rem; display:flex; flex-direction:column; color:var(--dim); }
@@ -2052,6 +2123,22 @@ function renderEconomy(ctx) {
         a common, it just arrives a hundred thousand times less often.</p>
     </section>
 
+    <section class="card">
+      <h2>One badge decides it</h2>
+      <p class="small">If price is 100 / P then a badge's EP <b>is</b> its rarity, so you would expect
+        the rarest thing a number earns to swamp everything else on it. For a typical number it does
+        not: the average biggest badge is only about a third of the score, because an ordinary roll
+        picks up a dozen badges of much the same commonness and they add up.</p>
+      <p class="small">What the average hides is how fast that changes. Split the same measure by card
+        tier and the mechanism is obvious - a number is not rare because it collected more badges, it
+        is rare because it collected <b>one</b> rare badge, and by the top tier that single badge is
+        nearly the whole score.</p>
+      <div class="tiles" id="domstats"></div>
+      <div id="domtiers"></div>
+      <div id="domhist"></div>
+      <div class="domax"><span>none of it</span><span>half</span><span>all of it</span></div>
+    </section>
+
     <div class="grid2">
       <section class="card"><h2>What actually varies <em>supersession</em></h2>
         <p class="small">The one thing that breaks the flat 100 EP: within a family only the
@@ -2084,7 +2171,8 @@ ${overlayHTML('Then re-running family supersession on every number to see which 
 
   const script = `${BETA_BOOT_JS}
 const __W = ${JSON.stringify(workerSrc(economyWorker))};
-(${economyClient.toString()})(__W, ${JSON.stringify(meta)}, ${JSON.stringify(FAMILY_NAMES)}, ${JSON.stringify(pal)});`;
+(${economyClient.toString()})(__W, ${JSON.stringify(meta)}, ${JSON.stringify(FAMILY_NAMES)},
+  ${JSON.stringify(pal)}, ${JSON.stringify(tiers)});`;
 
   return betaShell({ title: 'RNGdle - Badge Economy', width: '1000px', slug: 'economy', css, body, script });
 }
