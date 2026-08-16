@@ -11,6 +11,7 @@ npm install          # installs wrangler
 npm run dev          # local dev server (http://localhost:8787)
 npm run deploy       # publish to your Cloudflare account (wrangler login first)
 npm test             # run the badge-logic test harness
+npm run test:browser # real-browser smoke test of the /beta tools
 ```
 
 - **Web UI:** `GET /` (or `/?n=696969`)
@@ -90,12 +91,16 @@ are the two halves of that protocol.
 | `/beta/economy` | **Badge pricing**, written up as a finding: EP turns out to be exactly `100 / P(earn)` for every badge, so supersession is the only thing that varies. |
 | `/beta/species` | The range grouped by **exact badge set** - distinct kinds, their rank-size curve, and the numbers that score like nothing else. |
 
-Two things worth knowing about the code:
+Three things worth knowing about the code:
 
 - Tool pages are marked `noindex` and the routes are not linked from the main tools;
   the only entry point is the rail's **Beta lab** item.
 - The shared loading overlay is `.beta-ov`, deliberately prefixed: it is a full-screen
   fixed layer, so a tool reusing a bare class name would paint over the whole page.
+- `betaShell` prepends a no-op `__name` shim to every page script, because the clients
+  are shipped via `toString()` and esbuild's `keepNames` fills that source with calls to
+  a bundle-only helper. Run **`npm run test:deploy`** before deploying: it serves the
+  real bundle, which is the only way to catch that class of bug.
 
 ## Generated snapshot files (`npm run gen`)
 

@@ -9,7 +9,9 @@
     "gen": "node research/gen-snapshot.mjs",
     "predeploy": "node research/gen-snapshot.mjs",
     "deploy": "wrangler deploy",
-    "test": "node test/test.mjs"
+    "test": "node test/test.mjs",
+    "test:browser": "node test/browser.mjs",
+    "test:deploy": "node test/browser.mjs --bundle"
   },
   "devDependencies": {
     "wrangler": "^3"

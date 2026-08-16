@@ -7,8 +7,22 @@ npm install          # installs wrangler
 npm run dev          # wrangler dev server (http://localhost:8787)
 npm run serve        # plain-Node dev server (same worker, no wrangler hotkey loop)
 npm test             # badge-logic test harness
+npm run test:browser # real-browser smoke test of the /beta tools
+npm run test:deploy  # the same, against the esbuild bundle - run before deploying
 npm run deploy       # publish to Cloudflare (runs the generator via predeploy)
 ```
+
+`test:browser` loads every `/beta` page at desktop and phone widths, waits for its
+sweep, and then drives its controls, failing on any console error, any horizontal
+overflow, or any control that does nothing. It skips itself (exit 0) when
+playwright-core is not installed.
+
+**Run `npm run test:deploy` before any deploy that touches a page's client code.**
+The tools ship their client to the browser via `Function.prototype.toString()`, and
+esbuild's `keepNames` rewrites those functions to call `__name()` - a helper that only
+exists inside the bundle. A page can therefore work perfectly from `src/` and be broken
+in production. `src/beta.js` ships a no-op `__name` shim to prevent that; the bundle run
+is what proves it is still there.
 
 Wrangler is always invoked through npm scripts / `npx wrangler` - never a global
 install.
