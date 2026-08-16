@@ -1474,6 +1474,7 @@ void main() {
   $('grid').addEventListener('change', e => { showGrid = e.target.checked; render(); });
   $('badge').addEventListener('change', e => {
     const i = LABELS.indexOf(e.target.value);
+    history.replaceState(null, '', i < 0 ? location.pathname : '?badge=' + encodeURIComponent(LABELS[i]));
     if (i < 0) {
       MASK = null; maskBadge = -1;
       $('badgenote').textContent = '';
@@ -1540,6 +1541,11 @@ void main() {
       if (b) flyTo(Number(b.dataset.n));
     });
     $('hud').classList.add('on');
+    const want = new URLSearchParams(location.search).get('badge');
+    if (want && LABELS.includes(want)) {
+      $('badge').value = want;
+      $('badge').dispatchEvent(new Event('change'));
+    }
   });
 }
 
@@ -2332,7 +2338,11 @@ function spectrumClient(WORKER_SRC, META, FAMS, PAL) {
     tip.style.top = Math.max(8, ev.clientY - tip.offsetHeight - 12) + 'px';
   });
   cv.addEventListener('mouseleave', () => { tip.style.display = 'none'; hover = -1; draw(); });
-  cv.addEventListener('click', ev => { sel = rowAt(ev); detail(sel); draw(); });
+  cv.addEventListener('click', ev => {
+    sel = rowAt(ev);
+    history.replaceState(null, '', sel < 0 ? location.pathname : '#' + encodeURIComponent(META[sel][0]));
+    detail(sel); draw();
+  });
   $('sort').addEventListener('change', e => { sort = e.target.value; reorder(); });
   $('norm').addEventListener('change', e => { norm = e.target.value; draw(); });
   addEventListener('resize', draw);
@@ -2352,7 +2362,11 @@ function spectrumClient(WORKER_SRC, META, FAMS, PAL) {
     SPREAD = new Float64Array(B);
     for (let i = 0; i < B; i++) SPREAD[i] = spread(i);
     $('page').classList.add('on');                 // must be visible before draw() measures
-    reorder(); detail(-1);
+    reorder();
+    const want = decodeURIComponent(location.hash.slice(1));
+    const hit = want ? META.findIndex(m => m[0] === want) : -1;
+    if (hit >= 0) { sel = hit; draw(); }
+    detail(sel);
   });
 }
 
@@ -2674,6 +2688,10 @@ function oracleClient(WORKER_SRC, TIERS, META, PAL) {
     if (busy) return;
     busy = true;
     $('board').classList.add('working');
+    // Keep the locked digits in the URL so a board worth showing someone can be
+    // linked to. Free positions are '.', which reads as the pattern it is.
+    const pat = fix.map(d => d < 0 ? '.' : d).join('');
+    history.replaceState(null, '', pat === '......' ? location.pathname : '?fix=' + pat);
     W.postMessage({ cmd: 'query', fix: fix.slice() });
   }
   function got(m) {
@@ -2710,7 +2728,12 @@ function oracleClient(WORKER_SRC, TIERS, META, PAL) {
   betaBoot(WORKER_SRC, got).then(({ worker, data }) => {
     W = worker; Q = data; P99 = data.p99;
     $('page').classList.add('on');
-    board(); summary();
+    const pat = (new URLSearchParams(location.search).get('fix') || '').slice(0, 6);
+    // A leading 0 has no six-digit numbers behind it, so ignore it rather than showing
+    // an empty board to anyone who hand-edits the URL.
+    const want = [...pat].map((c, i) => (c >= '0' && c <= '9' && !(i === 0 && c === '0')) ? +c : -1);
+    if (want.length === 6 && want.some(d => d >= 0)) { fix = want; send(); }
+    else { board(); summary(); }
   });
 }
 
@@ -4025,8 +4048,8 @@ function projectionsClient(WORKER_SRC, TIERS, LABELS) {
   const LAYOUTS = [
     { id: 0, name: 'By value', hint: 'n across, n / 1000 down - the /grid layout. Adjacent numbers sit side by side, so last-digit and modular rules show as vertical banding.' },
     { id: 1, name: 'By digits', hint: 'Nested decimal: the first two digits pick a 10x10 block, the next two a block inside that, the last two a cell. Digit-pattern rules become self-similar.' },
-    { id: 2, name: 'Hilbert', hint: 'A space-filling curve: numbers close in value stay close in both directions, not just along a row, so runs read as compact blobs instead of stripes.' },
-    { id: 3, name: 'Z-order', hint: 'Morton order - interleave the bits of the coordinates. Same idea as Hilbert but with jumps, which is exactly what the seams are.' },
+    { id: 2, name: 'Hilbert', hint: 'A space-filling curve: numbers close in value stay close in both directions, not just along a row, so runs read as compact blobs instead of stripes. The empty patch is the curve past 1,000,000 - it fills a 1024 square, and the 48,576 spare places end up together, which is the property.' },
+    { id: 3, name: 'Z-order', hint: 'Morton order - interleave the bits of the coordinates. Same idea as Hilbert but with jumps, which is exactly what the seams are; the empty places past 1,000,000 scatter rather than clumping.' },
     { id: 4, name: 'By score', hint: 'Sorted by EP, lowest first. Position no longer means anything about the number, but the area each tier occupies is its exact share of the range.' },
   ];
 
@@ -4320,14 +4343,27 @@ void main() {
     return [(ndcX - m[6]) / m[0], (ndcY - m[7]) / m[4]];
   }
 
-  function goto(id) {
-    if (id === to && t >= 1) return;
-    from = t < 1 ? from : to;
-    to = id; t = 0; animStart = performance.now();
+  function url() {
+    const q = new URLSearchParams();
+    if (to) q.set('l', String(to));
+    if (maskBadge >= 0 && hasMask) q.set('badge', LABELS[maskBadge]);
+    const qs = q.toString();
+    history.replaceState(null, '', qs ? '?' + qs : location.pathname);
+  }
+
+  // `instant` lands on the layout without a morph, which is what a deep link wants:
+  // arriving mid-animation from a layout the visitor never asked for is just noise.
+  function goto(id, instant) {
+    if (id === to && t >= 1 && !instant) return;
+    from = instant ? id : (t < 1 ? from : to);
+    to = id;
+    t = instant ? 1 : 0;
+    animStart = performance.now();
     sel = -1; show(-1);
     [...document.querySelectorAll('#layouts button')].forEach(b =>
       b.classList.toggle('on', Number(b.dataset.l) === id));
     $('hint').textContent = LAYOUTS[id].hint;
+    url();
     render();
   }
 
@@ -4342,6 +4378,7 @@ void main() {
     if (i < 0) {
       hasMask = false; maskBadge = -1;
       $('badgenote').textContent = '';
+      url();
       render();
       return;
     }
@@ -4379,6 +4416,7 @@ void main() {
     hasMask = true;
     $('badgenote').textContent = `${lit.toLocaleString()} numbers · ${
       (100 * lit / mask.length).toFixed(lit < 1000 ? 4 : 2)}% of the map`;
+    url();
     render();
   }).then(({ worker, data }) => {
     W = worker;
@@ -4415,6 +4453,15 @@ void main() {
     $('hud').classList.add('on');
     $('hint').textContent = LAYOUTS[0].hint;
     render();
+
+    const q = new URLSearchParams(location.search);
+    const l = Number(q.get('l'));
+    if (Number.isInteger(l) && l > 0 && l < LAYOUTS.length) goto(l, true);
+    const badge = q.get('badge');
+    if (badge && LABELS.includes(badge)) {
+      $('badge').value = badge;
+      $('badge').dispatchEvent(new Event('change'));
+    }
   });
 }
 
