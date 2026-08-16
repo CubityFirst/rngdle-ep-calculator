@@ -1047,7 +1047,11 @@ function atlasWorker() {
       const N = 1000000;
       self.postMessage({ type: 'progress', pct: 0.92, msg: 'Building the height field…' });
 
-      const ep = new Float32Array(N);
+      // Float64, not Float32: EP runs to nine figures and a 24-bit mantissa cannot hold
+      // it, so 186,186,584 comes back as 186,186,592. The height texture is built from
+      // this in the page and can be Float32 - rendering does not care - but the numbers
+      // shown in the readout and the peaks list have to be the real ones.
+      const ep = new Float64Array(N);
       let max = 0, sum = 0;
       for (let i = 0; i < N; i++) { const v = swept.ep[i]; ep[i] = v; sum += v; if (v > max) max = v; }
       const cnt = new Uint8Array(N);
@@ -1511,7 +1515,7 @@ void main() {
     buildTexture(); render();
   }).then(({ worker, data }) => {
     W = worker;
-    EP = new Float32Array(data.ep); CNT = new Uint8Array(data.cnt);
+    EP = new Float64Array(data.ep); CNT = new Uint8Array(data.cnt);
     MAXEP = data.max; PEAKS = data.peaks;
 
     prog = link(VS, FS);
