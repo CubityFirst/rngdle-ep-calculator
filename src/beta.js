@@ -3218,7 +3218,7 @@ function collectorWorker() {
   };
 }
 
-function collectorClient(WORKER_SRC, META, PAL) {
+function collectorClient(WORKER_SRC, META) {
   const B = META.length;
   const $ = id => document.getElementById(id);
   const fmt = n => Math.round(n).toLocaleString();
@@ -3363,9 +3363,10 @@ function collectorClient(WORKER_SRC, META, PAL) {
 }
 
 function renderCollector(ctx) {
-  const { BADGES, TIER_PALETTE, tierFromScore } = ctx;
-  const meta = BADGES.map(([id, label, emoji, ep]) => [label, emoji, ep, tierFromScore(ep), 0, id]);
-  const pal = Object.fromEntries(Object.entries(TIER_PALETTE).map(([k, v]) => [k, v.accent]));
+  const { BADGES, tierFromScore } = ctx;
+  // Same shape as the other tools' META so the row helpers read the same, with a
+  // placeholder in the family slot: this page never groups by family.
+  const meta = BADGES.map(([id, label, emoji, ep]) => [label, emoji, ep, tierFromScore(ep), -1, id]);
 
   const css = `
   #page { display:none; }
@@ -3471,7 +3472,7 @@ ${overlayHTML('Then simulating collections and searching for a covering set.')}`
 
   const script = `${BETA_BOOT_JS}
 const __W = ${JSON.stringify(workerSrc(collectorWorker))};
-(${collectorClient.toString()})(__W, ${JSON.stringify(meta)}, ${JSON.stringify(pal)});`;
+(${collectorClient.toString()})(__W, ${JSON.stringify(meta)});`;
 
   return betaShell({ title: 'RNGdle - The Collector', width: '900px', slug: 'collector', css, body, script });
 }
@@ -4814,7 +4815,7 @@ function contactWorker() {
 }
 
 // META[i] = [label, emoji, ep, tier, familyIndex, id]
-function contactClient(WORKER_SRC, META, FAMS, PAL) {
+function contactClient(WORKER_SRC, META, PAL) {
   const B = META.length;
   const $ = id => document.getElementById(id);
   const pctf = p => p === 0 ? '0%' : p >= 1 ? p.toFixed(1) + '%' : p >= 0.01 ? p.toFixed(2) + '%' : p.toFixed(4) + '%';
@@ -4904,7 +4905,7 @@ function contactClient(WORKER_SRC, META, FAMS, PAL) {
 }
 
 function renderContact(ctx) {
-  const { BADGES, FAMILIES, FAMILY_NAMES, TIER_PALETTE, tierFromScore } = ctx;
+  const { BADGES, FAMILIES, TIER_PALETTE, tierFromScore } = ctx;
   const famOf = new Map();
   FAMILIES.forEach((fam, fi) => { for (const id of fam) famOf.set(id, fi); });
   const meta = BADGES.map(([id, label, emoji, ep]) =>
@@ -4975,7 +4976,7 @@ ${overlayHTML('Then reducing all 230 badge maps to thumbnails.')}`;
 
   const script = `${BETA_BOOT_JS}
 const __W = ${JSON.stringify(workerSrc(contactWorker))};
-(${contactClient.toString()})(__W, ${JSON.stringify(meta)}, ${JSON.stringify(FAMILY_NAMES)}, ${JSON.stringify(pal)});`;
+(${contactClient.toString()})(__W, ${JSON.stringify(meta)}, ${JSON.stringify(pal)});`;
 
   return betaShell({ title: 'RNGdle - Contact Sheet', width: '1180px', slug: 'contact', css, body, script });
 }
