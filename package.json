@@ -11,7 +11,8 @@
     "deploy": "wrangler deploy",
     "test": "node test/test.mjs",
     "test:browser": "node test/browser.mjs",
-    "test:deploy": "node test/browser.mjs --bundle"
+    "test:deploy": "node test/browser.mjs --bundle",
+    "test:supersession": "node test/supersession.mjs"
   },
   "devDependencies": {
     "wrangler": "^3"
