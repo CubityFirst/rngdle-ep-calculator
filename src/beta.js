@@ -4781,8 +4781,11 @@ function nearmissClient(WORKER_SRC, TIERS) {
     // neighbours the worst score in particular is often shared, and picking one
     // arbitrarily would claim a distinction the numbers do not make.
     for (const c of cells) {
-      c.best = !c.self && c.e === best;
-      c.worst = !c.self && c.e === worst && best !== worst;
+      // Only mark an extreme when it is actually one. On a local peak every swap loses,
+      // so a "best" star would be pointing at the least-bad way to make things worse;
+      // in a local valley the same is true of the "worst" caret in reverse.
+      c.best = !c.self && c.e === best && best > mine;
+      c.worst = !c.self && c.e === worst && worst < mine && best !== worst;
     }
     // Colour on the log ratio against the number itself, so the scale means the same
     // thing for a 3,000 EP roll and a 3,000,000 one.
@@ -4915,12 +4918,16 @@ function renderNearMiss(ctx) {
   .cell.self { font-weight:800; }
   /* The two extremes, after :hover so the marking survives the pointer. A star for the
      best swap and a caret for the worst - a star on the worst cell reads as praise. */
-  .cell.best { border-color:var(--ok); box-shadow:0 0 0 1px var(--ok); }
-  .cell.worst { border-color:var(--bad); box-shadow:0 0 0 1px var(--bad); }
-  .cell .mk { position:absolute; top:1px; right:3px; font-size:.62rem; line-height:1;
-    font-weight:700; pointer-events:none; }
-  .cell.best .mk { color:var(--ok); }
-  .cell.worst .mk { color:var(--bad); }
+  /* The ring needs a dark line between it and the fill: the best cell is the greenest
+     one on the board and the worst the reddest, so a same-hue ring sat straight on top
+     of its own colour and vanished. The mark itself goes near-white for the same
+     reason - it has to read on a saturated fill of either colour. */
+  .cell.best, .cell.worst { box-shadow:inset 0 0 0 1px rgba(8,9,12,.75); }
+  .cell.best { border-color:var(--ok); outline:1.5px solid var(--ok); outline-offset:0; }
+  .cell.worst { border-color:var(--bad); outline:1.5px solid var(--bad); outline-offset:0; }
+  .cell .mk { position:absolute; top:0; right:2px; font-size:.66rem; line-height:1.2;
+    font-weight:700; color:var(--text); text-shadow:0 0 3px rgba(8,9,12,.95), 0 1px 1px rgba(8,9,12,.9);
+    pointer-events:none; }
   .cfoot { text-align:center; font-size:.66rem; color:var(--faint); font-family:var(--mono); }
   @media (max-width:640px) { .cell { height:30px; font-size:.8rem; } .cell em { display:none; } }
 
@@ -4979,9 +4986,10 @@ function renderNearMiss(ctx) {
     leading digit gives 100069 - every one of the 54 is a legal roll in 0-999,999. Green means that
     digit would have scored more than the number you are looking at, red less, and the shade is the
     log ratio, so the scale reads the same for a small score and a huge one. The outlined cells are
-    the extremes: <b>&#9733;</b> the best swap on offer and <b>&#9660;</b> the worst. Both mark every
-    cell tied at that value rather than picking one, so several can be outlined at once - and on a
-    local peak the best swap is still a loss, just the smallest one.
+    the extremes worth acting on: <b>&#9733;</b> the biggest gain available and <b>&#9660;</b> the
+    biggest loss. Each marks every cell tied at that value rather than picking one, so several can be
+    outlined at once - and neither appears unless it is real, so a number that beats all 54 of its
+    neighbours shows no star at all.
   </footer>
 </div>
 ${overlayHTML('Then walking all 54 million neighbour pairs to find the peaks and the near misses.')}`;

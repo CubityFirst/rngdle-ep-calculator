@@ -194,17 +194,32 @@ const INTERACTIONS = {
       .then(() => p.textContent('#title .tn'))],
     ['type a number', p => p.fill('#n', '80085').then(() => p.click('#go button'))
       .then(() => p.textContent('#title .tn'))],
-    // Exactly one best swap should be marked, and the worst should not be the same cell.
+    // A star only when some swap gains, a caret only when some swap loses - so the two
+    // interesting cases are a local peak (1 beats all 54) and a local valley (103623
+    // loses to all 54). 17726 has both.
     ['best/worst marks', async p => {
-      const m = await p.evaluate(() => ({
-        best: [...document.querySelectorAll('#board .cell.best')].map(e => e.dataset.n),
-        worst: [...document.querySelectorAll('#board .cell.worst')].map(e => e.dataset.n),
-        stars: [...document.querySelectorAll('#board .cell.best .mk')].length,
-      }));
-      if (!m.best.length) throw new Error('no best swap marked');
-      if (m.stars !== m.best.length) throw new Error('best cells missing their star');
-      if (m.best.some(n => m.worst.includes(n))) throw new Error('a cell is both best and worst');
-      return `${m.best.length} best, ${m.worst.length} worst`;
+      const look = async (n) => {
+        await p.fill('#n', String(n));
+        await p.click('#go button');
+        await p.waitForTimeout(350);
+        return p.evaluate(() => ({
+          best: [...document.querySelectorAll('#board .cell.best')].map(e => e.dataset.n),
+          worst: [...document.querySelectorAll('#board .cell.worst')].map(e => e.dataset.n),
+          stars: document.querySelectorAll('#board .cell.best .mk').length,
+          gains: document.querySelectorAll('#cur .stat')[2].querySelector('.v').textContent.trim(),
+        }));
+      };
+      const out = [];
+      for (const n of [1, 103623, 17726]) {
+        const m = await look(n);
+        if (m.stars !== m.best.length) throw new Error(`${n}: best cells missing their star`);
+        if (m.best.some(x => m.worst.includes(x))) throw new Error(`${n}: a cell is both best and worst`);
+        if ((m.gains === 'nothing') !== (m.best.length === 0)) {
+          throw new Error(`${n}: star and the "one digit gains" stat disagree (${m.gains}, ${m.best.length} starred)`);
+        }
+        out.push(`${n}: ${m.best.length}b/${m.worst.length}w`);
+      }
+      return out.join('  ');
     }],
   ],
   // The username path is left alone here as well - it calls rngdle's API. Pasted rolls
