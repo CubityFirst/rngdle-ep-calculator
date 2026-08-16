@@ -295,6 +295,25 @@ const THUMBS = {
     <path d="M19 13h6M19 20h6M19 27h6" opacity=".9"/>`,
 };
 
+// Things the tools turned up that are not visible anywhere else on the site. Every
+// one is a measurement, not a constant - the tool named beside it recomputes it from
+// the live rules on every visit, so if a rebalance moves one, the page will say so
+// rather than these going quietly stale.
+const FINDINGS = [
+  ['Every badge is priced at exactly 100 / its own odds', 'so all 230 are worth the same 100 EP per ' +
+    'roll in expectation. A mythic is no better value than a common, it just arrives less often.', 'economy'],
+  ['46% of numbers score like nothing else in the range', 'no other number earns the same set of ' +
+    'badges. The rules are far more discriminating than they look.', 'species'],
+  ['28% of the range is one digit away from a mythic', 'and only 4,736 numbers beat all 54 of the ' +
+    'neighbours one digit change can reach.', 'nearmiss'],
+  ['Earning every badge takes about 4 million rolls', 'or 62 numbers, if you were allowed to pick ' +
+    'them. Thirty-two badges are earned by exactly one number in the whole range.', 'collector'],
+  ['The card tiers are cut at round percentiles, not round scores', 'top 1%, next 4%, next 5%, ' +
+    'next 15% - which is why the EP thresholds themselves look so arbitrary.', 'luck'],
+  ['Supersession quietly destroys 6.3% of all EP', 'a third of it inside the Power family alone, ' +
+    'and two badges are outranked on every single number that earns them.', 'economy'],
+];
+
 export function renderBetaIndex() {
   const cards = BETA_TOOLS.map(t => `
     <a class="tool" href="/beta/${t.slug}">
@@ -326,6 +345,20 @@ export function renderBetaIndex() {
   .tool-body p { margin:0; font-size:.86rem; color:var(--dim); line-height:1.55; }
   .tool-note { margin-top:auto; padding-top:.35rem; font-size:.76rem; color:var(--faint); }
 
+  .finds { margin-top:2rem; }
+  .finds h2 { font-size:.78rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--muted); margin:0 0 .4rem; }
+  .findlead { margin:0 0 .9rem; font-size:.82rem; color:var(--faint); line-height:1.6; }
+  .finds ol { list-style:none; margin:0; padding:0; display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(min(330px,100%),1fr)); gap:.6rem; }
+  .finds li { display:flex; flex-direction:column; gap:.25rem; padding:.75rem .9rem;
+    border:1px solid var(--border); border-left:3px solid var(--hl); border-radius:var(--r-card);
+    background:var(--surface); }
+  .finds li b { font-size:.88rem; font-weight:600; line-height:1.4; }
+  .finds li span { font-size:.8rem; color:var(--muted); line-height:1.55; }
+  .finds li a { margin-top:auto; padding-top:.35rem; font-size:.76rem; text-decoration:none; }
+  .finds li a:hover { text-decoration:underline; }
+
   .lead { border:1px solid var(--border); border-left:3px solid var(--hl);
     border-radius:var(--r-card); background:var(--surface); padding:.9rem 1.05rem; margin-bottom:1.3rem; }
   .lead p { margin:0; font-size:.87rem; color:var(--dim); line-height:1.6; }
@@ -334,7 +367,8 @@ export function renderBetaIndex() {
 
   const body = `<div class="wrap">
   <h1>Beta lab <span class="beta-tag">experimental</span></h1>
-  <p class="tag">Data-vis and insight tools built on the full 1,000,001-number sweep.</p>
+  <p class="tag">${BETA_TOOLS.length} data-vis and insight tools built on the full
+    1,000,001-number sweep.</p>
 
   <section class="lead">
     <p>Each of these scores <b>every legal roll</b> - all 1,000,001 of them - in your browser, then
@@ -346,6 +380,16 @@ export function renderBetaIndex() {
   </section>
 
   <div id="cards">${cards}</div>
+
+  <section class="finds">
+    <h2>What they turned up</h2>
+    <p class="findlead">None of this is visible in the badge table. Each line is measured, not stored -
+      follow it to the tool that recomputes it from the live rules.</p>
+    <ol>${FINDINGS.map(([head, body, slug]) => `<li>
+      <b>${head}</b><span>${body}</span>
+      <a href="/beta/${slug}">${BETA_TOOLS.find(t => t.slug === slug).title} &rarr;</a>
+    </li>`).join('')}</ol>
+  </section>
 
   <footer>
     <b>Beta</b> - these are experiments. Layout, names and routes may change, and none of them are
