@@ -133,9 +133,10 @@ counts, sum, product, substring helper, etc.); matches are summed into `totalEP`
 
 The badge `test` functions and the `FAMILIES` map were reconciled against the live game's
 own bundled scoring engine (scraped from rngdle.com) and now match it **exactly**: every
-number in `0..1,000,000` produces the identical total EP (see `test/full-parity.mjs`, which
-checks all 1,000,001 numbers against a faithful reconstruction of prod's scorer in
-`test/prod-scorer.mjs`). The consecutive / sequence / contiguous-pair badges call helpers
+number in `0..1,000,000` produces the identical total EP **and the identical set of
+scoring badges** (see `research/full-parity.mjs`, which checks all 1,000,001 numbers
+against prod's own scorer replayed from the current production bundle by
+`research/prod7-scorer.mjs`). The consecutive / sequence / contiguous-pair badges call helpers
 transcribed verbatim from prod (the `p*` functions in `src/index.js`). Notable rules worth
 calling out (all confirmed against prod):
 
