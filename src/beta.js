@@ -4765,7 +4765,7 @@ function nearmissClient(WORKER_SRC, TIERS) {
   function board(n) {
     const mine = EP[n], s = String(n).padStart(6, '0');
     const rows = [];
-    let best = -1, bestN = -1;
+    let best = -1, bestN = -1, worst = Infinity;
     const cells = [];
     for (let p = 0; p < 6; p++) {
       const pw = POW[p], curD = Number(s[p]), base = n - curD * pw;
@@ -4773,8 +4773,16 @@ function nearmissClient(WORKER_SRC, TIERS) {
         const m = base + d * pw;
         const e = EP[m];
         if (d !== curD && e > best) { best = e; bestN = m; }
+        if (d !== curD && e < worst) worst = e;
         cells.push({ p, d, m, e, self: d === curD });
       }
+    }
+    // Mark every cell tied at the extreme, not just the first one found - with 54
+    // neighbours the worst score in particular is often shared, and picking one
+    // arbitrarily would claim a distinction the numbers do not make.
+    for (const c of cells) {
+      c.best = !c.self && c.e === best;
+      c.worst = !c.self && c.e === worst && best !== worst;
     }
     // Colour on the log ratio against the number itself, so the scale means the same
     // thing for a 3,000 EP roll and a 3,000,000 one.
@@ -4792,8 +4800,11 @@ function nearmissClient(WORKER_SRC, TIERS) {
     $('board').innerHTML = [0, 1, 2, 3, 4, 5].map(p => `<div class="col">
       <div class="chead">${s[p]}</div>
       <div class="cells">${cells.filter(c => c.p === p).map(c =>
-        `<button type="button" class="cell${c.self ? ' self' : ''}" data-n="${c.m}" style="${colour(c)}"
-          title="${c.m.toLocaleString()} · ${fmt(c.e)} EP">${c.d}<em>${
+        `<button type="button" class="cell${c.self ? ' self' : c.best ? ' best' : c.worst ? ' worst' : ''}"
+          data-n="${c.m}" style="${colour(c)}"
+          title="${c.m.toLocaleString()} · ${fmt(c.e)} EP${
+            c.best ? ' · the best swap available' : c.worst ? ' · the worst swap available' : ''}">${
+          c.best ? '<span class="mk">&#9733;</span>' : c.worst ? '<span class="mk">&#9660;</span>' : ''}${c.d}<em>${
             c.self ? 'this' : (c.e >= mine ? '+' : '') + compact(c.e - mine)}</em></button>`).join('')}</div>
       <div class="cfoot">${['100k', '10k', '1k', '100', '10', '1'][p]}</div>
     </div>`).join('');
@@ -4896,12 +4907,20 @@ function renderNearMiss(ctx) {
   .chead { height:28px; display:flex; align-items:center; justify-content:center;
     font-family:var(--mono); font-size:1.1rem; font-weight:700; color:var(--hl-lt); }
   .cells { display:flex; flex-direction:column; gap:2px; }
-  .cell { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
-    height:38px; padding:0; border:1px solid transparent; border-radius:var(--r-sm);
-    font-family:var(--mono); font-size:.95rem; font-weight:600; }
+  .cell { position:relative; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:1px; height:38px; padding:0; border:1px solid transparent;
+    border-radius:var(--r-sm); font-family:var(--mono); font-size:.95rem; font-weight:600; }
   .cell em { font-style:normal; font-size:.6rem; font-weight:500; opacity:.9; letter-spacing:-.02em; }
   .cell:hover { border-color:var(--text); }
   .cell.self { font-weight:800; }
+  /* The two extremes, after :hover so the marking survives the pointer. A star for the
+     best swap and a caret for the worst - a star on the worst cell reads as praise. */
+  .cell.best { border-color:var(--ok); box-shadow:0 0 0 1px var(--ok); }
+  .cell.worst { border-color:var(--bad); box-shadow:0 0 0 1px var(--bad); }
+  .cell .mk { position:absolute; top:1px; right:3px; font-size:.62rem; line-height:1;
+    font-weight:700; pointer-events:none; }
+  .cell.best .mk { color:var(--ok); }
+  .cell.worst .mk { color:var(--bad); }
   .cfoot { text-align:center; font-size:.66rem; color:var(--faint); font-family:var(--mono); }
   @media (max-width:640px) { .cell { height:30px; font-size:.8rem; } .cell em { display:none; } }
 
@@ -4959,7 +4978,10 @@ function renderNearMiss(ctx) {
     Neighbours are taken on the <b>six-digit zero-padded</b> form, so 69 is 000069 and changing its
     leading digit gives 100069 - every one of the 54 is a legal roll in 0-999,999. Green means that
     digit would have scored more than the number you are looking at, red less, and the shade is the
-    log ratio, so the scale reads the same for a small score and a huge one.
+    log ratio, so the scale reads the same for a small score and a huge one. The outlined cells are
+    the extremes: <b>&#9733;</b> the best swap on offer and <b>&#9660;</b> the worst. Both mark every
+    cell tied at that value rather than picking one, so several can be outlined at once - and on a
+    local peak the best swap is still a loss, just the smallest one.
   </footer>
 </div>
 ${overlayHTML('Then walking all 54 million neighbour pairs to find the peaks and the near misses.')}`;

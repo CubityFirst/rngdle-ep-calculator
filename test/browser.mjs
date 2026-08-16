@@ -194,6 +194,18 @@ const INTERACTIONS = {
       .then(() => p.textContent('#title .tn'))],
     ['type a number', p => p.fill('#n', '80085').then(() => p.click('#go button'))
       .then(() => p.textContent('#title .tn'))],
+    // Exactly one best swap should be marked, and the worst should not be the same cell.
+    ['best/worst marks', async p => {
+      const m = await p.evaluate(() => ({
+        best: [...document.querySelectorAll('#board .cell.best')].map(e => e.dataset.n),
+        worst: [...document.querySelectorAll('#board .cell.worst')].map(e => e.dataset.n),
+        stars: [...document.querySelectorAll('#board .cell.best .mk')].length,
+      }));
+      if (!m.best.length) throw new Error('no best swap marked');
+      if (m.stars !== m.best.length) throw new Error('best cells missing their star');
+      if (m.best.some(n => m.worst.includes(n))) throw new Error('a cell is both best and worst');
+      return `${m.best.length} best, ${m.worst.length} worst`;
+    }],
   ],
   // The username path is left alone here as well - it calls rngdle's API. Pasted rolls
   // exercise the same engine scoring and the same rendering.
