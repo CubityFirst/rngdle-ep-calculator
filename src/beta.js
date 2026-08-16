@@ -2366,12 +2366,14 @@ function spectrumClient(WORKER_SRC, META, FAMS, PAL) {
     }
     const maxShare = Math.max(...lens.map(x => x.share), 1e-9);
 
-    // The stripe again, but as a profile the eye can read a shape off.
-    const W = 520, H = 90;
+    // The stripe again, but as a profile the eye can read a shape off. The 4px inset
+    // matters: a perfectly uniform badge sits at its own maximum in every block, and
+    // without it that line is drawn on the border and looks like an empty chart.
+    const W = 520, H = 90, PAD = 4;
     const cap = rowMax[i] || 1;
     const pts = [];
     for (let c = 0; c < BLK; c++) {
-      pts.push(`${(c / (BLK - 1) * W).toFixed(1)},${(H - (D[base + c] / cap) * H).toFixed(1)}`);
+      pts.push(`${(c / (BLK - 1) * W).toFixed(1)},${(H - PAD - (D[base + c] / cap) * (H - PAD * 2)).toFixed(1)}`);
     }
 
     box.innerHTML = `

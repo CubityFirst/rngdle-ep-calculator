@@ -9,6 +9,7 @@ npm run serve        # plain-Node dev server (same worker, no wrangler hotkey lo
 npm test             # badge-logic test harness
 npm run test:browser # real-browser smoke test of the /beta tools
 npm run test:deploy  # the same, against the esbuild bundle - run before deploying
+npm run test:supersession  # /beta's family rule vs research/badge-tally.json (~2 min)
 npm run deploy       # publish to Cloudflare (runs the generator via predeploy)
 ```
 
@@ -16,6 +17,13 @@ npm run deploy       # publish to Cloudflare (runs the generator via predeploy)
 sweep, and then drives its controls, failing on any console error, any horizontal
 overflow, or any control that does nothing. It skips itself (exit 0) when
 playwright-core is not installed.
+
+`test:supersession` matters because `/beta/economy` and `/beta/collector` re-implement
+the family rule in a Web Worker, over the sweep bitmask rather than through `compute()`.
+A mistake there would be invisible - the numbers would still look plausible - so the
+check runs both implementations over the whole range and compares them against the
+committed tally. Run it after touching `FAMILIES`, a badge's EP, or either copy of the
+supersession logic.
 
 **Run `npm run test:deploy` before any deploy that touches a page's client code.**
 The tools ship their client to the browser via `Function.prototype.toString()`, and
