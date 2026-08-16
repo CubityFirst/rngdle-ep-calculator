@@ -41,6 +41,12 @@ export const BETA_TOOLS = [
     note: '230 stripes, orderable by how evenly each rule is spread.',
   },
   {
+    slug: 'contact', title: 'Contact Sheet', kind: '2D',
+    blurb: 'Every badge map on one page. Rules with the same geometry are obvious ' +
+      'side by side, and the odd one out in a family jumps straight out.',
+    note: '230 thumbnails of the /grid frame, ordered by family.',
+  },
+  {
     slug: 'pairs', title: 'Badge Affinity', kind: 'Matrix',
     blurb: 'Which badges travel together. A 230x230 co-occurrence matrix over every ' +
       'number, plus the conditional odds - given this badge, what else did you get?',
@@ -244,6 +250,12 @@ const THUMBS = {
   atlas: `<path d="M2 30 L14 18 L22 26 L34 10 L46 22 L62 6" />
     <path d="M2 36 L14 26 L22 33 L34 20 L46 30 L62 16" opacity=".5"/>
     <path d="M2 24 L14 11 L22 19 L34 3 L46 15 L62 1" opacity=".28"/>`,
+  contact: `<rect x="4" y="5" width="16" height="13" rx="1.5" opacity=".9"/>
+    <rect x="24" y="5" width="16" height="13" rx="1.5" opacity=".45"/>
+    <rect x="44" y="5" width="16" height="13" rx="1.5" opacity=".7"/>
+    <rect x="4" y="22" width="16" height="13" rx="1.5" opacity=".5"/>
+    <rect x="24" y="22" width="16" height="13" rx="1.5" opacity=".85"/>
+    <rect x="44" y="22" width="16" height="13" rx="1.5" opacity=".35"/>`,
   pairs: `<rect x="4" y="4" width="9" height="9" opacity=".9"/><rect x="15" y="4" width="9" height="9" opacity=".25"/>
     <rect x="26" y="4" width="9" height="9" opacity=".55"/><rect x="37" y="4" width="9" height="9" opacity=".15"/>
     <rect x="4" y="15" width="9" height="9" opacity=".25"/><rect x="15" y="15" width="9" height="9" opacity=".9"/>
@@ -4679,6 +4691,220 @@ const __W = ${JSON.stringify(workerSrc(anatomyWorker))};
 }
 
 // ---------------------------------------------------------------------------
+// /beta/contact - all 230 badge maps on one sheet.
+//
+// /grid can show where any ONE badge fires on the 1000x1000 map. That is the right
+// tool for reading a single rule and the wrong one for comparing rules, because you
+// can only ever hold one in your head at a time.
+//
+// So: every badge as a 100x100 thumbnail of the same map, all on one page. Rules with
+// the same geometry become obvious side by side - the "contains a digit" badges are
+// wash, the divisibility badges are fine weave, the digit-length ones are hard bands -
+// and the odd one out in a family stands out immediately.
+//
+// Each thumbnail is a 10x10 block count, so a block is lit if any of its hundred
+// numbers earns the badge; at this size that is the honest reduction, and it keeps the
+// whole sheet inside 2.3MB.
+// ---------------------------------------------------------------------------
+
+function contactWorker() {
+  const T = 100;                                  // thumbnail side, 10x10 numbers per cell
+
+  self.onmessage = async ev => {
+    if (ev.data.cmd !== 'init') return;
+    try {
+      const swept = await betaSweep(ev.data.origin, 0.6);
+      const bits = swept.bits, ROW = swept.ROW;
+      const B = E.BADGE_META.length;
+      const N = 1000000;                          // the square face of the range
+
+      // A block holds 100 numbers, so a count never exceeds 100 and fits in a byte.
+      const maps = new Uint8Array(B * T * T);
+      const total = new Float64Array(B);
+      const idx = new Int32Array(256);
+      for (let n = 0; n < N; n++) {
+        if ((n & 0x3ffff) === 0) self.postMessage({ type: 'progress', pct: 0.6 + 0.4 * (n / N) });
+        const k = betaEarned(bits, n * ROW, ROW, idx);
+        if (!k) continue;
+        const cell = ((n / 1000 / 10) | 0) * T + (((n % 1000) / 10) | 0);
+        for (let a = 0; a < k; a++) { maps[idx[a] * T * T + cell]++; total[idx[a]]++; }
+      }
+      self.postMessage({ type: 'ready', maps: maps.buffer, total: total.buffer, T, B, N },
+        [maps.buffer, total.buffer]);
+    } catch (e) {
+      self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
+    }
+  };
+}
+
+// META[i] = [label, emoji, ep, tier, familyIndex, id]
+function contactClient(WORKER_SRC, META, FAMS, PAL) {
+  const B = META.length;
+  const $ = id => document.getElementById(id);
+  const pctf = p => p === 0 ? '0%' : p >= 1 ? p.toFixed(1) + '%' : p >= 0.01 ? p.toFixed(2) + '%' : p.toFixed(4) + '%';
+  let MAPS = null, TOTAL = null, T = 100, N = 0, norm = 'row', sort = 'family';
+
+  function order() {
+    const all = Array.from({ length: B }, (_, i) => i);
+    if (sort === 'ep') return all.sort((a, b) => META[b][2] - META[a][2] || a - b);
+    if (sort === 'rate') return all.sort((a, b) => TOTAL[b] - TOTAL[a] || a - b);
+    if (sort === 'alpha') return all.sort((a, b) => META[a][0].localeCompare(META[b][0]));
+    return all.sort((a, b) => {
+      const fa = META[a][4] < 0 ? 999 : META[a][4], fb = META[b][4] < 0 ? 999 : META[b][4];
+      return fa - fb || META[b][2] - META[a][2] || a - b;
+    });
+  }
+
+  function paint(cv, i) {
+    const ctx = cv.getContext('2d');
+    const img = ctx.createImageData(T, T);
+    const px = img.data;
+    const base = i * T * T;
+    let mx = 0;
+    for (let c = 0; c < T * T; c++) if (MAPS[base + c] > mx) mx = MAPS[base + c];
+    const cap = norm === 'row' ? Math.max(1, mx) : 100;
+    const [r, g, b] = hex(PAL[META[i][3]]);
+    // A badge earned by three numbers lights three cells out of ten thousand, which at
+    // this size is one dim pixel and reads as an empty tile. Below ~60 lit cells the
+    // marks are grown to 3x3 so they are visible; the position is still exact, and the
+    // sheet says so.
+    let lit = 0;
+    for (let c = 0; c < T * T; c++) if (MAPS[base + c]) lit++;
+    const grow = lit > 0 && lit < 60;
+
+    const alpha = new Float32Array(T * T);
+    for (let y = 0; y < T; y++) {
+      for (let x = 0; x < T; x++) {
+        const v = MAPS[base + y * T + x];
+        if (!v) continue;
+        const a = 0.35 + 0.65 * (Math.log1p(v) / Math.log1p(cap));
+        if (!grow) { alpha[y * T + x] = Math.max(alpha[y * T + x], a); continue; }
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= T) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= T) continue;
+            const w = dx || dy ? a * 0.55 : a;
+            const at = yy * T + xx;
+            if (w > alpha[at]) alpha[at] = w;
+          }
+        }
+      }
+    }
+    for (let c = 0; c < T * T; c++) {
+      const a = alpha[c], k = c * 4;
+      px[k] = 14 + (r - 14) * a; px[k + 1] = 15 + (g - 15) * a; px[k + 2] = 20 + (b - 20) * a;
+      px[k + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+
+  function render() {
+    const q = $('q').value.trim().toLowerCase();
+    const list = order().filter(i => !q || META[i][0].toLowerCase().includes(q));
+    $('sheet').innerHTML = list.map(i => `<a class="tile" href="/grid#${encodeURIComponent(META[i][0])}"
+      title="${META[i][0]} - ${pctf(100 * TOTAL[i] / N)} of numbers, open on /grid"
+      style="--tc:${PAL[META[i][3]]}">
+      <canvas width="${T}" height="${T}" data-i="${i}"></canvas>
+      <span class="tl">${META[i][1]} ${META[i][0]}</span>
+      <span class="tr">${pctf(100 * TOTAL[i] / N)}</span>
+    </a>`).join('');
+    for (const cv of $('sheet').querySelectorAll('canvas')) paint(cv, Number(cv.dataset.i));
+    $('count').textContent = list.length === B ? `${B} badges` : `${list.length} of ${B}`;
+  }
+
+  $('q').addEventListener('input', render);
+  $('sort').addEventListener('change', e => { sort = e.target.value; render(); });
+  $('norm').addEventListener('change', e => { norm = e.target.value; render(); });
+
+  betaBoot(WORKER_SRC).then(({ data }) => {
+    MAPS = new Uint8Array(data.maps); TOTAL = new Float64Array(data.total);
+    T = data.T; N = data.N;
+    $('page').classList.add('on');
+    render();
+  });
+}
+
+function renderContact(ctx) {
+  const { BADGES, FAMILIES, FAMILY_NAMES, TIER_PALETTE, tierFromScore } = ctx;
+  const famOf = new Map();
+  FAMILIES.forEach((fam, fi) => { for (const id of fam) famOf.set(id, fi); });
+  const meta = BADGES.map(([id, label, emoji, ep]) =>
+    [label, emoji, ep, tierFromScore(ep), famOf.has(id) ? famOf.get(id) : -1, id]);
+  const pal = Object.fromEntries(Object.entries(TIER_PALETTE).map(([k, v]) => [k, v.accent]));
+
+  const css = `
+  #page { display:none; }
+  #page.on { display:block; }
+  .bar { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; align-items:center; gap:.5rem;
+    padding:.7rem 0 .6rem; margin-bottom:.6rem;
+    background:linear-gradient(var(--bg) 86%, transparent); border-bottom:1px solid var(--border); }
+  .bar label { font-size:.78rem; color:var(--muted); }
+  .bar select { font-size:.85rem; padding:.4rem .5rem; }
+  #q { flex:1 1 180px; min-width:150px; }
+  #count { flex-basis:100%; font-size:.74rem; color:var(--faint); }
+
+  #sheet { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(132px,100%),1fr)); gap:.5rem; }
+  .tile { display:flex; flex-direction:column; gap:.25rem; padding:.35rem; text-decoration:none;
+    border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface);
+    color:var(--dim); transition:border-color .12s, transform .12s; }
+  .tile:hover { border-color:var(--tc); transform:translateY(-2px); }
+  .tile canvas { width:100%; height:auto; aspect-ratio:1; display:block; border-radius:var(--r-sm);
+    image-rendering:pixelated; background:#0a0b0f; }
+  .tl { font-size:.72rem; line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tr { font-size:.66rem; color:var(--faint); font-family:var(--mono); }`;
+
+  const body = `<div class="wrap">
+  <div class="tool-head">
+    <h1>Contact Sheet <span class="beta-tag">beta</span></h1>
+    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <p class="tag">Every badge's map, all at once. Across is n mod 1000, down is n / 1000 - the same
+    frame as /grid, one hundredth the size.</p>
+
+  <div id="page">
+    <div class="bar">
+      <input id="q" type="search" placeholder="Find a badge…" autocomplete="off">
+      <label for="sort">Order</label>
+      <select id="sort">
+        <option value="family">Family</option>
+        <option value="rate">How often earned</option>
+        <option value="ep">EP</option>
+        <option value="alpha">Name</option>
+      </select>
+      <label for="norm">Brightness</label>
+      <select id="norm">
+        <option value="row">Per badge</option>
+        <option value="abs">Absolute</option>
+      </select>
+      <span id="count"></span>
+    </div>
+    <div id="sheet"></div>
+  </div>
+
+  <footer>
+    Each thumbnail is a 100x100 reduction of the full map: one cell per block of a hundred consecutive
+    numbers, lit in proportion to how many of them earn the badge. <b>Per badge</b> scales each
+    thumbnail to its own busiest block, which is what makes a rule earned ten times in the whole range
+    visible at all; <b>absolute</b> puts them on one scale. Badges lighting fewer than 60 of the 10,000
+    cells have their marks <b>grown to 3x3</b> - the positions are still exact, but a single cell would
+    be one dim pixel and read as an empty tile. Ordering by family puts each family's members next to
+    each other, which is where the odd one out shows up. Click any tile for its full-resolution map on
+    <a href="/grid">/grid</a>.
+  </footer>
+</div>
+${overlayHTML('Then reducing all 230 badge maps to thumbnails.')}`;
+
+  const script = `${BETA_BOOT_JS}
+const __W = ${JSON.stringify(workerSrc(contactWorker))};
+(${contactClient.toString()})(__W, ${JSON.stringify(meta)}, ${JSON.stringify(FAMILY_NAMES)}, ${JSON.stringify(pal)});`;
+
+  return betaShell({ title: 'RNGdle - Contact Sheet', width: '1180px', slug: 'contact', css, body, script });
+}
+
+// ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
 
@@ -4711,4 +4937,5 @@ const RENDERERS = {
   projections: renderProjections,
   nearmiss: renderNearMiss,
   anatomy: renderAnatomy,
+  contact: renderContact,
 };
