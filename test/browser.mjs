@@ -20,6 +20,8 @@
 
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
+import { BADGES } from '../src/index.js';
+import { EXAMPLES } from '../src/examples.gen.js';
 import { readdirSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
@@ -85,6 +87,26 @@ const INTERACTIONS = {
     ['pick badge', p => p.click('#list .item').then(() => p.$eval('#side .sh-name b', e => e.textContent))],
   ],
   '/beta/spectrum': [
+    // A real cross-check, not just "the control did something": the panel's first
+    // earner comes from decoding the sweep bitmask in the worker, and examples.gen.js
+    // has the same answer from an independent full scan through compute(). If the bit
+    // decoding were off by anything these would not line up - and every other tool
+    // here decodes the same way.
+    ['first earners', async p => {
+      const checks = ['PALINDROME', 'DIVISIBLE_BY_THREE', 'PAIR', 'DEEP_VOID', 'NICE', 'PRIME']
+        .map(id => [id, BADGES.find(b => b[0] === id), EXAMPLES[id]])
+        .filter(([, b, ex]) => b && ex && ex.length);
+      for (const [id, b, ex] of checks) {
+        // goto() to the same document with only a different hash does not navigate, so
+        // the page never re-boots and never applies the selection. Reload explicitly.
+        await p.goto(base + '/beta/spectrum#' + encodeURIComponent(b[1]), { waitUntil: 'domcontentloaded' });
+        await p.reload({ waitUntil: 'domcontentloaded' });
+        await waitReady(p);
+        const got = await p.$eval('#detail .drange a', e => e.textContent.replace(/\D/g, ''));
+        if (Number(got) !== ex[0]) throw new Error(`${id}: page says ${got}, examples.gen.js says ${ex[0]}`);
+      }
+      return `${checks.length} badges match examples.gen.js`;
+    }],
     ['sort', p => p.selectOption('#sort', 'spread').then(() => 'ok')],
     ['brightness', p => p.selectOption('#norm', 'abs').then(() => 'ok')],
     ['click stripe', async p => {
