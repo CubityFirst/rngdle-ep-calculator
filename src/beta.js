@@ -23,73 +23,73 @@ import { pageShell } from './ui.js';
 // one you drive, then the two about odds, then the two written up as findings.
 export const BETA_TOOLS = [
   {
-    slug: 'atlas', title: 'EP Atlas', kind: '3D',
+    slug: 'atlas', see: ['projections', 'spectrum'], title: 'EP Atlas', kind: '3D',
     blurb: 'The whole number line as terrain. 1,000,000 numbers laid out 1000x1000, ' +
       'height and colour from EP - the scoring landscape as a place you can fly over.',
     note: 'WebGL2 - orbit, zoom, click to land on a number.',
   },
   {
-    slug: 'projections', title: 'Projections', kind: '2D',
+    slug: 'projections', see: ['atlas', 'species'], title: 'Projections', kind: '2D',
     blurb: 'The same million numbers laid out five different ways, morphing between ' +
       'them - because the layout decides which structure you can see at all.',
     note: 'WebGL2 point cloud; every layout computed in the vertex shader.',
   },
   {
-    slug: 'spectrum', title: 'Badge Spectrum', kind: '2D',
+    slug: 'spectrum', see: ['contact', 'pairs'], title: 'Badge Spectrum', kind: '2D',
     blurb: 'Every badge as a density stripe across the full range. Digit-length rules ' +
       'step at each power of ten, modular rules band, exact badges are one lit pixel.',
     note: '230 stripes, orderable by how evenly each rule is spread.',
   },
   {
-    slug: 'contact', title: 'Contact Sheet', kind: '2D',
+    slug: 'contact', see: ['spectrum', 'pairs'], title: 'Contact Sheet', kind: '2D',
     blurb: 'Every badge map on one page. Rules with the same geometry are obvious ' +
       'side by side, and the odd one out in a family jumps straight out.',
     note: '230 thumbnails of the /grid frame, ordered by family.',
   },
   {
-    slug: 'pairs', title: 'Badge Affinity', kind: 'Matrix',
+    slug: 'pairs', see: ['contact', 'species'], title: 'Badge Affinity', kind: 'Matrix',
     blurb: 'Which badges travel together. A 230x230 co-occurrence matrix over every ' +
       'number, plus the conditional odds - given this badge, what else did you get?',
     note: 'Lift, P(B|A) and Jaccard, orderable by family or by cluster.',
   },
   {
-    slug: 'anatomy', title: 'Anatomy', kind: 'Report',
+    slug: 'anatomy', see: ['oracle', 'economy'], title: 'Anatomy', kind: 'Report',
     blurb: 'Which plain properties of a number actually move its score - digit sum, ' +
       'repeats, runs, divisibility - and which sound like they should and do not.',
     note: 'Ten properties, every one measured as lift against the range average.',
   },
   {
-    slug: 'oracle', title: 'Digit Oracle', kind: 'Interactive',
+    slug: 'oracle', see: ['nearmiss', 'anatomy'], title: 'Digit Oracle', kind: 'Interactive',
     blurb: 'Half a number is already worth something. Lock any digits and every ' +
       'remaining choice is re-scored against the numbers that still match.',
     note: 'Mean EP behind all 60 digit-position choices, conditional on what you know.',
   },
   {
-    slug: 'nearmiss', title: 'Near Misses', kind: 'Interactive',
+    slug: 'nearmiss', see: ['oracle', 'atlas'], title: 'Near Misses', kind: 'Interactive',
     blurb: 'Every number has exactly 54 neighbours one digit away. See what each of ' +
       'them would have scored, and which ordinary numbers sit next to a fortune.',
     note: 'Peaks, valleys, and how much of the range is one digit from a mythic.',
   },
   {
-    slug: 'luck', title: 'Luck Lab', kind: 'Odds',
+    slug: 'luck', see: ['collector', 'species'], title: 'Luck Lab', kind: 'Odds',
     blurb: 'What a roll is worth before you make it. Exact tier odds, what your best ' +
       'should look like after N rolls, and how lucky a real player actually got.',
     note: 'Closed-form best-of-N off the exact score distribution - nothing simulated.',
   },
   {
-    slug: 'collector', title: 'The Collector', kind: 'Odds',
+    slug: 'collector', see: ['luck', 'economy'], title: 'The Collector', kind: 'Odds',
     blurb: 'How many rolls to earn all 230 badges - simulated over the real earner ' +
       'sets - against how few numbers would do it if you could pick them.',
     note: 'Exact collection curve, plus a greedy cover of the whole badge list.',
   },
   {
-    slug: 'economy', title: 'Badge Economy', kind: 'Report',
+    slug: 'economy', see: ['collector', 'pairs'], title: 'Badge Economy', kind: 'Report',
     blurb: 'Every badge turns out to be priced at exactly 100 / its own odds, so all ' +
       '230 are worth the same per roll. Only supersession breaks the tie.',
     note: 'The price law, and what families cost in EP that is earned but never paid.',
   },
   {
-    slug: 'species', title: 'Species', kind: 'Report',
+    slug: 'species', see: ['pairs', 'nearmiss'], title: 'Species', kind: 'Report',
     blurb: 'Two numbers with the same badges are the same thing to the scorer. ' +
       'Grouped that way, the range stops being a line and becomes a population.',
     note: 'Distinct badge sets, their rank-size curve, and the true one-of-a-kinds.',
@@ -125,7 +125,18 @@ const BETA_CSS = `
   .tool-head h1 { flex:1; min-width:0; }
   .tool-back { font-size:.8rem; color:var(--muted); text-decoration:none; white-space:nowrap;
     padding:.3rem .6rem; border:1px solid var(--border-2); border-radius:var(--r-pill); }
-  .tool-back:hover { color:var(--text); border-color:var(--border-3); }`;
+  .tool-back:hover { color:var(--text); border-color:var(--border-3); }
+
+  /* Related tools, appended to every document-shell page by betaShell. */
+  .tool-more { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem;
+    margin-top:1.6rem; padding-top:1rem; border-top:1px solid var(--border); }
+  .tool-more > span { font-size:.72rem; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--faint); font-weight:600; margin-right:.2rem; }
+  .tool-more a { display:inline-flex; flex-direction:column; gap:.1rem; padding:.5rem .8rem;
+    text-decoration:none; border:1px solid var(--border-2); border-radius:var(--r-ctl);
+    background:var(--surface); color:var(--text); font-size:.85rem; font-weight:500; }
+  .tool-more a:hover { border-color:var(--accent); background:var(--surface-2); }
+  .tool-more a em { font-style:normal; font-size:.72rem; color:var(--muted); font-weight:400; }`;
 
 /**
  * Wrap a beta tool in the site shell.
@@ -139,11 +150,22 @@ const BETA_CSS = `
  * reason /grid and /chains carry it, and workerSrc() adds it for the worker half.
  */
 function betaShell(o) {
+  const tool = o.slug ? TOOL_BY_SLUG.get(o.slug) : null;
+  // Related tools, on the document pages only: the full-bleed canvas ones have no
+  // document flow to put a strip in, and their HUD already carries the way back.
+  const more = tool && tool.see && !o.full ? `\n<div class="wrap"><nav class="tool-more">
+  <span>See also</span>
+  ${tool.see.map(s => TOOL_BY_SLUG.get(s)).filter(Boolean).map(t =>
+    `<a href="/beta/${t.slug}">${t.title}<em>${t.kind}</em></a>`).join('\n  ')}
+  <a href="/beta">All ${BETA_TOOLS.length} tools<em>Beta lab</em></a>
+</nav></div>` : '';
+
   return pageShell({
     ...o,
     nav: 'beta',
     noindex: true,
     css: `${BETA_CSS}\n${o.css || ''}`,
+    body: o.body + more,
     script: o.script ? `var __name = (f) => f;\n${o.script}` : o.script,
   });
 }
