@@ -53,6 +53,12 @@ export const BETA_TOOLS = [
     note: 'Mean EP behind all 60 digit-position choices, conditional on what you know.',
   },
   {
+    slug: 'nearmiss', title: 'Near Misses', kind: 'Interactive',
+    blurb: 'Every number has exactly 54 neighbours one digit away. See what each of ' +
+      'them would have scored, and which ordinary numbers sit next to a fortune.',
+    note: 'Peaks, valleys, and how much of the range is one digit from a mythic.',
+  },
+  {
     slug: 'luck', title: 'Luck Lab', kind: 'Odds',
     blurb: 'What a roll is worth before you make it. Exact tier odds, what your best ' +
       'should look like after N rolls, and how lucky a real player actually got.',
@@ -254,6 +260,12 @@ const THUMBS = {
   collector: `<path d="M4 34 C 20 34, 26 12, 40 8 S 56 5, 60 5"/>
     <circle cx="16" cy="29" r="2.2" opacity=".6"/><circle cx="28" cy="17" r="2.2" opacity=".8"/>
     <circle cx="44" cy="7" r="2.2"/><path d="M4 34h56" opacity=".25"/>`,
+  nearmiss: `<rect x="4" y="4" width="15" height="14" rx="2" opacity=".35"/>
+    <rect x="23" y="4" width="15" height="14" rx="2" opacity=".95"/>
+    <rect x="42" y="4" width="15" height="14" rx="2" opacity=".35"/>
+    <rect x="4" y="22" width="15" height="14" rx="2" opacity=".35"/>
+    <rect x="23" y="22" width="15" height="14" rx="2" opacity=".55"/>
+    <rect x="42" y="22" width="15" height="14" rx="2" opacity=".35"/>`,
   luck: `<path d="M4 34 C 14 34, 18 30, 22 20 S 28 4, 33 4 S 40 12, 45 22 S 54 34, 60 34"/>
     <path d="M45 34v-8M52 34v-4" opacity=".45"/>`,
   oracle: `<rect x="4" y="6" width="10" height="28" rx="2" opacity=".3"/>
@@ -4145,6 +4157,295 @@ const __W = ${JSON.stringify(workerSrc(projectionsWorker))};
 }
 
 // ---------------------------------------------------------------------------
+// /beta/nearmiss - what one different digit would have been worth.
+//
+// Treat every number as its six-digit zero-padded form and it has exactly 54
+// neighbours: six positions times nine other digits, every one of them a legal roll.
+// That turns the range into a graph, and the interesting questions are local ones -
+// was your roll a peak or a valley, and how far off was the peak next door?
+//
+// The global pass is 54 million lookups, which is why it lives in the worker; after
+// that the page holds the EP array and any single number's neighbourhood is 54 reads.
+// ---------------------------------------------------------------------------
+
+function nearmissWorker() {
+  const N = 1000000;
+  const POW = [100000, 10000, 1000, 100, 10, 1];
+
+  self.onmessage = async ev => {
+    if (ev.data.cmd !== 'init') return;
+    try {
+      const swept = await betaSweep(ev.data.origin, 0.5);
+      const ep = new Float64Array(N);
+      for (let i = 0; i < N; i++) ep[i] = swept.ep[i];
+      const mythic = ev.data.mythic;
+
+      self.postMessage({ type: 'progress', pct: 0.55, msg: 'Walking 54 million neighbours…' });
+      let peaks = 0, valleys = 0, nearMythic = 0, sumBest = 0;
+      // Two small top-lists, kept by insertion - a full sort of a million candidates
+      // to show ten rows would cost more than the whole pass.
+      const cruel = [], summits = [];
+      const keep = (list, item, cap, key) => {
+        if (list.length < cap) { list.push(item); list.sort((a, b) => b[key] - a[key]); return; }
+        if (item[key] <= list[cap - 1][key]) return;
+        list[cap - 1] = item;
+        list.sort((a, b) => b[key] - a[key]);
+      };
+
+      for (let n = 0; n < N; n++) {
+        if ((n & 0x1ffff) === 0) self.postMessage({ type: 'progress', pct: 0.55 + 0.45 * (n / N) });
+        const mine = ep[n];
+        let best = -1, bestN = -1, worse = 0;
+        for (let p = 0; p < 6; p++) {
+          const pw = POW[p], cur = ((n / pw) | 0) % 10, base = n - cur * pw;
+          for (let d = 0; d < 10; d++) {
+            if (d === cur) continue;
+            const e = ep[base + d * pw];
+            if (e > best) { best = e; bestN = base + d * pw; }
+            if (e < mine) worse++;
+          }
+        }
+        sumBest += best;
+        if (worse === 54) { peaks++; keep(summits, { n, ep: mine, ep2: 0 }, 10, 'ep'); }
+        if (worse === 0) valleys++;
+        if (best >= mythic) nearMythic++;
+        // A "near miss" is a poor roll with a spectacular neighbour. Ratio, so it is
+        // not just a list of the ten biggest numbers in the range.
+        if (mine < mythic) keep(cruel, { n, ep: mine, best, to: bestN, ratio: best / Math.max(1, mine) }, 10, 'ratio');
+      }
+
+      self.postMessage({ type: 'ready', ep: ep.buffer, N, peaks, valleys, nearMythic,
+        meanBest: sumBest / N, cruel, summits }, [ep.buffer]);
+    } catch (e) {
+      self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
+    }
+  };
+}
+
+function nearmissClient(WORKER_SRC, TIERS) {
+  const $ = id => document.getElementById(id);
+  const N = 1000000, POW = [100000, 10000, 1000, 100, 10, 1];
+  const fmt = n => Math.round(n).toLocaleString();
+  // Signed: the board's cells are mostly negative deltas, and an eight-digit one does
+  // not fit in a 40px cell.
+  const compact = n => {
+    const a = Math.abs(n), sign = n < 0 ? '-' : '';
+    return a >= 1e6 ? sign + (a / 1e6).toFixed(2) + 'M'
+      : a >= 1e4 ? sign + (a / 1e3).toFixed(1) + 'k' : sign + fmt(a);
+  };
+  const tierOf = ep => { let x = TIERS[0]; for (const y of TIERS) if (ep >= y.lo) x = y; return x; };
+  let EP = null, cur = 123456;
+
+  function board(n) {
+    const mine = EP[n], s = String(n).padStart(6, '0');
+    const rows = [];
+    let best = -1, bestN = -1;
+    const cells = [];
+    for (let p = 0; p < 6; p++) {
+      const pw = POW[p], curD = Number(s[p]), base = n - curD * pw;
+      for (let d = 0; d < 10; d++) {
+        const m = base + d * pw;
+        const e = EP[m];
+        if (d !== curD && e > best) { best = e; bestN = m; }
+        cells.push({ p, d, m, e, self: d === curD });
+      }
+    }
+    // Colour on the log ratio against the number itself, so the scale means the same
+    // thing for a 3,000 EP roll and a 3,000,000 one.
+    const lr = e => Math.log10(Math.max(1, e) / Math.max(1, mine));
+    const span = Math.max(0.35, ...cells.map(c => Math.abs(lr(c.e))));
+    const colour = c => {
+      if (c.self) return 'background:var(--hl);color:var(--on-accent)';
+      const t = lr(c.e) / span;
+      const a = Math.min(0.85, Math.abs(t) * 0.9 + 0.08);
+      return t >= 0
+        ? `background:color-mix(in srgb, var(--ok) ${(a * 100).toFixed(0)}%, var(--surface-2));color:var(--text)`
+        : `background:color-mix(in srgb, var(--bad) ${(a * 70).toFixed(0)}%, var(--surface-2));color:var(--dim)`;
+    };
+
+    $('board').innerHTML = [0, 1, 2, 3, 4, 5].map(p => `<div class="col">
+      <div class="chead">${s[p]}</div>
+      <div class="cells">${cells.filter(c => c.p === p).map(c =>
+        `<button type="button" class="cell${c.self ? ' self' : ''}" data-n="${c.m}" style="${colour(c)}"
+          title="${c.m.toLocaleString()} · ${fmt(c.e)} EP">${c.d}<em>${
+            c.self ? 'this' : (c.e >= mine ? '+' : '') + compact(c.e - mine)}</em></button>`).join('')}</div>
+      <div class="cfoot">${['100k', '10k', '1k', '100', '10', '1'][p]}</div>
+    </div>`).join('');
+
+    const t = tierOf(mine), bt = tierOf(best);
+    const worse = cells.filter(c => !c.self && c.e < mine).length;
+    $('cur').innerHTML = `
+      <div class="stat stat-lg"><span class="k">This number</span><span class="v">${compact(mine)}</span>
+        <span class="sub">EP · <span class="pill" style="--tc:${t.accent}">${t.label}</span></span></div>
+      <div class="stat stat-lg"><span class="k">Best neighbour</span><span class="v">${compact(best)}</span>
+        <span class="sub">EP · <a href="/?n=${bestN}">${bestN.toLocaleString()}</a>
+          · <span class="pill" style="--tc:${bt.accent}">${bt.label}</span></span></div>
+      <div class="stat stat-lg"><span class="k">One digit gains</span><span class="v">${
+        best > mine ? '+' + compact(best - mine) : 'nothing'}</span>
+        <span class="sub">${best > mine ? (best / Math.max(1, mine)).toFixed(1) + 'x this score' : 'this is a local peak'}</span></div>
+      <div class="stat stat-lg"><span class="k">Better than</span><span class="v">${worse}</span>
+        <span class="sub">of its 54 neighbours</span></div>`;
+    $('title').innerHTML = `<span class="tn">${n.toLocaleString()}</span>
+      <a class="tlink" href="/?n=${n}">open on the calculator &rarr;</a>`;
+    cur = n;
+    history.replaceState(null, '', '?n=' + n);
+  }
+
+  function set(n) {
+    if (!Number.isInteger(n) || n < 0 || n >= N) return;
+    board(n);
+  }
+
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-n]');
+    if (b) { set(Number(b.dataset.n)); scrollTo({ top: 0, behavior: 'smooth' }); }
+  });
+  $('go').addEventListener('submit', e => {
+    e.preventDefault();
+    set(parseInt(($('n').value || '').replace(/\D/g, ''), 10));
+  });
+  $('rand').addEventListener('click', () => {
+    const n = Math.floor(Math.random() * N);
+    $('n').value = n;
+    set(n);
+  });
+
+  betaBoot(WORKER_SRC, null, { mythic: TIERS[TIERS.length - 1].lo }).then(({ data }) => {
+    EP = new Float64Array(data.ep);
+    $('page').classList.add('on');
+    $('global').innerHTML = `
+      <div class="stat stat-lg"><span class="k">One digit from mythic</span><span class="v">${
+        (100 * data.nearMythic / data.N).toFixed(1)}%</span>
+        <span class="sub">${fmt(data.nearMythic)} numbers have a mythic neighbour</span></div>
+      <div class="stat stat-lg"><span class="k">Local peaks</span><span class="v">${fmt(data.peaks)}</span>
+        <span class="sub">beat all 54 of their neighbours</span></div>
+      <div class="stat stat-lg"><span class="k">Local valleys</span><span class="v">${fmt(data.valleys)}</span>
+        <span class="sub">lose to all 54</span></div>
+      <div class="stat stat-lg"><span class="k">Mean best neighbour</span><span class="v">${
+        compact(data.meanBest)}</span><span class="sub">EP · against a mean roll of 21.5k</span></div>`;
+
+    const row = (n, right, sub) => {
+      const t = tierOf(EP[n]);
+      return `<button type="button" class="nrow" data-n="${n}">
+        <span class="nn">${n.toLocaleString()}</span>
+        <span class="pill" style="--tc:${t.accent}">${t.label}</span>
+        <span class="ns">${sub}</span><span class="nv">${right}</span></button>`;
+    };
+    $('cruel').innerHTML = data.cruel.map(c =>
+      row(c.n, (c.ratio >= 1000 ? compact(c.ratio) : Math.round(c.ratio)) + 'x',
+        `${fmt(c.ep)} EP, next door ${compact(c.best)}`)).join('');
+    $('summits').innerHTML = data.summits.map(s =>
+      row(s.n, compact(s.ep) + ' EP', 'beats every neighbour')).join('');
+
+    const q = parseInt(new URLSearchParams(location.search).get('n') || '', 10);
+    const start = Number.isInteger(q) && q >= 0 && q < N ? q : 123456;
+    $('n').value = start;
+    set(start);
+  });
+}
+
+function renderNearMiss(ctx) {
+  const { CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE } = ctx;
+  const tiers = CARD_TIER_NAMES.map((key, i) => ({
+    label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
+    lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
+  }));
+
+  const css = `
+  #page { display:none; }
+  #page.on { display:block; }
+  .card { margin-bottom:.9rem; }
+  .card > p.small { margin:-.35rem 0 .8rem; font-size:.8rem; color:var(--muted); line-height:1.6; }
+  .bar { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; margin-bottom:1rem; }
+  #go { display:flex; gap:.5rem; }
+  #n { width:9rem; }
+  #title { display:flex; align-items:baseline; gap:.8rem; flex-wrap:wrap; margin-bottom:.9rem; }
+  #title .tn { font-family:var(--mono); font-size:2rem; font-weight:600; letter-spacing:.06em; }
+  #title .tlink { font-size:.8rem; }
+
+  .cols { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,290px); gap:1rem; align-items:start; }
+  @media (max-width:900px) { .cols { grid-template-columns:minmax(0,1fr); } }
+  #board { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:.5rem; }
+  .col { display:flex; flex-direction:column; gap:.3rem; min-width:0; }
+  .chead { height:28px; display:flex; align-items:center; justify-content:center;
+    font-family:var(--mono); font-size:1.1rem; font-weight:700; color:var(--hl-lt); }
+  .cells { display:flex; flex-direction:column; gap:2px; }
+  .cell { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+    height:38px; padding:0; border:1px solid transparent; border-radius:var(--r-sm);
+    font-family:var(--mono); font-size:.95rem; font-weight:600; }
+  .cell em { font-style:normal; font-size:.6rem; font-weight:500; opacity:.9; letter-spacing:-.02em; }
+  .cell:hover { border-color:var(--text); }
+  .cell.self { font-weight:800; }
+  .cfoot { text-align:center; font-size:.66rem; color:var(--faint); font-family:var(--mono); }
+  @media (max-width:640px) { .cell { height:30px; font-size:.8rem; } .cell em { display:none; } }
+
+  #cur, #global { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(140px,100%),1fr)); gap:.5rem; }
+  #cur .stat, #global .stat { min-width:0; overflow-wrap:anywhere; }
+  #global { margin-bottom:1.2rem; }
+  .two { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(330px,100%),1fr)); gap:.9rem; }
+
+  .nrow { display:flex; align-items:center; gap:.5rem; width:100%; text-align:left; padding:.34rem .35rem;
+    font-size:.84rem; font-weight:400; color:var(--dim); background:transparent; border:0;
+    border-radius:var(--r-sm); }
+  .nrow:hover { background:var(--surface-2); border:0; color:var(--text); }
+  .nrow .nn { flex:0 0 4.6rem; font-family:var(--mono); }
+  .nrow .ns { flex:1; min-width:0; font-size:.74rem; color:var(--faint); font-family:var(--mono);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .nrow .nv { flex:0 0 auto; font-family:var(--mono); font-size:.8rem; color:var(--hl-lt); }`;
+
+  const body = `<div class="wrap">
+  <div class="tool-head">
+    <h1>Near Misses <span class="beta-tag">beta</span></h1>
+    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <p class="tag">Every number has exactly 54 neighbours - six digit positions, nine other digits each.
+    This is what each of them would have scored.</p>
+
+  <div id="page">
+    <div class="bar">
+      <form id="go"><input id="n" type="text" inputmode="numeric" placeholder="a number"
+        autocomplete="off"><button type="submit" class="btn-primary btn-sm">Show</button></form>
+      <button type="button" id="rand" class="btn-sm">Random roll</button>
+    </div>
+
+    <div id="title"></div>
+    <div class="cols">
+      <section class="card"><div id="board"></div></section>
+      <div id="cur"></div>
+    </div>
+
+    <h2 class="eyebrow" style="margin-top:1.6rem">Across the whole range</h2>
+    <div id="global"></div>
+
+    <div class="two">
+      <section class="card"><h2>Cruellest near misses</h2>
+        <p class="small">Ordinary numbers with a spectacular neighbour - ranked by how many times
+          better one different digit would have been.</p>
+        <div id="cruel"></div></section>
+      <section class="card"><h2>Highest local peaks</h2>
+        <p class="small">Numbers that beat all 54 of their neighbours, best first. Nothing one digit
+          away from these is worth more.</p>
+        <div id="summits"></div></section>
+    </div>
+  </div>
+
+  <footer>
+    Neighbours are taken on the <b>six-digit zero-padded</b> form, so 69 is 000069 and changing its
+    leading digit gives 100069 - every one of the 54 is a legal roll in 0-999,999. Green means that
+    digit would have scored more than the number you are looking at, red less, and the shade is the
+    log ratio, so the scale reads the same for a small score and a huge one.
+  </footer>
+</div>
+${overlayHTML('Then walking all 54 million neighbour pairs to find the peaks and the near misses.')}`;
+
+  const script = `${BETA_BOOT_JS}
+const __W = ${JSON.stringify(workerSrc(nearmissWorker))};
+(${nearmissClient.toString()})(__W, ${JSON.stringify(tiers)});`;
+
+  return betaShell({ title: 'RNGdle - Near Misses', width: '1000px', slug: 'nearmiss', css, body, script });
+}
+
+// ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
 
@@ -4175,4 +4476,5 @@ const RENDERERS = {
   collector: renderCollector,
   species: renderSpecies,
   projections: renderProjections,
+  nearmiss: renderNearMiss,
 };
