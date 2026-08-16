@@ -374,7 +374,8 @@ export function renderBetaIndex() {
     </a>`).join('');
 
   const css = `
-  #cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(330px,100%),1fr)); gap:.8rem; }
+  #cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(330px,100%),1fr));
+    gap:.8rem; margin-top:1.3rem; }
   .tool { display:flex; flex-direction:column; text-decoration:none; color:inherit; overflow:hidden;
     border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface);
     transition:border-color .12s, transform .12s, background .12s; }
@@ -395,7 +396,6 @@ export function renderBetaIndex() {
   .finds { margin-top:2rem; }
   .finds h2 { font-size:.78rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
     color:var(--muted); margin:0 0 .4rem; }
-  .findlead { margin:0 0 .9rem; font-size:.82rem; color:var(--faint); line-height:1.6; }
   .finds ol { list-style:none; margin:0; padding:0; display:grid;
     grid-template-columns:repeat(auto-fill, minmax(min(330px,100%),1fr)); gap:.6rem; }
   .finds li { display:flex; flex-direction:column; gap:.25rem; padding:.75rem .9rem;
@@ -404,35 +404,16 @@ export function renderBetaIndex() {
   .finds li b { font-size:.88rem; font-weight:600; line-height:1.4; }
   .finds li span { font-size:.8rem; color:var(--muted); line-height:1.55; }
   .finds li a { margin-top:auto; padding-top:.35rem; font-size:.76rem; text-decoration:none; }
-  .finds li a:hover { text-decoration:underline; }
-
-  .lead { border:1px solid var(--border); border-left:3px solid var(--hl);
-    border-radius:var(--r-card); background:var(--surface); padding:.9rem 1.05rem; margin-bottom:1.3rem; }
-  .lead p { margin:0; font-size:.87rem; color:var(--dim); line-height:1.6; }
-  .lead p + p { margin-top:.5rem; }
-  .lead b { color:var(--text); font-weight:600; }`;
+  .finds li a:hover { text-decoration:underline; }`;
 
   const body = `<div class="wrap">
   <h1>Beta lab <span class="beta-tag">experimental</span></h1>
-  <p class="tag">${BETA_TOOLS.length} data-vis and insight tools built on the full
-    1,000,001-number sweep.</p>
-
-  <section class="lead">
-    <p>Nearly all of these score <b>every legal roll</b> - all 1,000,001 of them - in your browser,
-      then look at the result from a different angle. Nothing is precomputed on the server, so they
-      all track the live badge rules exactly.</p>
-    <p>That sweep runs once, is shared between them (and with <a href="/grid">Grid</a> and
-      <a href="/chains">Chains</a>), and is cached in this browser afterwards. Expect a few seconds
-      the first time and none after that. <a href="/beta/collection">Your Collection</a> is the
-      exception and needs no sweep at all - it opens straight away.</p>
-  </section>
+  <p class="tag">Data-vis and insight tools built on the full 1,000,001-number sweep.</p>
 
   <div id="cards">${cards}</div>
 
   <section class="finds">
-    <h2>What they turned up</h2>
-    <p class="findlead">None of this is visible in the badge table. Each line is measured, not stored -
-      follow it to the tool that recomputes it from the live rules.</p>
+    <h2>Some insights</h2>
     <ol>${FINDINGS.map(([head, body, slug]) => `<li>
       <b>${head}</b><span>${body}</span>
       <a href="/beta/${slug}">${BETA_TOOLS.find(t => t.slug === slug).title} &rarr;</a>
@@ -440,8 +421,7 @@ export function renderBetaIndex() {
   </section>
 
   <footer>
-    <b>Beta</b> - these are experiments. Layout, names and routes may change, and none of them are
-    linked from the main tools yet.
+    <b>Beta</b> - these are experiments. Layout, names and routes may change.
   </footer>
 </div>`;
 
