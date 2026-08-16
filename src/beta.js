@@ -2949,25 +2949,31 @@ function luckClient(WORKER_SRC, TIERS) {
   }
 
   // --- your rolls ---------------------------------------------------------
-  function analyse(nums, label) {
+  // Two independent readings of the same set: how good the single best roll was among
+  // players with that many rolls, and whether the whole set drifted high or low
+  // (percentiles are uniform, so their mean has a known spread).
+  function score(nums) {
     const valid = nums.filter(n => Number.isInteger(n) && n >= 0 && n < N);
-    if (!valid.length) {
-      $('verdict').innerHTML = '<p class="err">No usable numbers - give me integers from 0 to 1,000,000.</p>';
-      return;
-    }
+    if (!valid.length) return null;
     const rows = valid.map(n => ({ n, ep: EP[n], p: cdf(EP[n]) })).sort((a, b) => b.ep - a.ep);
     const k = rows.length;
     const best = rows[0];
-    // Two independent readings of the same rolls: how good the single best one was
-    // among players with the same number of rolls, and whether the whole set drifted
-    // high or low (percentiles are uniform, so their mean has a known spread).
     const beatShare = Math.pow(best.p, k);
     const meanP = rows.reduce((s, r) => s + r.p, 0) / k;
-    const z = (meanP - 0.5) / Math.sqrt(1 / 12 / k);
-    const par = bestAt(k, 0.5);
-    const verdict = beatShare >= 0.999 ? 'extraordinary' : beatShare >= 0.99 ? 'very lucky'
-      : beatShare >= 0.75 ? 'lucky' : beatShare >= 0.25 ? 'about par'
-      : beatShare >= 0.01 ? 'unlucky' : 'brutal';
+    return { rows, k, best, beatShare, meanP,
+      z: (meanP - 0.5) / Math.sqrt(1 / 12 / k), par: bestAt(k, 0.5) };
+  }
+  const verdictOf = b => b >= 0.999 ? 'extraordinary' : b >= 0.99 ? 'very lucky'
+    : b >= 0.75 ? 'lucky' : b >= 0.25 ? 'about par' : b >= 0.01 ? 'unlucky' : 'brutal';
+
+  function analyse(nums, label) {
+    const st = score(nums);
+    if (!st) {
+      $('verdict').innerHTML = '<p class="err">No usable numbers - give me integers from 0 to 1,000,000.</p>';
+      return;
+    }
+    const { rows, k, best, beatShare, meanP, z, par } = st;
+    const verdict = verdictOf(beatShare);
 
     $('verdict').innerHTML = `
       <div class="vhead"><b>${label}</b><span>${fmt(k)} roll${k === 1 ? '' : 's'}</span></div>
@@ -3000,16 +3006,57 @@ function luckClient(WORKER_SRC, TIERS) {
     const nums = ($('paste').value.match(/\d+/g) || []).map(Number);
     analyse(nums, 'Pasted rolls');
   });
+  async function loadPlayer(u) {
+    const r = await fetch('/api/profile?u=' + encodeURIComponent(u));
+    const d = await r.json();
+    if (!r.ok || !d.scored) throw new Error(d.error || `could not load ${u}`);
+    return { username: d.username || u, nums: d.scored.map(x => x.number) };
+  }
+
+  // Several names rank the players against each other rather than pooling their rolls:
+  // pooling is what /u already does, and "who got luckier" only means anything per
+  // player anyway.
+  async function compare(names) {
+    const loaded = await Promise.all(names.map(u =>
+      loadPlayer(u).then(p => ({ ...p, st: score(p.nums) })).catch(e => ({ username: u, error: e.message }))));
+    const ok = loaded.filter(p => p.st).sort((a, b) => b.st.beatShare - a.st.beatShare);
+    const bad = loaded.filter(p => !p.st);
+    if (!ok.length) {
+      $('verdict').innerHTML = `<p class="err">${bad.map(p => p.error).join('; ')}</p>`;
+      return;
+    }
+    $('verdict').innerHTML = `
+      <div class="vhead"><b>${ok.length} players</b><span>ranked by how lucky their best roll was</span></div>
+      <div class="ctable">
+        <div class="crow chead"><span>Player</span><span>Rolls</span><span>Best</span>
+          <span>Luckier than</span><span>Drift</span></div>
+        ${ok.map(p => `<button type="button" class="crow" data-u="${p.username}">
+          <span class="cu">${p.username}</span>
+          <span>${fmt(p.st.k)}</span>
+          <span>${compact(p.st.best.ep)}</span>
+          <span class="cl">${(100 * p.st.beatShare).toFixed(1)}%<em>${verdictOf(p.st.beatShare)}</em></span>
+          <span>${p.st.z >= 0 ? '+' : ''}${p.st.z.toFixed(2)}σ</span>
+        </button>`).join('')}
+      </div>
+      <p class="muted small">Click a row for that player's full reading.</p>
+      ${bad.length ? `<p class="muted small">Could not load: ${bad.map(p => p.username).join(', ')}.</p>` : ''}`;
+    for (const b of $('verdict').querySelectorAll('[data-u]')) {
+      b.addEventListener('click', () => {
+        const p = ok.find(x => x.username === b.dataset.u);
+        analyse(p.nums, p.username);
+      });
+    }
+  }
+
   $('user-form').addEventListener('submit', async e => {
     e.preventDefault();
-    const u = $('user').value.trim();
-    if (!u) return;
+    const names = [...new Set(($('user').value.match(/[A-Za-z0-9_.-]+/g) || []))].slice(0, 6);
+    if (!names.length) return;
     $('verdict').innerHTML = '<div class="loading"><span class="spinner"></span>Loading rolls…</div>';
     try {
-      const r = await fetch('/api/profile?u=' + encodeURIComponent(u));
-      const d = await r.json();
-      if (!r.ok || !d.scored) throw new Error(d.error || 'could not load that player');
-      analyse(d.scored.map(s => s.number), d.username || u);
+      if (names.length > 1) { await compare(names); return; }
+      const p = await loadPlayer(names[0]);
+      analyse(p.nums, p.username);
     } catch (err) {
       $('verdict').innerHTML = `<p class="err">${err.message}</p>`;
     }
@@ -3097,7 +3144,24 @@ function renderLuck(ctx) {
   .vrow:hover { background:var(--surface-2); color:var(--text); }
   .vrow .vn { flex:1; font-family:var(--mono); font-size:.88rem; }
   .vrow .vp, .vrow .ve { font-family:var(--mono); font-size:.76rem; color:var(--faint); }
-  .loading { display:flex; align-items:center; gap:.6rem; color:var(--muted); font-size:.86rem; }`;
+  .loading { display:flex; align-items:center; gap:.6rem; color:var(--muted); font-size:.86rem; }
+  .ctable { display:flex; flex-direction:column; gap:1px; }
+  .crow { display:grid; grid-template-columns:minmax(0,1.6fr) 3.6rem 4.6rem 6.4rem 4rem;
+    align-items:center; gap:.5rem; width:100%; text-align:right; padding:.4rem .5rem; font-size:.84rem;
+    font-weight:400; color:var(--dim); background:transparent; border:0; border-radius:var(--r-sm);
+    font-variant-numeric:tabular-nums; font-family:var(--mono); }
+  .crow:hover { background:var(--surface-2); border:0; color:var(--text); }
+  .crow .cu { text-align:left; font-family:var(--font); overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; }
+  .crow .cl { color:var(--hl-lt); }
+  .crow .cl em { display:block; font-style:normal; font-size:.68rem; color:var(--faint);
+    font-family:var(--font); }
+  .crow.chead { color:var(--faint); font-size:.7rem; letter-spacing:.06em; text-transform:uppercase;
+    font-family:var(--font); border-bottom:1px solid var(--border); border-radius:0; }
+  .crow.chead:hover { background:transparent; }
+  .crow.chead > span:first-child { text-align:left; }
+  @media (max-width:600px) { .crow { grid-template-columns:minmax(0,1.4fr) 4.4rem 6rem; }
+    .crow > span:nth-child(2), .crow > span:nth-child(5) { display:none; } }`;
 
   const body = `<div class="wrap">
   <div class="tool-head">
@@ -3139,11 +3203,12 @@ function renderLuck(ctx) {
     <section class="card">
       <h2>How lucky were yours?</h2>
       <p class="small">Look up a player, or paste any list of numbers. Each roll is scored against the
-        exact distribution above, so nothing here is an estimate.</p>
+        exact distribution above, so nothing here is an estimate. Name several players (up to six) to
+        rank them against each other instead.</p>
       <div class="inputs">
         <div><label for="user">rngdle player</label>
-          <form id="user-form"><input id="user" type="text" placeholder="username" autocomplete="off">
-            <button type="submit" class="btn-primary btn-sm">Check</button></form></div>
+          <form id="user-form"><input id="user" type="text" placeholder="username, or several to compare"
+            autocomplete="off"><button type="submit" class="btn-primary btn-sm">Check</button></form></div>
         <div><label for="paste">or paste rolls</label>
           <textarea id="paste" placeholder="123456, 696969, 100000&#10;one per line or comma separated"></textarea>
           <button type="button" id="paste-go" class="btn-sm">Analyse</button></div>

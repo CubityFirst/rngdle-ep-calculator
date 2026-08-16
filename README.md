@@ -85,7 +85,7 @@ are the two halves of that protocol.
 | `/beta/pairs` | **Badge affinity**: how often each of the ~26k badge pairs lands on the same number, read as lift, `P(B|A)`, Jaccard or a raw count. Orderable by family or by average-linkage cluster. |
 | `/beta/oracle` | **Digit oracle**: lock any digits of a six-digit number and all 60 digit-position choices are re-scored against only the numbers that still match. |
 | `/beta/nearmiss` | **Near misses**: the 54 numbers one digit away from any given one, what each would have scored, and across the range the local peaks, the local valleys, and how much of it sits one digit from a mythic. |
-| `/beta/luck` | **Roll odds**: the exact EP distribution, tier odds, closed-form best-of-N, and a luck reading for a real player's rolls (via `/api/profile`, scored locally). |
+| `/beta/luck` | **Roll odds**: the exact EP distribution, tier odds, closed-form best-of-N, and a luck reading for a real player's rolls (via `/api/profile`, scored locally). Name several players to rank them against each other. |
 | `/beta/collector` | **Coupon collector**: rolls needed to earn all 230 badges, simulated over the real earner sets, against a greedy cover of the same badge list. |
 | `/beta/anatomy` | **Plain properties against score**: digit sum, distinct digits, longest run, divisibility, palindromes - each measured as lift against the range average and ranked by how much spread it actually produces. |
 | `/beta/economy` | **Badge pricing**, written up as a finding: EP turns out to be exactly `100 / P(earn)` for every badge, so supersession is the only thing that varies. |

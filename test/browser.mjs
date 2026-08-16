@@ -111,6 +111,9 @@ const INTERACTIONS = {
     ['click cell', p => p.click('#board .cell.live').then(() => p.waitForTimeout(600)).then(() => p.textContent('#pattern'))],
     ['reset', p => p.click('#reset').then(() => p.waitForTimeout(600)).then(() => p.textContent('#pattern'))],
   ],
+  // The player lookup is deliberately not exercised: it calls rngdle's public API, and
+  // a test suite has no business hammering someone else's server. The pasted-rolls path
+  // runs the same scoring code.
   '/beta/luck': [
     ['rolls slider', async p => {
       await p.$eval('#rolls', e => { e.value = '500'; e.dispatchEvent(new Event('input', { bubbles: true })); });
