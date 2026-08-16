@@ -155,6 +155,12 @@ const INTERACTIONS = {
     ['colour', p => p.selectOption('#mode', '2').then(() => 'ok')],
     ['height source', p => p.selectOption('#hsrc', 'count').then(() => 'ok')],
     ['detail', p => p.selectOption('#res', '250').then(() => 'ok')],
+    ['badge overlay', async p => {
+      await p.fill('#badge', 'Palindrome');
+      await p.$eval('#badge', e => e.dispatchEvent(new Event('change', { bubbles: true })));
+      await p.waitForTimeout(2500);
+      return p.textContent('#badgenote');
+    }],
     ['fly to', async p => {
       await p.fill('#gn', '696969');
       await p.click('#goto button');

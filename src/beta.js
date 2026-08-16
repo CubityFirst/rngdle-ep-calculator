@@ -1028,10 +1028,22 @@ const __W = ${JSON.stringify(workerSrc(pairsWorker))};
 // ---------------------------------------------------------------------------
 
 function atlasWorker() {
+  // Kept after the sweep so a badge overlay can be cut on demand: the bitmask is ~29MB
+  // and belongs here, not on the page, which only ever needs one badge at a time.
+  let BITS = null, ROW = 0;
+
   self.onmessage = async ev => {
+    if (ev.data.cmd === 'badge') {
+      const i = ev.data.i, N = 1000000, byte = i >> 3, bit = 1 << (i & 7);
+      const mask = new Uint8Array(N);
+      for (let n = 0; n < N; n++) mask[n] = (BITS[n * ROW + byte] & bit) ? 1 : 0;
+      self.postMessage({ type: 'mask', i, mask: mask.buffer }, [mask.buffer]);
+      return;
+    }
     if (ev.data.cmd !== 'init') return;
     try {
       const swept = await betaSweep(ev.data.origin, 0.9);
+      BITS = swept.bits; ROW = swept.ROW;
       // The square face of the range is 0..999,999; 1,000,000 is the one 7-digit roll
       // and has no cell, exactly as on /grid.
       const N = 1000000;
@@ -1063,7 +1075,7 @@ function atlasWorker() {
 }
 
 // TIERS = [{ name, label, accent, lo }] ascending, lo = inclusive EP floor.
-function atlasClient(WORKER_SRC, TIERS) {
+function atlasClient(WORKER_SRC, TIERS, LABELS) {
   const $ = id => document.getElementById(id);
   const SIDE = 1000;                                  // cells per side at full detail
   const cv = $('gl');
@@ -1074,7 +1086,8 @@ function atlasClient(WORKER_SRC, TIERS) {
     return;
   }
 
-  let EP = null, CNT = null, MAXEP = 1, PEAKS = [];
+  let EP = null, CNT = null, MAXEP = 1, PEAKS = [], W = null;
+  let MASK = null, maskBadge = -1;               // badge overlay, or null for none
   let S = 1000, mode = 0, exag = 1, hsrc = 'log', showGrid = true;
   let mesh = null, tex = null, prog = null, vao = null, uni = {};
   let sel = -1;
@@ -1088,12 +1101,12 @@ uniform mat4 uMVP;
 uniform sampler2D uT;        // (height 0..1, EP, badge count, -)
 uniform int uS;
 uniform float uY;            // vertical exaggeration, in world units
-out float vH; out float vEP; out float vC; out vec2 vUV; out vec3 vN; out vec3 vP;
+out float vH; out float vEP; out float vC; out float vA; out vec2 vUV; out vec3 vN; out vec3 vP;
 float hAt(ivec2 p) { return texelFetch(uT, clamp(p, ivec2(0), ivec2(uS - 1)), 0).r; }
 void main() {
   int gx = gl_VertexID % uS, gy = gl_VertexID / uS;
   vec4 t = texelFetch(uT, ivec2(gx, gy), 0);
-  vH = t.r; vEP = t.g; vC = t.b;
+  vH = t.r; vEP = t.g; vC = t.b; vA = t.a;
   float d = 2.0 / float(uS - 1);
   // Central differences on the four neighbours - cheap, and the only lighting cue
   // that makes the ridge structure legible at a glance.
@@ -1108,7 +1121,7 @@ void main() {
   const FS = `#version 300 es
 precision highp float;
 precision highp int;
-in float vH; in float vEP; in float vC; in vec2 vUV; in vec3 vN; in vec3 vP;
+in float vH; in float vEP; in float vC; in float vA; in vec2 vUV; in vec3 vN; in vec3 vP;
 uniform vec3 uTier[7];
 uniform float uCut[6];
 uniform int uMode;           // 0 tier, 1 height ramp, 2 badge count
@@ -1117,6 +1130,8 @@ uniform int uGrid;
 uniform int uS;
 uniform vec3 uEye;
 uniform vec2 uSel;           // selected cell, or (-1,-1)
+uniform int uMark;           // 1 when a badge overlay is loaded
+uniform vec3 uMarkCol;
 out vec4 o;
 
 vec3 tierColour(float ep) {
@@ -1135,6 +1150,12 @@ void main() {
   vec3 base = uMode == 0 ? tierColour(vEP)
             : uMode == 1 ? ramp(vH)
             : ramp(vC / max(uMaxC, 1.0));
+  // Badge overlay: everything that does not earn it drops to a desaturated grey, so
+  // the ones that do read as the only thing on the map with any colour in it.
+  if (uMark == 1) {
+    float g = dot(base, vec3(.299, .587, .114));
+    base = vA > 0.5 ? uMarkCol : vec3(g * .38);
+  }
   vec3 L = normalize(vec3(.45, .8, .35));
   float lam = max(dot(normalize(vN), L), 0.0);
   vec3 col = base * (.30 + .78 * lam);
@@ -1166,7 +1187,7 @@ void main() {
   const PICK_FS = `#version 300 es
 precision highp float;
 precision highp int;
-in vec2 vUV; in float vH; in float vEP; in float vC; in vec3 vN; in vec3 vP;
+in vec2 vUV; in float vH; in float vEP; in float vC; in float vA; in vec3 vN; in vec3 vP;
 uniform int uS;
 out vec4 o;
 void main() {
@@ -1248,17 +1269,20 @@ void main() {
       : hsrc === 'lin' ? ep / MAXEP : lg(ep) / lg(MAXEP);
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
-        let best = 0, bc = 0;
+        let best = 0, bc = 0, mark = 0;
         for (let dy = 0; dy < step; dy++) {
           const row = (y * step + dy) * SIDE + x * step;
           for (let dx = 0; dx < step; dx++) {
             const v = EP[row + dx];
             if (v > best) { best = v; bc = CNT[row + dx]; }
+            // Height and colour pool by peak; the overlay pools by "any", or a badge
+            // earned by one number in a block would vanish at anything below full detail.
+            if (MASK && MASK[row + dx]) mark = 1;
           }
         }
         const k = (y * S + x) * 4;
         data[k] = height(best, bc);
-        data[k + 1] = best; data[k + 2] = bc; data[k + 3] = 0;
+        data[k + 1] = best; data[k + 2] = bc; data[k + 3] = mark;
       }
     }
     if (!tex) {
@@ -1330,6 +1354,8 @@ void main() {
     setCommon(prog, mvp);
     gl.uniform1i(uni.mode, mode);
     gl.uniform1i(uni.grid, showGrid ? 1 : 0);
+    gl.uniform1i(uni.mark, MASK ? 1 : 0);
+    gl.uniform3f(uni.markCol, 0.94, 0.62, 0.33);
     gl.uniform1f(uni.maxc, 40);
     gl.uniform3fv(uni.eye, new Float32Array(eyePos()));
     gl.uniform2f(uni.sel, sel < 0 ? -1 : (sel % SIDE) * (S / SIDE), sel < 0 ? -1 : Math.floor(sel / SIDE) * (S / SIDE));
@@ -1446,6 +1472,23 @@ void main() {
   });
   $('hsrc').addEventListener('change', e => { hsrc = e.target.value; buildTexture(); render(); });
   $('grid').addEventListener('change', e => { showGrid = e.target.checked; render(); });
+  $('badge').addEventListener('change', e => {
+    const i = LABELS.indexOf(e.target.value);
+    if (i < 0) {
+      MASK = null; maskBadge = -1;
+      $('badgenote').textContent = '';
+      buildTexture(); render();
+      return;
+    }
+    if (i === maskBadge) return;
+    maskBadge = i;
+    $('badgenote').textContent = 'Loading…';
+    W.postMessage({ cmd: 'badge', i });
+  });
+  $('badgeclear').addEventListener('click', () => {
+    $('badge').value = '';
+    $('badge').dispatchEvent(new Event('change'));
+  });
   $('top').addEventListener('click', () => { cam.az = 0; cam.el = 1.5; cam.dist = 2.6; cam.tx = cam.tz = 0; render(); });
   $('reset').addEventListener('click', () => {
     cam.az = 0.65; cam.el = 0.62; cam.dist = 3.4; cam.tx = cam.tz = 0; sel = -1;
@@ -1459,7 +1502,16 @@ void main() {
   addEventListener('resize', render);
 
   // --- boot --------------------------------------------------------------
-  betaBoot(WORKER_SRC).then(({ data }) => {
+  betaBoot(WORKER_SRC, m => {
+    if (m.type !== 'mask' || m.i !== maskBadge) return;
+    MASK = new Uint8Array(m.mask);
+    let lit = 0;
+    for (let n = 0; n < MASK.length; n++) if (MASK[n]) lit++;
+    $('badgenote').textContent = `${lit.toLocaleString()} numbers · ${
+      (100 * lit / MASK.length).toFixed(lit < 1000 ? 4 : 2)}% of the map`;
+    buildTexture(); render();
+  }).then(({ worker, data }) => {
+    W = worker;
     EP = new Float32Array(data.ep); CNT = new Uint8Array(data.cnt);
     MAXEP = data.max; PEAKS = data.peaks;
 
@@ -1469,7 +1521,8 @@ void main() {
     uni = {
       mode: gl.getUniformLocation(prog, 'uMode'), grid: gl.getUniformLocation(prog, 'uGrid'),
       maxc: gl.getUniformLocation(prog, 'uMaxC'), eye: gl.getUniformLocation(prog, 'uEye'),
-      sel: gl.getUniformLocation(prog, 'uSel'),
+      sel: gl.getUniformLocation(prog, 'uSel'), mark: gl.getUniformLocation(prog, 'uMark'),
+      markCol: gl.getUniformLocation(prog, 'uMarkCol'),
     };
     gl.useProgram(prog);
     gl.uniform3fv(gl.getUniformLocation(prog, 'uTier'),
@@ -1491,7 +1544,8 @@ void main() {
 }
 
 function renderAtlas(ctx) {
-  const { CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE } = ctx;
+  const { BADGES, CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE, esc } = ctx;
+  const LABELS = BADGES.map(b => b[1]);
   const tiers = CARD_TIER_NAMES.map((key, i) => ({
     name: key, label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
     lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
@@ -1519,6 +1573,12 @@ function renderAtlas(ctx) {
   .ctl select { font-size:12px; padding:.35rem .45rem; background:rgba(255,255,255,.06);
     border-color:rgba(255,255,255,.14); }
   .chk { display:flex; align-items:center; gap:.45rem; font-size:12px; color:var(--dim); cursor:pointer; }
+  .badgerow { display:flex; gap:5px; }
+  #badge { flex:1; min-width:0; font-size:12px; padding:.35rem .45rem; background:rgba(255,255,255,.06);
+    border-color:rgba(255,255,255,.14); }
+  #badgeclear { flex:0 0 auto; padding:.35rem .5rem; font-size:13px; color:var(--muted);
+    background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.14); }
+  #badgenote { font-size:11px; color:var(--hl-lt); font-family:var(--mono); min-height:1.1em; }
   .row2 { display:flex; gap:6px; }
   .row2 button { flex:1; font-size:12px; padding:.4rem .5rem; background:rgba(255,255,255,.06);
     border-color:rgba(255,255,255,.14); }
@@ -1581,6 +1641,14 @@ function renderAtlas(ctx) {
   <label class="ctl"><span>Exaggeration <em id="exagv">1x</em></span>
     <input id="exag" type="range" min=".25" max="3" step=".05" value="1"></label>
   <label class="chk"><input id="grid" type="checkbox" checked> 100k gridlines</label>
+  <div class="ctl"><span>Light up a badge</span>
+    <div class="badgerow">
+      <input id="badge" list="badgelist" type="text" placeholder="any badge…" autocomplete="off">
+      <button type="button" id="badgeclear" title="Clear the overlay">&times;</button>
+    </div>
+    <div id="badgenote"></div>
+  </div>
+  <datalist id="badgelist">${LABELS.map(l => `<option value="${esc(l)}"></option>`).join('')}</datalist>
   <div class="row2"><button type="button" id="top">Top down</button>
     <button type="button" id="reset">Reset</button></div>
   <form id="goto"><input id="gn" type="text" inputmode="numeric" placeholder="Fly to number…"
@@ -1595,7 +1663,7 @@ ${overlayHTML('Then lifting the 1000x1000 map into a height field.')}`;
 
   const script = `${BETA_BOOT_JS}
 const __W = ${JSON.stringify(workerSrc(atlasWorker))};
-(${atlasClient.toString()})(__W, ${JSON.stringify(tiers)});`;
+(${atlasClient.toString()})(__W, ${JSON.stringify(tiers)}, ${JSON.stringify(LABELS)});`;
 
   return betaShell({
     title: 'RNGdle - EP Atlas', slug: 'atlas', full: true, css, body, script,
