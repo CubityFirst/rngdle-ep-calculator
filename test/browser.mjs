@@ -104,6 +104,16 @@ const INTERACTIONS = {
       await p.waitForTimeout(200);
       return p.$eval('#tip b', e => e.textContent);
     }],
+    ['click point', async p => {
+      const [x, y] = await p.$eval('#chart .pt', e => {
+        const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2];
+      });
+      await p.mouse.click(x, y);
+      await p.waitForTimeout(400);
+      const u = new URL(p.url());
+      if (!u.pathname.startsWith('/badges')) throw new Error('did not navigate: ' + u.pathname);
+      return u.pathname + u.hash;
+    }],
   ],
   '/beta/oracle': [
     ['lock best', p => p.click('#greedy').then(() => p.waitForTimeout(600)).then(() => p.textContent('#pattern'))],

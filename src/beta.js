@@ -1912,6 +1912,11 @@ function economyClient(WORKER_SRC, META, FAMS, PAL) {
   $('chart').addEventListener('mouseout', e => {
     if (e.target.closest('[data-i]')) tip.style.display = 'none';
   });
+  // The caption promises this; SVG circles are not links, so it has to be wired.
+  $('chart').addEventListener('click', e => {
+    const c = e.target.closest('[data-i]');
+    if (c) location.href = '/badges#' + META[Number(c.dataset.i)][5];
+  });
 
   // --- boot --------------------------------------------------------------
   const ep = Float64Array.from(META, m => m[2]);
