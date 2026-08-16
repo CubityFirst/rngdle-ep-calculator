@@ -1897,8 +1897,23 @@ function economyClient(WORKER_SRC, META, FAMS, PAL, TIERS) {
       (100 * r.keep).toFixed(1) + ' EP',
       `${(100 * r.keep).toFixed(1)}% of the time it is the family's top badge`)).join('') ||
       '<p class="muted small">No badge ever loses its family.</p>';
+    // Two very different reasons a badge can never pay, and only one of them costs
+    // anything: losing to a BIGGER sibling forfeits the difference, whereas losing a
+    // TIE is pure bookkeeping - the same EP is still awarded, under the other name.
     $('dead').innerHTML = dead.length
-      ? dead.map(r => row(r, fmt(r.earn) + ' wasted', `${FAMS[META[r.i][4]]} family - outranked every time`)).join('')
+      ? dead.map(r => {
+        const mine = META[r.i][2], fam = META[r.i][4];
+        let best = null;
+        for (let j = 0; j < B; j++) {
+          if (j === r.i || META[j][4] !== fam) continue;
+          if (!best || META[j][2] > META[best][2]) best = j;
+        }
+        const tied = best !== null && META[best][2] === mine;
+        return row(r, tied ? 'no EP lost' : fmt(mine) + ' forgone',
+          best === null ? 'outranked every time'
+            : tied ? `ties ${META[best][0]} at ${fmt(mine)} EP and loses the tie on list order`
+              : `outranked by ${META[best][0]} at ${fmt(META[best][2])} EP`);
+      }).join('')
       : '<p class="muted small">None - every badge is the top scorer of its family somewhere.</p>';
     $('deadn').textContent = dead.length;
     $('cleann').textContent = clean;
@@ -2145,8 +2160,11 @@ function renderEconomy(ctx) {
           superseded and keep the full 100.</p>
         <div id="taxed"></div></section>
       <section class="card"><h2>Never pay out <em>(<span id="deadn">-</span>)</em></h2>
-        <p class="small">Earned somewhere in the range, yet outranked by a family sibling on every single
-          number that earns them. Worth exactly nothing: they can be collected, never scored.</p>
+        <p class="small">Earned somewhere in the range, yet beaten by a family sibling on every single
+          number that earns them - so the badge itself is never the one credited. Whether that costs
+          anything depends on why: a badge beaten by a <b>bigger</b> sibling forfeits its own EP, but
+          one that merely <b>ties</b> and loses on list order costs nothing at all, because the same
+          EP is still awarded under the sibling's name.</p>
         <div id="dead"></div></section>
     </div>
 
@@ -2162,7 +2180,10 @@ function renderEconomy(ctx) {
     The <b>price law</b> is not assumed - the line is a least-squares fit of log EP against log earn-rate
     over all 230 badges, and it recovers slope -1 and constant 100 on its own. <b>Earn</b> and
     <b>score</b> counts both come from the live sweep: a badge is earned when its rule matches, and
-    scores only when it wins its family, so a rebalance would show up here immediately.
+    scores only when it wins its family, so a rebalance would show up here immediately. Ties inside a
+    family go to whichever badge is listed first, which is what rngdle's own scorer does - so a tied
+    pair always credits the same one of the two, and the other reads as never scoring even though the
+    EP is paid every time.
   </footer>
 </div>
 ${overlayHTML('Then re-running family supersession on every number to see which badges actually pay.')}`;
