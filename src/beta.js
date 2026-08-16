@@ -29,6 +29,12 @@ export const BETA_TOOLS = [
     note: 'WebGL2 - orbit, zoom, click to land on a number.',
   },
   {
+    slug: 'projections', title: 'Projections', kind: '2D',
+    blurb: 'The same million numbers laid out five different ways, morphing between ' +
+      'them - because the layout decides which structure you can see at all.',
+    note: 'WebGL2 point cloud; every layout computed in the vertex shader.',
+  },
+  {
     slug: 'spectrum', title: 'Badge Spectrum', kind: '2D',
     blurb: 'Every badge as a density stripe across the full range. Digit-length rules ' +
       'step at each power of ten, modular rules band, exact badges are one lit pixel.',
@@ -236,6 +242,10 @@ const THUMBS = {
     <circle cx="28" cy="20" r="2.5"/><circle cx="34" cy="23" r="2.5"/><circle cx="41" cy="13" r="2.5"/>
     <circle cx="48" cy="16" r="2.5"/><circle cx="55" cy="7" r="2.5"/>
     <path d="M4 36 L60 4" stroke-dasharray="4 3" opacity=".5"/>`,
+  projections: `<rect x="4" y="6" width="24" height="28" rx="2" opacity=".85"/>
+    <path d="M8 10h16M8 16h16M8 22h16M8 28h16" opacity=".4"/>
+    <path d="M36 34c0-8 6-8 6-16s6-8 6-8" opacity=".9"/>
+    <path d="M36 20h8M48 26h8" opacity=".55"/><circle cx="58" cy="10" r="2"/>`,
   spectrum: `<path d="M4 8h56M4 14h56M4 20h56M4 26h56M4 32h56" stroke-dasharray="2 5" opacity=".9"/>
     <path d="M4 11h56M4 17h56M4 23h56M4 29h56" stroke-dasharray="7 3" opacity=".35"/>`,
   species: `<circle cx="14" cy="20" r="10" opacity=".9"/><circle cx="33" cy="20" r="6" opacity=".6"/>
@@ -1290,7 +1300,7 @@ void main() {
   // --- interaction -------------------------------------------------------
   let drag = null;
   cv.addEventListener('pointerdown', e => {
-    cv.setPointerCapture(e.pointerId);
+    try { cv.setPointerCapture(e.pointerId); } catch (err) { /* not an active pointer */ }
     drag = { x: e.clientX, y: e.clientY, moved: 0, pan: e.shiftKey || e.button === 1 };
   });
   cv.addEventListener('pointermove', e => {
@@ -3640,6 +3650,501 @@ const __W = ${JSON.stringify(workerSrc(speciesWorker))};
 }
 
 // ---------------------------------------------------------------------------
+// /beta/projections - the same million numbers, laid out five different ways.
+//
+// /grid puts number n at (n mod 1000, n / 1000). That is one choice out of many, and
+// the choice decides what you can see: a layout that puts numerically adjacent numbers
+// side by side shows last-digit rules and hides everything else, while one that nests
+// by digit pairs makes digit-pattern rules self-similar and obvious.
+//
+// So: draw all 1,000,000 as a point cloud and let the layout change under them, with a
+// real interpolation rather than a cut - watching where a highlighted set travels
+// between two layouts says more about the structure than either picture alone.
+//
+// Every layout is computed in the vertex shader from gl_VertexID, so there are no
+// position buffers at all and switching is a uniform change. Only the by-score layout
+// needs data (each number's rank), which arrives as a texture.
+// ---------------------------------------------------------------------------
+
+function projectionsWorker() {
+  self.onmessage = async ev => {
+    if (ev.data.cmd !== 'init') return;
+    try {
+      const swept = await betaSweep(ev.data.origin, 0.8);
+      const N = 1000000;
+      self.postMessage({ type: 'progress', pct: 0.85, msg: 'Ranking every number…' });
+      const ep = new Float64Array(N);
+      let max = 0;
+      for (let i = 0; i < N; i++) { ep[i] = swept.ep[i]; if (ep[i] > max) max = ep[i]; }
+      const cnt = new Uint8Array(N);
+      cnt.set(swept.cnt.subarray(0, N));
+
+      // rank[n] = where n sits in score order, and its inverse for hit-testing the
+      // by-score layout. Sorting an index array of a million is ~half a second once.
+      const order = new Uint32Array(N);
+      for (let i = 0; i < N; i++) order[i] = i;
+      const arr = Array.from(order).sort((a, b) => ep[a] - ep[b]);
+      const rank = new Uint32Array(N), byRank = new Uint32Array(N);
+      for (let r = 0; r < N; r++) { rank[arr[r]] = r; byRank[r] = arr[r]; }
+
+      self.postMessage({ type: 'ready', ep: ep.buffer, cnt: cnt.buffer, rank: rank.buffer,
+        byRank: byRank.buffer, max, N }, [ep.buffer, cnt.buffer, rank.buffer, byRank.buffer]);
+    } catch (e) {
+      self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
+    }
+  };
+}
+
+function projectionsClient(WORKER_SRC, TIERS) {
+  const $ = id => document.getElementById(id);
+  const cv = $('gl');
+  const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
+  if (!gl) {
+    $('ovhead').textContent = 'WebGL2 not available';
+    $('ovtext').textContent = 'This tool needs WebGL2. Everything else in the lab works without it.';
+    return;
+  }
+  const N = 1000000, SIDE = 1000;
+
+  let EP = null, CNT = null, RANK = null, BYRANK = null, MAXEP = 1;
+  let from = 0, to = 0, t = 1, animStart = 0, mode = 0, sel = -1;
+  const view = { x: 0.5, y: 0.5, z: 1 };          // centre in layout space, plus zoom
+
+  // Layout ids must match the switch in the vertex shader.
+  const LAYOUTS = [
+    { id: 0, name: 'By value', hint: 'n across, n / 1000 down - the /grid layout. Adjacent numbers sit side by side, so last-digit and modular rules show as vertical banding.' },
+    { id: 1, name: 'By digits', hint: 'Nested decimal: the first two digits pick a 10x10 block, the next two a block inside that, the last two a cell. Digit-pattern rules become self-similar.' },
+    { id: 2, name: 'Hilbert', hint: 'A space-filling curve: numbers close in value stay close in both directions, not just along a row, so runs read as compact blobs instead of stripes.' },
+    { id: 3, name: 'Z-order', hint: 'Morton order - interleave the bits of the coordinates. Same idea as Hilbert but with jumps, which is exactly what the seams are.' },
+    { id: 4, name: 'By score', hint: 'Sorted by EP, lowest first. Position no longer means anything about the number, but the area each tier occupies is its exact share of the range.' },
+  ];
+
+  const VS = `#version 300 es
+precision highp float;
+precision highp int;
+uniform mat3 uM;              // layout space (0..1) -> clip
+uniform int uA, uB;           // layouts being interpolated
+uniform float uT;             // 0 = uA, 1 = uB
+uniform float uPt;
+uniform sampler2D uD;         // (normalised log EP, EP, badge count, rank)
+out vec4 vD;
+flat out int vN;
+
+ivec2 decimalNest(int n) {
+  return ivec2((n / 10000) % 10 * 100 + (n / 100) % 10 * 10 + n % 10,
+               (n / 100000) % 10 * 100 + (n / 1000) % 10 * 10 + (n / 10) % 10);
+}
+ivec2 morton(int d) {
+  int x = 0, y = 0;
+  for (int i = 0; i < 10; i++) {
+    x |= ((d >> (2 * i)) & 1) << i;
+    y |= ((d >> (2 * i + 1)) & 1) << i;
+  }
+  return ivec2(x, y);
+}
+ivec2 hilbert(int d) {
+  ivec2 p = ivec2(0);
+  int t = d;
+  for (int s = 1; s < 1024; s *= 2) {
+    int rx = 1 & (t / 2);
+    int ry = 1 & (t ^ rx);
+    if (ry == 0) {
+      if (rx == 1) { p = ivec2(s - 1 - p.x, s - 1 - p.y); }
+      p = p.yx;
+    }
+    p += s * ivec2(rx, ry);
+    t /= 4;
+  }
+  return p;
+}
+vec2 place(int kind, int n, float rank) {
+  if (kind == 0) return vec2(float(n % 1000), float(n / 1000)) / 1000.0;
+  if (kind == 1) return vec2(decimalNest(n)) / 1000.0;
+  if (kind == 2) return vec2(hilbert(n)) / 1024.0;
+  if (kind == 3) return vec2(morton(n)) / 1024.0;
+  int r = int(rank);
+  return vec2(float(r % 1000), float(r / 1000)) / 1000.0;
+}
+void main() {
+  int n = gl_VertexID;
+  vN = n;
+  vD = texelFetch(uD, ivec2(n % 1000, n / 1000), 0);
+  vec2 p = mix(place(uA, n, vD.a), place(uB, n, vD.a), uT);
+  vec3 c = uM * vec3(p, 1.0);
+  gl_Position = vec4(c.xy, 0.0, 1.0);
+  gl_PointSize = uPt;
+}`;
+
+  const FS = `#version 300 es
+precision highp float;
+precision highp int;
+in vec4 vD;
+flat in int vN;
+uniform vec3 uTier[7];
+uniform float uCut[6];
+uniform int uMode;            // 0 tier, 1 EP ramp, 2 badge count
+uniform float uMaxC;
+uniform int uSel;
+out vec4 o;
+vec3 ramp(float x) {
+  x = clamp(x, 0.0, 1.0);
+  vec3 a = vec3(.055,.067,.098), b = vec3(.10,.20,.38), c = vec3(.22,.50,.75),
+       d = vec3(.60,.79,.88), e = vec3(1.0,.96,.87);
+  return x < .25 ? mix(a, b, x / .25) : x < .5 ? mix(b, c, (x - .25) / .25)
+       : x < .75 ? mix(c, d, (x - .5) / .25) : mix(d, e, (x - .75) / .25);
+}
+void main() {
+  if (vN == uSel) { o = vec4(1.0, .62, .25, 1.0); return; }
+  vec3 col;
+  if (uMode == 0) { col = uTier[0]; for (int i = 0; i < 6; i++) if (vD.g >= uCut[i]) col = uTier[i + 1]; }
+  else if (uMode == 1) col = ramp(vD.r);
+  else col = ramp(vD.b / max(uMaxC, 1.0));
+  o = vec4(col, 1.0);
+}`;
+
+  function compile(src, type) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  let prog;
+  try {
+    prog = gl.createProgram();
+    gl.attachShader(prog, compile(VS, gl.VERTEX_SHADER));
+    gl.attachShader(prog, compile(FS, gl.FRAGMENT_SHADER));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  } catch (err) {
+    // This runs before betaBoot, so without this the overlay would sit there forever
+    // with nothing to read.
+    $('ovhead').textContent = 'Could not compile the shaders';
+    $('ovtext').textContent = String(err && err.message || err);
+    return;
+  }
+  const U = n => gl.getUniformLocation(prog, n);
+  const vao = gl.createVertexArray();
+
+  // --- CPU copies of the layouts, for hit-testing ------------------------
+  // Inverting the current layout is exact and costs nothing, which beats a picking
+  // pass here - the points are one pixel wide and a pass would only find exact hits
+  // anyway.
+  function place(layout, n) {
+    if (layout === 0) return [n % 1000, (n / 1000) | 0, 1000];
+    if (layout === 1) {
+      return [((n / 10000) | 0) % 10 * 100 + ((n / 100) | 0) % 10 * 10 + n % 10,
+        ((n / 100000) | 0) % 10 * 100 + ((n / 1000) | 0) % 10 * 10 + ((n / 10) | 0) % 10, 1000];
+    }
+    if (layout === 3) {
+      let x = 0, y = 0;
+      for (let i = 0; i < 10; i++) { x |= ((n >> (2 * i)) & 1) << i; y |= ((n >> (2 * i + 1)) & 1) << i; }
+      return [x, y, 1024];
+    }
+    if (layout === 2) {
+      let px = 0, py = 0, tt = n;
+      for (let s = 1; s < 1024; s *= 2) {
+        const rx = 1 & (tt >> 1), ry = 1 & (tt ^ rx);
+        if (ry === 0) {
+          if (rx === 1) { px = s - 1 - px; py = s - 1 - py; }
+          const tmp = px; px = py; py = tmp;
+        }
+        px += s * rx; py += s * ry;
+        tt = tt >> 2;
+      }
+      return [px, py, 1024];
+    }
+    const r = RANK[n];
+    return [r % 1000, (r / 1000) | 0, 1000];
+  }
+  // The inverse: cell -> number, for whichever layout is currently settled.
+  function unplace(layout, cx, cy) {
+    if (layout === 0) return cy * 1000 + cx;
+    if (layout === 1) {
+      const a = (cy / 100) | 0, b = (cx / 100) | 0, c = ((cy / 10) | 0) % 10,
+        d = ((cx / 10) | 0) % 10, e = cy % 10, f = cx % 10;
+      return a * 100000 + b * 10000 + c * 1000 + d * 100 + e * 10 + f;
+    }
+    if (layout === 3) {
+      let n = 0;
+      for (let i = 0; i < 10; i++) { n |= ((cx >> i) & 1) << (2 * i); n |= ((cy >> i) & 1) << (2 * i + 1); }
+      return n < N ? n : -1;
+    }
+    if (layout === 2) {
+      let rx, ry, d = 0, px = cx, py = cy;
+      for (let s = 512; s > 0; s = s >> 1) {
+        rx = (px & s) > 0 ? 1 : 0;
+        ry = (py & s) > 0 ? 1 : 0;
+        d += s * s * ((3 * rx) ^ ry);
+        if (ry === 0) {
+          if (rx === 1) { px = s - 1 - px; py = s - 1 - py; }
+          const tmp = px; px = py; py = tmp;
+        }
+      }
+      return d < N ? d : -1;
+    }
+    const r = cy * 1000 + cx;
+    return r < N ? BYRANK[r] : -1;
+  }
+
+  // --- render ------------------------------------------------------------
+  function matrix() {
+    // Layout space is 0..1; fit it square inside the canvas, then apply pan/zoom.
+    const asp = cv.width / cv.height;
+    const s = 2 * view.z / (asp > 1 ? 1 : 1);
+    const sx = (asp > 1 ? s / asp : s), sy = (asp > 1 ? s : s * asp);
+    return new Float32Array([
+      sx, 0, 0,
+      0, -sy, 0,
+      -sx * view.x, sy * view.y, 1,
+    ]);
+  }
+
+  let raf = 0;
+  function render() { if (!raf) raf = requestAnimationFrame(frame); }
+  function frame(now) {
+    raf = 0;
+    if (!EP) return;
+    if (t < 1) {
+      // Smoothstep, so the layouts ease apart and back together instead of sliding.
+      const p = Math.min(1, (now - animStart) / 900);
+      t = p * p * (3 - 2 * p);
+      if (p < 1) render(); else { t = 1; from = to; }
+    }
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.floor(cv.clientWidth * dpr), h = Math.floor(cv.clientHeight * dpr);
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    gl.viewport(0, 0, cv.width, cv.height);
+    gl.clearColor(0.031, 0.035, 0.047, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(prog);
+    gl.uniformMatrix3fv(U('uM'), false, matrix());
+    gl.uniform1i(U('uA'), from); gl.uniform1i(U('uB'), to);
+    gl.uniform1f(U('uT'), t);
+    gl.uniform1i(U('uMode'), mode);
+    gl.uniform1f(U('uMaxC'), 40);
+    gl.uniform1i(U('uSel'), sel);
+    // One device pixel per number at fit; bigger as you zoom in, so a single number
+    // stays findable rather than vanishing between samples.
+    const px = (Math.min(cv.width, cv.height) * view.z) / SIDE;
+    gl.uniform1f(U('uPt'), Math.max(1, px));
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.POINTS, 0, N);
+  }
+
+  // --- readout -----------------------------------------------------------
+  const fmt = n => n.toLocaleString();
+  const tierOf = ep => { let x = TIERS[0]; for (const y of TIERS) if (ep >= y.lo) x = y; return x; };
+  function show(n) {
+    const box = $('read');
+    if (n < 0) { box.classList.remove('on'); return; }
+    const tr = tierOf(EP[n]);
+    box.classList.add('on');
+    box.innerHTML = `<div class="rd-top"><span class="rd-n">${fmt(n)}</span>
+        <span class="pill" style="--tc:${tr.accent}">${tr.label}</span></div>
+      <div class="rd-row"><span>EP</span><b>${fmt(Math.round(EP[n]))}</b></div>
+      <div class="rd-row"><span>Badges</span><b>${CNT[n]}</b></div>
+      <div class="rd-row"><span>Score rank</span><b>${fmt(N - RANK[n])}</b></div>
+      <a class="rd-open" href="/?n=${n}">Open on the calculator &rarr;</a>`;
+  }
+
+  function cellAt(ev) {
+    if (t < 1) return -1;                          // mid-morph there is no cell to name
+    const r = cv.getBoundingClientRect();
+    const m = matrix();
+    // Undo the same transform the shader applies.
+    const ndcX = ((ev.clientX - r.left) / r.width) * 2 - 1;
+    const ndcY = 1 - ((ev.clientY - r.top) / r.height) * 2;
+    const lx = (ndcX - m[6]) / m[0], ly = (ndcY - m[7]) / m[4];
+    // Hilbert and Z-order fill a 1024 square; the other three a 1000 one.
+    const size = from === 2 || from === 3 ? 1024 : 1000;
+    const gx = Math.floor(lx * size), gy = Math.floor(ly * size);
+    if (gx < 0 || gy < 0 || gx >= size || gy >= size) return -1;
+    return unplace(from, gx, gy);
+  }
+
+  // --- interaction -------------------------------------------------------
+  let drag = null;
+  cv.addEventListener('pointerdown', e => {
+    try { cv.setPointerCapture(e.pointerId); } catch (err) { /* not an active pointer */ }
+    drag = { x: e.clientX, y: e.clientY, moved: 0 };
+  });
+  cv.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const r = cv.getBoundingClientRect();
+    const dx = (e.clientX - drag.x) / r.width, dy = (e.clientY - drag.y) / r.height;
+    drag.x = e.clientX; drag.y = e.clientY; drag.moved += Math.abs(dx) + Math.abs(dy);
+    view.x -= dx / view.z; view.y -= dy / view.z;
+    render();
+  });
+  cv.addEventListener('pointerup', e => {
+    const click = drag && drag.moved < 0.005;
+    drag = null;
+    if (!click) return;
+    sel = cellAt(e); show(sel); render();
+  });
+  cv.addEventListener('wheel', e => {
+    e.preventDefault();
+    const r = cv.getBoundingClientRect();
+    const before = cellPoint(e, r);
+    view.z = Math.max(0.9, Math.min(400, view.z * Math.exp(-e.deltaY * 0.0015)));
+    const after = cellPoint(e, r);
+    view.x += before[0] - after[0]; view.y += before[1] - after[1];
+    render();
+  }, { passive: false });
+  // Layout-space point under the cursor, used to keep it fixed while zooming.
+  function cellPoint(ev, r) {
+    const m = matrix();
+    const ndcX = ((ev.clientX - r.left) / r.width) * 2 - 1;
+    const ndcY = 1 - ((ev.clientY - r.top) / r.height) * 2;
+    return [(ndcX - m[6]) / m[0], (ndcY - m[7]) / m[4]];
+  }
+
+  function goto(id) {
+    if (id === to && t >= 1) return;
+    from = t < 1 ? from : to;
+    to = id; t = 0; animStart = performance.now();
+    sel = -1; show(-1);
+    [...document.querySelectorAll('#layouts button')].forEach(b =>
+      b.classList.toggle('on', Number(b.dataset.l) === id));
+    $('hint').textContent = LAYOUTS[id].hint;
+    render();
+  }
+
+  $('layouts').addEventListener('click', e => {
+    const b = e.target.closest('[data-l]');
+    if (b) goto(Number(b.dataset.l));
+  });
+  $('mode').addEventListener('change', e => { mode = Number(e.target.value); render(); });
+  $('fit').addEventListener('click', () => { view.x = view.y = 0.5; view.z = 1; render(); });
+  addEventListener('resize', render);
+
+  betaBoot(WORKER_SRC).then(({ data }) => {
+    EP = new Float64Array(data.ep); CNT = new Uint8Array(data.cnt);
+    RANK = new Uint32Array(data.rank); BYRANK = new Uint32Array(data.byRank);
+    MAXEP = data.max;
+
+    // One RGBA32F texture carries everything the shaders need per number: normalised
+    // log EP for the ramp, raw EP for the tier cut, badge count, and the score rank
+    // (which is a position, not a colour - it is what the by-score layout reads).
+    const tex = new Float32Array(N * 4);
+    const lg = Math.log10(1 + MAXEP);
+    for (let n = 0; n < N; n++) {
+      const k = n * 4;
+      tex[k] = Math.log10(1 + EP[n]) / lg;
+      tex[k + 1] = EP[n];
+      tex[k + 2] = CNT[n];
+      tex[k + 3] = RANK[n];
+    }
+    const T = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, T);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1000, 1000, 0, gl.RGBA, gl.FLOAT, tex);
+    gl.useProgram(prog);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(U('uD'), 0);
+    gl.uniform3fv(U('uTier'), new Float32Array(TIERS.flatMap(x => {
+      const h = x.accent.slice(1);
+      return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
+    })));
+    gl.uniform1fv(U('uCut'), new Float32Array(TIERS.slice(1).map(x => x.lo)));
+
+    $('hud').classList.add('on');
+    $('hint').textContent = LAYOUTS[0].hint;
+    render();
+  });
+}
+
+function renderProjections(ctx) {
+  const { CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE } = ctx;
+  const tiers = CARD_TIER_NAMES.map((key, i) => ({
+    label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
+    lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
+  }));
+  const names = ['By value', 'By digits', 'Hilbert', 'Z-order', 'By score'];
+
+  const css = `
+  body { -webkit-user-select:none; user-select:none; }
+  #gl { position:fixed; top:0; left:var(--rail-w); width:calc(100% - var(--rail-w)); height:100%;
+    display:block; cursor:grab; touch-action:none; }
+  #gl:active { cursor:grabbing; }
+  .glass { position:fixed; z-index:5; background:rgba(12,14,22,.86); border:1px solid rgba(255,255,255,.12);
+    border-radius:var(--r-card); backdrop-filter:blur(6px); }
+
+  #hud { top:12px; left:calc(var(--rail-w) + 12px); width:270px; padding:12px; display:none;
+    flex-direction:column; gap:.7rem; max-height:calc(100vh - 24px); overflow:auto; }
+  #hud.on { display:flex; }
+  #hud h1 { font-size:14px; font-weight:650; margin:0; }
+  #hud .sub { font-size:11.5px; color:var(--muted); line-height:1.5; }
+  #hud a.back { font-size:11.5px; color:var(--muted); text-decoration:none; }
+  #hud a.back:hover { color:var(--text); }
+  #layouts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px; }
+  #layouts button { padding:.42rem .5rem; font-size:12px; color:var(--dim);
+    background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.14); }
+  #layouts button:hover { background:rgba(255,255,255,.13); }
+  #layouts button.on { background:color-mix(in srgb, var(--hl) 22%, transparent); color:#f6dcc0;
+    border-color:color-mix(in srgb, var(--hl) 50%, transparent); }
+  #hint { font-size:11.5px; color:var(--dim); line-height:1.55; min-height:4.5em;
+    padding-top:.1rem; border-top:1px solid rgba(255,255,255,.1); }
+  .ctl { display:flex; flex-direction:column; gap:.25rem; }
+  .ctl > span { font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); font-weight:600; }
+  .ctl select { width:100%; font-size:12px; padding:.35rem .45rem; background:rgba(255,255,255,.06);
+    border-color:rgba(255,255,255,.14); }
+  #fit { font-size:12px; padding:.4rem .5rem; background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.14); }
+
+  #read { top:12px; right:12px; width:210px; padding:11px 12px; display:none; flex-direction:column; gap:.3rem; }
+  #read.on { display:flex; }
+  .rd-top { display:flex; align-items:center; justify-content:space-between; gap:.5rem; margin-bottom:.3rem; }
+  .rd-n { font-family:var(--mono); font-size:1.05rem; font-weight:600; letter-spacing:-.02em; }
+  .rd-row { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); }
+  .rd-row b { font-family:var(--mono); font-weight:600; color:var(--text); }
+  .rd-open { margin-top:.45rem; font-size:11.5px; text-decoration:none; }
+
+  #legend { bottom:12px; right:12px; padding:9px 12px; display:flex; flex-wrap:wrap; gap:.35rem .8rem;
+    max-width:min(420px, 60vw); font-size:11.5px; color:var(--dim); }
+  #legend i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:.35rem; }
+  #help { bottom:12px; left:calc(var(--rail-w) + 12px); padding:7px 11px; font-size:11.5px; color:var(--muted); }
+  #help b { color:var(--dim); font-weight:600; }
+  @media (max-width:760px) { #legend, #help { display:none; } #hud { width:220px; } }`;
+
+  const legend = tiers.slice().reverse().map(t =>
+    `<span><i style="background:${t.accent}"></i>${t.label}</span>`).join('');
+
+  const body = `<canvas id="gl"></canvas>
+<div id="hud" class="glass">
+  <div>
+    <h1>Projections <span class="beta-tag">beta</span></h1>
+    <div class="sub">All 1,000,000 numbers, laid out five ways. The layout changes under them,
+      so you can watch where a set of numbers travels.</div>
+    <a class="back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <div id="layouts">${names.map((n, i) =>
+    `<button type="button" data-l="${i}"${i === 0 ? ' class="on"' : ''}>${n}</button>`).join('')}</div>
+  <div id="hint"></div>
+  <label class="ctl"><span>Colour</span>
+    <select id="mode">
+      <option value="0">Card tier</option>
+      <option value="1">EP</option>
+      <option value="2">Badges earned</option>
+    </select></label>
+  <button type="button" id="fit">Fit</button>
+</div>
+<div id="read" class="glass"></div>
+<div id="legend" class="glass">${legend}</div>
+<div id="help" class="glass"><b>Drag</b> to pan · <b>Wheel</b> to zoom · <b>Click</b> a point to read it</div>
+${overlayHTML('Then ranking every number so the by-score layout has somewhere to put them.')}`;
+
+  const script = `${BETA_BOOT_JS}
+const __W = ${JSON.stringify(workerSrc(projectionsWorker))};
+(${projectionsClient.toString()})(__W, ${JSON.stringify(tiers)});`;
+
+  return betaShell({
+    title: 'RNGdle - Projections', slug: 'projections', full: true, css, body, script,
+    viewport: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no',
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
 
@@ -3669,4 +4174,5 @@ const RENDERERS = {
   luck: renderLuck,
   collector: renderCollector,
   species: renderSpecies,
+  projections: renderProjections,
 };
