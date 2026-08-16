@@ -342,6 +342,8 @@ const FINDINGS = [
     'next 15% - which is why the EP thresholds themselves look so arbitrary.', 'luck'],
   ['Supersession quietly destroys 6.3% of all EP', 'a third of it inside the Power family alone, ' +
     'and two badges are outranked on every single number that earns them.', 'economy'],
+  ['A rare number is not one that collected more badges', 'it is one that collected a single rare ' +
+    'badge. That badge is 16% of a trash score and 81% of a mythic one.', 'economy'],
 ];
 
 export function renderBetaIndex() {
