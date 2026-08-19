@@ -2768,7 +2768,10 @@ const __WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + analysisWorker.toS
 function gridWorker() {
   let E = null, origin = '';
   let counts = null, bits = null, epArr = null, ROW = 0, cmin = 0, cmax = 0, emin = 0, emax = 0;
-  const N = 1000000;                    // the grid is a 1000x1000 canvas: 0..999,999 only
+  // How many numbers this sweep covers, set by the 'compute' message: 1,000,000 for the
+  // standard 1000x1000 canvas (0..999,999) or 10,000,000 for the extended 10000x1000 one
+  // (0..9,999,999). Both drop the round top value, as the square grid always has.
+  let N = 1000000;
 
   // Membership of a single badge index: which numbers earn it (1) or not (0).
   function membership(idx) {
@@ -2805,16 +2808,31 @@ function gridWorker() {
       }
       if (msg.cmd !== 'compute') return;
       origin = msg.origin;
+      N = msg.n || 1000000;
       if (!E) E = await import(origin + '/engine.js');
       self.postMessage({ type: 'meta', badges: E.BADGE_META });
 
-      // Shared sweep (engine.js): per-number badge count, total EP and the packed
-      // earned-badge bitmask, cached once for this page, / and /chains alike. It covers
-      // 0..1,000,000; the grid canvas is 1000x1000, so take the first 1,000,000 only.
-      const swept = await E.sweepShared(origin, pct => self.postMessage({ type: 'progress', pct }), msg.force);
-      counts = swept.cnt.subarray(0, N);
-      epArr = swept.ep.subarray(0, N);
-      bits = swept.bits.subarray(0, N * swept.ROW);
+      const onPct = pct => self.postMessage({ type: 'progress', pct });
+      let swept;
+      if (N > 1000000) {
+        // Extended range: sweep it directly and deliberately do NOT go through
+        // sweepShared. The arrays come to ~360MB, which is far past what IndexedDB will
+        // hold, and attempting to store them risks evicting the 1M entry that /, /chains
+        // and the /beta tools all read - making every other page slow to serve a mode
+        // the visitor may never open again. So it lives in this worker for the session
+        // and dies with the page. Badge switches stay instant meanwhile, because `bits`
+        // stays resident here exactly as in the cached path.
+        swept = await E.sweepAll(origin + '/engine.js', 0, N - 1, 0, onPct);
+        counts = swept.cnt; epArr = swept.ep; bits = swept.bits;
+      } else {
+        // Shared sweep (engine.js): per-number badge count, total EP and the packed
+        // earned-badge bitmask, cached once for this page, / and /chains alike. It covers
+        // 0..1,000,000; the grid canvas is 1000x1000, so take the first 1,000,000 only.
+        swept = await E.sweepShared(origin, onPct, msg.force);
+        counts = swept.cnt.subarray(0, N);
+        epArr = swept.ep.subarray(0, N);
+        bits = swept.bits.subarray(0, N * swept.ROW);
+      }
       ROW = swept.ROW;
 
       // Derived rather than stored - a single 1M pass costs a few ms.
@@ -2836,8 +2854,12 @@ function gridWorker() {
   };
 }
 
-function gridClient(WORKER_SRC, LABELS, DOMS) {
-  const SIZE = 1000;
+function gridClient(WORKER_SRC, LABELS, DOMS, EXT) {
+  // Layout: number n sits at (n % GW, floor(n / GW)), so x is the low digits and y the
+  // high ones. GH stays 1000 in both modes - only the x extent changes, which keeps the
+  // y axis meaning the same thing and every horizontal band comparable between them.
+  const GW = EXT ? 10000 : 1000, GH = 1000, TOTAL = GW * GH;
+  const LEGAL_MAX = 1000000;       // the live roll range, and all the calculator accepts
   const cv = document.getElementById('grid');
   const ctx = cv.getContext('2d');
   const tip = document.getElementById('tip');
@@ -2902,14 +2924,14 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
 
   function grayCanvas(paint) {
     const cnv = document.createElement('canvas');
-    cnv.width = SIZE; cnv.height = SIZE;
+    cnv.width = GW; cnv.height = GH;
     paint(cnv.getContext('2d'));
     return cnv;
   }
   function buildCount() {
     const L = buildLUT();
     countCanvas = grayCanvas(sctx => {
-      const img = sctx.createImageData(SIZE, SIZE), d = img.data;
+      const img = sctx.createImageData(GW, GH), d = img.data;
       for (let i = 0; i < counts.length; i++) {
         const t = cmax === cmin ? 0 : (counts[i] - cmin) / (cmax - cmin);
         const q = ((t * 255 + 0.5) | 0) * 3, p = i << 2;
@@ -2926,7 +2948,7 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
     const df = supMode === 'black' ? 0 : 0.3;
     const dr = (lr + (hr - lr) * df) | 0, dg = (lg + (hg - lg) * df) | 0, db = (lb + (hb - lb) * df) | 0;
     return grayCanvas(sctx => {
-      const img = sctx.createImageData(SIZE, SIZE), d = img.data;
+      const img = sctx.createImageData(GW, GH), d = img.data;
       for (let i = 0; i < m.length; i++) {
         const p = i << 2;
         if (m[i]) {
@@ -2942,7 +2964,7 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
   function buildEP() {
     const L = buildLUT(), lo = Math.log(emin + 1), span = (Math.log(emax + 1) - lo) || 1;
     epCanvas = grayCanvas(sctx => {
-      const img = sctx.createImageData(SIZE, SIZE), d = img.data;
+      const img = sctx.createImageData(GW, GH), d = img.data;
       for (let i = 0; i < epArr.length; i++) {
         const t = (Math.log(epArr[i] + 1) - lo) / span, q = ((t * 255 + 0.5) | 0) * 3, p = i << 2;
         d[p] = L[q]; d[p + 1] = L[q + 1]; d[p + 2] = L[q + 2]; d[p + 3] = 255;
@@ -2964,13 +2986,13 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
     cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr);
   }
   function fit() {
-    minScale = Math.min(cw / SIZE, ch / SIZE);
+    minScale = Math.min(cw / GW, ch / GH);
     scale = minScale;
-    ox = (cw - SIZE * scale) / 2;
-    oy = (ch - SIZE * scale) / 2;
+    ox = (cw - GW * scale) / 2;
+    oy = (ch - GH * scale) / 2;
   }
   function clampPan() {
-    const w = SIZE * scale, h = SIZE * scale;
+    const w = GW * scale, h = GH * scale;
     // Let the grid be dragged until an edge reaches the window centre (not just the
     // viewport edge), so corners are easy to reach when zoomed in.
     ox = w <= cw ? (cw - w) / 2 : Math.min(cw / 2, Math.max(cw / 2 - w, ox));
@@ -2983,12 +3005,12 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#08090c';
     ctx.fillRect(0, 0, cw, ch);
-    ctx.drawImage(src, ox, oy, SIZE * scale, SIZE * scale);
+    ctx.drawImage(src, ox, oy, GW * scale, GH * scale);
   }
   function numberAt(mx, my) {
     const sx = Math.floor((mx - ox) / scale), sy = Math.floor((my - oy) / scale);
-    if (sx < 0 || sy < 0 || sx >= SIZE || sy >= SIZE) return null;
-    return { x: sx, y: sy, n: sy * SIZE + sx };
+    if (sx < 0 || sy < 0 || sx >= GW || sy >= GH) return null;
+    return { x: sx, y: sy, n: sy * GW + sx };
   }
   function zoomAt(mx, my, factor) {
     const ns = Math.min(maxScale, Math.max(minScale, scale * factor));
@@ -3017,7 +3039,7 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
       let cnt = 0; if (member) for (let i = 0; i < member.length; i++) cnt += member[i];
       let sc = 0; if (sup) for (let i = 0; i < sup.length; i++) sc += sup[i];
       titleEl.textContent = member
-        ? (view + ' - ' + cnt.toLocaleString() + ' / 1,000,000 (' + fmtPct(cnt / 1e6 * 100) + ')' + (sup ? ' · ' + sc.toLocaleString() + ' superseded' : ''))
+        ? (view + ' - ' + cnt.toLocaleString() + ' / ' + TOTAL.toLocaleString() + ' (' + fmtPct(cnt / TOTAL * 100) + ')' + (sup ? ' · ' + sc.toLocaleString() + ' superseded' : ''))
         : (view + ' …');
       const hi = cmap(1), lo = cmap(0);
       const hc = 'rgb(' + (hi[0] | 0) + ',' + (hi[1] | 0) + ',' + (hi[2] | 0) + ')';
@@ -3167,10 +3189,11 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
         else if (member && member[hit.n]) { detail = 'earns ' + view + (sup && sup[hit.n] ? ' (superseded)' : ''); }
         else { detail = 'no ' + view; }
         tip.style.display = 'block';
-        tip.innerHTML = '<b>' + hit.n.toLocaleString() + '</b><span>' + detail + ' - click to open</span>';
+        tip.innerHTML = '<b>' + hit.n.toLocaleString() + '</b><span>' + detail +
+          (hit.n <= LEGAL_MAX ? ' - click to open' : ' - not a legal roll') + '</span>';
         tip.style.left = Math.min(cw - 160, x + 16) + 'px';
         tip.style.top = Math.min(ch - 44, y + 16) + 'px';
-        cv.style.cursor = 'pointer';
+        cv.style.cursor = hit.n <= LEGAL_MAX ? 'pointer' : 'not-allowed';
       } else { tip.style.display = 'none'; cv.style.cursor = 'grab'; }
     }
   });
@@ -3181,7 +3204,13 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
       const p = [...pointers.values()][0]; lx = p.x; ly = p.y; pinch = null; moved = 999;
     } else if (pointers.size === 0) {
       pinch = null;
-      if (had && moved < 5) { const [x, y] = rel(e); const hit = numberAt(x, y); if (hit) location.href = '/?n=' + hit.n; }
+      if (had && moved < 5) {
+        const [x, y] = rel(e); const hit = numberAt(x, y);
+        // The calculator only accepts the live roll range, so above it the click has
+        // nowhere to go. Say why rather than handing over a number it will reject.
+        if (hit && hit.n <= LEGAL_MAX) location.href = '/?n=' + hit.n;
+        else if (hit) flash(hit.n.toLocaleString() + ' is past the 1,000,000 roll limit');
+      }
     }
   }
   cv.addEventListener('pointerup', endPointer);
@@ -3206,6 +3235,14 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
   document.getElementById('zin').onclick = () => zoomAt(cw / 2, ch / 2, 1.5);
   document.getElementById('zout').onclick = () => zoomAt(cw / 2, ch / 2, 1 / 1.5);
   document.getElementById('zreset').onclick = () => { fit(); render(); };
+  // Switching range reloads rather than re-initialising in place: it frees the extended
+  // sweep's ~360MB, rebuilds the worker and every cached canvas at the new size, and puts
+  // the mode in the URL so the view stays shareable. The selected view (hash) survives.
+  document.getElementById('rangebtn').onclick = () => {
+    const u = new URL(location.href);
+    if (EXT) u.searchParams.delete('r'); else u.searchParams.set('r', '10m');
+    location.href = u.toString();
+  };
   document.getElementById('zlink').onclick = async () => {
     try { await navigator.clipboard.writeText(location.href); flash('Link copied'); }
     catch (_) { flash('Copy failed'); }
@@ -3262,7 +3299,7 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
   let konamiPos = 0;
   let life = null;                 // { cur, nxt, gen, timer, canvas, img }
   function lifeSeed() {
-    const N = SIZE * SIZE, a = new Uint8Array(N);
+    const N = TOTAL, a = new Uint8Array(N);
     if (view === 'count' && counts) {
       const mid = (cmin + cmax) / 2;
       for (let i = 0; i < N; i++) a[i] = counts[i] > mid ? 1 : 0;
@@ -3291,11 +3328,13 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
     render();
   }
   function stepLife() {
-    const cur = life.cur, nxt = life.nxt, S = SIZE;
-    for (let y = 0; y < S; y++) {
-      const row = y * S, up = (y === 0 ? S - 1 : y - 1) * S, dn = (y === S - 1 ? 0 : y + 1) * S;
-      for (let x = 0; x < S; x++) {
-        const l = x === 0 ? S - 1 : x - 1, r = x === S - 1 ? 0 : x + 1;
+    // Wraps as a torus, so the two axes have to be tracked separately - they are only
+    // the same length in the 1000x1000 mode.
+    const cur = life.cur, nxt = life.nxt, W = GW, H = GH;
+    for (let y = 0; y < H; y++) {
+      const row = y * W, up = (y === 0 ? H - 1 : y - 1) * W, dn = (y === H - 1 ? 0 : y + 1) * W;
+      for (let x = 0; x < W; x++) {
+        const l = x === 0 ? W - 1 : x - 1, r = x === W - 1 ? 0 : x + 1;
         const nb = cur[up + l] + cur[up + x] + cur[up + r] + cur[row + l] + cur[row + r] + cur[dn + l] + cur[dn + x] + cur[dn + r];
         nxt[row + x] = (nb === 3 || (nb === 2 && cur[row + x])) ? 1 : 0;
       }
@@ -3310,9 +3349,9 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
     const seed = lifeSeed();
     if (!seed) { flash('Still building the grid…'); return; }
     const canvas = document.createElement('canvas');
-    canvas.width = SIZE; canvas.height = SIZE;
+    canvas.width = GW; canvas.height = GH;
     life = { cur: seed, nxt: new Uint8Array(seed.length), gen: 0, timer: 0,
-      canvas: canvas, img: canvas.getContext('2d').createImageData(SIZE, SIZE) };
+      canvas: canvas, img: canvas.getContext('2d').createImageData(GW, GH) };
     paintLife();
     life.timer = setInterval(stepLife, 100);
     flash("Conway's Game of Life - Esc to stop");
@@ -3332,7 +3371,7 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
     if (m.type === 'progress') {
       const pct = Math.round(m.pct * 100);
       bar.style.width = pct + '%';
-      ovtext.textContent = 'Scoring ' + pct + '% of 1,000,000 numbers…';
+      ovtext.textContent = 'Scoring ' + pct + '% of ' + TOTAL.toLocaleString() + ' numbers…';
     } else if (m.type === 'done') {
       counts = new Uint8Array(m.counts); cmin = m.min; cmax = m.max;
       epArr = new Float64Array(m.ep); emin = m.emin; emax = m.emax;
@@ -3358,10 +3397,10 @@ function gridClient(WORKER_SRC, LABELS, DOMS) {
     }
   };
   worker.onerror = e => { ovtext.textContent = 'Worker error: ' + (e.message || e); };
-  worker.postMessage({ cmd: 'compute', origin: location.origin });
+  worker.postMessage({ cmd: 'compute', origin: location.origin, n: TOTAL });
 }
 
-function renderGrid() {
+function renderGrid(ext) {
   const labels = JSON.stringify(BADGES.map(b => b[1]));
   // Per-badge dominator lists for the "Hide superseded" toggle: doms[i] = badge indices
   // in i's family that win supersession over i when co-earned (higher EP, or equal EP
@@ -3405,7 +3444,7 @@ function renderGrid() {
     #side { left: calc(var(--rail-w) + 10px); right: 10px; width: auto; max-width: none;
       top: 10px; bottom: 10px; padding: 14px; gap: 12px; }
     #search { padding: 11px 12px; font-size: 15px; }
-    #supbtn { padding: 10px 12px; font-size: 14px; }
+    #supbtn, #rangebtn { padding: 10px 12px; font-size: 14px; }
     #supmode button { padding: 0 10px; font-size: 13px; }
     .item { padding: 11px 10px; font-size: 14px; }
     #ctrls { gap: 8px; padding: 7px; }
@@ -3420,7 +3459,19 @@ function renderGrid() {
   #side .credit b { color: var(--accent); font-weight: 600; }
   #side .hint-text { font-size: 12px; color: var(--muted); }
   #vtitle { font-size: 12px; color: #cfd3df; min-height: 16px; }
-  #suprow { display: flex; gap: 6px; align-items: stretch; }
+  #suprow, #rangerow { display: flex; gap: 6px; align-items: stretch; }
+  /* Styled as #supbtn's sibling: same control, different axis (how much is swept
+     rather than how it is drawn), so it reads as one family of grid settings. */
+  #rangebtn { flex: 1; min-width: 0; display: inline-flex; align-items: center;
+    justify-content: flex-start; gap: 8px; padding: 7px 10px;
+    font-size: 12.5px; font-weight: 500; text-align: left; color: var(--dim);
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); }
+  #rangebtn:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.14); }
+  #rangebtn .dot { flex: 0 0 auto; width: 12px; height: 12px; border-radius: 3px;
+    border: 1px solid rgba(255,255,255,.35); }
+  #rangebtn.on { background: color-mix(in srgb, var(--hl) 18%, transparent); color: #f6dcc0;
+    border-color: color-mix(in srgb, var(--hl) 45%, transparent); }
+  #rangebtn.on .dot { background: var(--hl); border-color: var(--hl); }
   #supbtn { flex: 1; min-width: 0; justify-content: flex-start; gap: 8px; padding: 7px 10px;
     font-size: 12.5px; font-weight: 500; text-align: left; color: var(--dim);
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); }
@@ -3478,9 +3529,15 @@ function renderGrid() {
   const body = `<canvas id="grid"></canvas>
 <button id="sideshow" class="glass" title="Show panel" aria-label="Show panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>
 <div id="side" class="glass">
-  <div class="sidehead"><h1>All 1,000,000 numbers</h1><button id="sidehide" title="Hide panel" aria-label="Hide panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button></div>
+  <div class="sidehead"><h1>All ${ext ? '10,000,000' : '1,000,000'} numbers</h1><button id="sidehide" title="Hide panel" aria-label="Hide panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button></div>
   <div class="credit">Heavily inspired by <b>basiliotornado</b></div>
   <div id="vtitle">All numbers - badge count</div>
+  <div id="rangerow">
+    <button id="rangebtn"${ext ? ' class="on"' : ''} title="${ext
+      ? 'Back to the live roll range on a 1000x1000 grid - cached, so it reopens instantly.'
+      : 'Score every number up to 10,000,000 instead of 1,000,000, on a 10000x1000 grid. Roughly 360MB in memory and a far longer sweep, and it is deliberately not cached - it runs again on every reload. Numbers above 1,000,000 are not legal rolls.'}"><span class="dot"></span>${
+      ext ? 'Back to 1,000,000' : 'Extend to 10,000,000'}</button>
+  </div>
   <div id="suprow">
     <button id="supbtn" disabled title="Darken numbers where a higher badge in the same family supersedes the selected badge (it still shows as earned but scores 0 there)"><span class="dot"></span>Hide superseded badges</button>
     <div id="supmode" title="Grey keeps superseded numbers faintly visible; black hides them entirely"><button id="supgrey" class="on" disabled>grey</button><button id="supblack" disabled>black</button></div>
@@ -3506,13 +3563,13 @@ function renderGrid() {
 <div id="ov">
   <h2>Building the grid…</h2>
   <div id="track" class="progress"><i id="bar"></i></div>
-  <div id="ovtext">Scoring 1,000,000 numbers (one-time; cached after)…</div>
+  <div id="ovtext">Scoring ${ext ? '10,000,000 numbers (not cached - this runs again on reload)' : '1,000,000 numbers (one-time; cached after)'}…</div>
 </div>`;
 
   const script = `
 var __name = (f) => f;
 const __GRID_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + gridWorker.toString() + ')()')};
-(${gridClient.toString()})(__GRID_WORKER_SRC, ${labels}, ${JSON.stringify(doms)});`;
+(${gridClient.toString()})(__GRID_WORKER_SRC, ${labels}, ${JSON.stringify(doms)}, ${ext ? 'true' : 'false'});`;
 
   return pageShell({
     title: 'RNGdle - Number Grid', nav: 'grid', full: true, noindex: true, css, body, script,
@@ -5512,7 +5569,7 @@ export default {
 
     // Hidden interactive 1,000,000-number map; click a cell to open it on /.
     if (url.pathname === '/grid') {
-      return new Response(renderGrid(), {
+      return new Response(renderGrid(url.searchParams.get('r') === '10m'), {
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
     }
