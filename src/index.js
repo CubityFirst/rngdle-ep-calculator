@@ -26,6 +26,9 @@ import { pageShell } from './ui.js';
 // the same client-side sweep as everything else; betaCtx() below is the one hand-off.
 import { handleBeta } from './beta.js';
 
+// Palette gallery for /beta/boxes - the only route that reads or writes storage.
+import { handleGallery, handleMyLikes } from './gallery.js';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -5512,7 +5515,7 @@ function betaCtx() {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     const raw = url.searchParams.get('n');
 
@@ -5533,6 +5536,13 @@ export default {
         },
       });
     }
+
+    // Shared palette gallery (POST to publish, GET to browse). Answers 503 rather
+    // than 500 when no D1 binding is present, so a deployment without one still
+    // serves every other route normally.
+    const gallery = await handleGallery(url, request, env)
+      || await handleMyLikes(url, request, env);
+    if (gallery) return gallery;
 
     if (url.pathname === '/api') {
       const n = parseN(raw);
