@@ -8,20 +8,18 @@ compatibility_date = "2025-01-01"
 pattern = "rng.cubityfir.st"
 custom_domain = true
 
-# Palette gallery for /beta/boxes (src/gallery.js). `wrangler dev` provisions a local
-# D1 from this binding on its own - seed it once with
-#   npx wrangler d1 execute rngdle --file=schema.sql --local
+# Palette gallery for /beta/boxes (src/gallery.js). Created 2026-08-19 in WEUR.
+# Schema lives in schema.sql and is applied per environment:
+#   npx wrangler d1 execute rngdle --file=schema.sql --local    # the wrangler dev db
+#   npx wrangler d1 execute rngdle --file=schema.sql --remote   # this database
 #
-# database_id below is a placeholder that is fine for local dev but NOT for deploy.
-# Before the gallery works in production, create the real database and paste its id:
-#   npx wrangler d1 create rngdle
-#   npx wrangler d1 execute rngdle --file=schema.sql --remote
-#   npx wrangler secret put IP_SALT       # salts the hashed submitter key
-#   npx wrangler secret put ADMIN_TOKEN   # enables DELETE /api/palettes/<id>
-#
-# Without a real id the deployed worker still serves every other route; the gallery
-# just answers 503 "not configured".
+# `wrangler dev` provisions its own local D1 from this binding, so local work never
+# touches the real one. Two secrets belong with it (`npx wrangler secret put`):
+#   IP_SALT      salts the hashed submitter key - without it the hash is guessable
+#                by anyone who can enumerate IP addresses
+#   ADMIN_TOKEN  enables DELETE /api/palettes/<id>; with no token set, nothing can
+#                be hidden through the API at all
 [[d1_databases]]
 binding = "DB"
 database_name = "rngdle"
-database_id = "local-placeholder-replace-with-wrangler-d1-create"
+database_id = "2ab6144c-0287-4cb0-9e6c-9e50bec4908a"
