@@ -76,7 +76,7 @@ function findChromium() {
 // --- the pages and what to poke on them ------------------------------------
 const PAGES = ['/', '/beta', '/beta/atlas', '/beta/projections', '/beta/spectrum', '/beta/contact',
   '/beta/pairs', '/beta/oracle', '/beta/nearmiss', '/beta/collection', '/beta/luck',
-  '/beta/collector', '/beta/anatomy', '/beta/economy', '/beta/species'];
+  '/beta/collector', '/beta/anatomy', '/beta/economy', '/beta/species', '/beta/boxes'];
 
 const INTERACTIONS = {
   // The calculator is not part of the lab, but it shares the badge renderer and the
@@ -128,6 +128,101 @@ const INTERACTIONS = {
       await p.waitForTimeout(900);
       return p.evaluate(() => `${document.querySelectorAll('.bn-b.bn-sup').length} superseded, ` +
         `${document.querySelector('.bn-ep')?.textContent}`);
+    }],
+  ],
+  // The Box Lab draws no data of its own - it restyles one number - so what is worth
+  // holding here is that every control still changes what is on screen, and that the
+  // gallery stays quiet on a dev server with no D1 binding.
+  '/beta/boxes': [
+    ['boxes render', async p => {
+      const m = await p.evaluate(() => ({
+        strips: document.querySelectorAll('.pv').length,
+        per: document.querySelector('.pv')?.children.length,
+        real: [...new Set([...document.querySelectorAll('.bx.real .bx-word')].map(e => e.textContent))],
+      }));
+      if (!m.strips) throw new Error('no preview strips');
+      if (m.per !== 7) throw new Error(`prod has 7 tiers, strip drew ${m.per}`);
+      if (m.real.length !== 1) throw new Error(`the number should land in exactly one tier, got ${m.real.join('/')}`);
+      return `${m.strips} strips x ${m.per}, lands in ${m.real[0]}`;
+    }],
+    ['theme swaps the tokens', async p => {
+      const before = await p.evaluate(() => getComputedStyle(document.querySelector('.pv')).backgroundColor);
+      await p.click('#theme button[data-v="light"]');
+      await p.waitForTimeout(150);
+      const after = await p.evaluate(() => getComputedStyle(document.querySelector('.pv')).backgroundColor);
+      if (before === after) throw new Error('light/dark painted the same background');
+      await p.click('#theme button[data-v="dark"]');
+      return `${before} -> ${after}`;
+    }],
+    ['style toggles add strips', async p => {
+      const n = await p.$$eval('.pv', e => e.length);
+      await p.click('.pick[data-k="halo"]');
+      await p.waitForTimeout(150);
+      const m = await p.$$eval('.pv', e => e.length);
+      if (m <= n) throw new Error(`turning a style on did not add a strip (${n} -> ${m})`);
+      return `${n} -> ${m} strips`;
+    }],
+    ['a number re-lands', async p => {
+      await p.fill('#n', '');
+      await p.type('#n', '999999');
+      await p.waitForTimeout(700);
+      const m = await p.evaluate(() => ({
+        read: document.getElementById('read').textContent.replace(/\s+/g, ' ').trim(),
+        n: document.querySelector('.bx-n')?.textContent,
+        real: document.querySelector('.bx.real .bx-word')?.textContent,
+      }));
+      if (m.n !== '999,999') throw new Error(`boxes show ${m.n}`);
+      if (!/EP/.test(m.read)) throw new Error('the readout never scored it');
+      return `${m.n} -> ${m.real}`;
+    }],
+    ['editing a tier reaches the boxes', async p => {
+      await p.click('#pal button[data-v="mine"]');
+      await p.waitForTimeout(150);
+      const row = (await p.$$('.edr')).pop();
+      await row.$eval('input[type="text"]', e => {
+        e.value = 'LEGENDARY';
+        e.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await p.waitForTimeout(200);
+      const words = await p.$$eval('.pv:first-of-type .bx-word', e => e.map(x => x.textContent));
+      if (!words.includes('LEGENDARY')) throw new Error(`renamed tier never appeared: ${words.join(', ')}`);
+      const css = await p.textContent('#ed-out');
+      if (!/--tier-legendary/.test(css)) throw new Error('the export did not pick up the new word');
+      await p.click('#ed-reset');
+      await p.click('#pal button[data-v="prod"]');
+      return words.join(' ');
+    }],
+    ['add and remove a tier', async p => {
+      await p.click('#pal button[data-v="mine"]');
+      const before = await p.$eval('.pv', e => e.children.length);
+      await p.click('#ed-add');
+      await p.waitForTimeout(150);
+      const added = await p.$eval('.pv', e => e.children.length);
+      if (added !== before + 1) throw new Error(`add gave ${added}, wanted ${before + 1}`);
+      await (await p.$$('.edx')).pop().click();
+      await p.waitForTimeout(150);
+      const back = await p.$eval('.pv', e => e.children.length);
+      if (back !== before) throw new Error(`remove gave ${back}, wanted ${before}`);
+      await p.click('#pal button[data-v="prod"]');
+      return `${before} -> ${added} -> ${back}`;
+    }],
+    // Without a D1 binding the dev server has no gallery. That has to read as an
+    // explained empty state rather than a broken one - and, because this harness
+    // fails a page on any console error, it has to happen without a failed request.
+    ['gallery degrades quietly', async p => {
+      const msg = await p.textContent('#gal-msg');
+      const cards = await p.$$eval('.gc', e => e.length);
+      if (!msg.trim()) throw new Error('empty gallery said nothing at all');
+      if (cards) throw new Error(`${cards} cards with no database`);
+      return msg.slice(0, 44);
+    }],
+    ['publish needs a name', async p => {
+      await p.fill('#pub-name', '');
+      await p.click('#pub-go');
+      await p.waitForTimeout(150);
+      const msg = await p.textContent('#pub-msg');
+      if (!/name/i.test(msg)) throw new Error(`expected a naming complaint, got "${msg}"`);
+      return msg;
     }],
   ],
   '/beta/pairs': [

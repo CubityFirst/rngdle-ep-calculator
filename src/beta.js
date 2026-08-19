@@ -77,6 +77,12 @@ export const BETA_TOOLS = [
     note: 'The one tool here that needs no sweep - it loads instantly.',
   },
   {
+    slug: 'boxes', see: ['collection', 'luck'], title: 'Box Lab', kind: 'Design',
+    blurb: 'Every coloured box rngdle.com knows how to draw, with your number in all of ' +
+      'them at once - then the same boxes in words and colours of your own.',
+    note: 'Tier colours, keyframes and card recipes read out of the live stylesheet.',
+  },
+  {
     slug: 'luck', see: ['collector', 'species'], title: 'Luck Lab', kind: 'Odds',
     blurb: 'What a roll is worth before you make it. Exact tier odds, what your best ' +
       'should look like after N rolls, and how lucky a real player actually got.',
@@ -5767,6 +5773,788 @@ function renderCollection(ctx) {
 }
 
 // ---------------------------------------------------------------------------
+// Box Lab
+//
+// rngdle.com paints a roll into a set of styled boxes, and that styling is not in
+// the JS bundle we already mine for badge rules - it is a Tailwind v4 stylesheet
+// with a hand-written token layer on top. The constants below are read straight
+// out of it (/_next/static/chunks/40301e47118b0e38.css, fetched 2026-08-19).
+//
+// Two things there are worth a tool. First, prod's tier colours are theme-aware:
+// seven of them, written in oklch, with a whole second set swapped in under .dark
+// - which is why TIER_PALETTE in index.js (lifted from the older RARITY_PALETTE,
+// one fixed set) is not what the live site paints. Second, the box itself has
+// several recipes - a plain card, a holographic overlay, a five-colour halo, a
+// pulse - and none of them is guessable from the colour values alone.
+//
+// So: put one number in every box at once. The custom palette below that is the
+// point of the page - prod's seven words and seven colours are a starting guess,
+// not a fact, and this is where a different guess gets to look like something.
+// ---------------------------------------------------------------------------
+
+// Prod's seven tier colours, both themes. Each entry is [oklch, hex]: prod writes
+// oklch and the preview paints with it verbatim, but a colour input cannot seed
+// from oklch, so the sRGB equivalent rides along for the editor. (They are all
+// Tailwind palette stops - light is the 700-ish rung, dark the 300/400 rung.)
+const PROD_TIERS = [
+  { key: 'trash',    word: 'TRASH',
+    light: ['oklch(42.1% .095 57.708)',  '#733e0a'], dark: ['oklch(87.9% .169 91.605)',  '#ffd230'] },
+  { key: 'common',   word: 'COMMON',
+    light: ['oklch(44.6% .03 256.802)',  '#4a5565'], dark: ['oklch(87.2% .01 258.338)',  '#d1d5dc'] },
+  { key: 'uncommon', word: 'UNCOMMON',
+    light: ['oklch(52.7% .154 150.069)', '#008236'], dark: ['oklch(76.5% .177 163.223)', '#00d492'] },
+  { key: 'rare',     word: 'RARE',
+    light: ['oklch(48.8% .243 264.376)', '#1447e6'], dark: ['oklch(70.7% .165 254.624)', '#51a2ff'] },
+  { key: 'epic',     word: 'EPIC',
+    light: ['oklch(49.6% .265 301.924)', '#8200db'], dark: ['oklch(71.4% .203 305.504)', '#c27aff'] },
+  { key: 'anomaly',  word: 'ANOMALY',
+    light: ['oklch(55.3% .195 38.402)',  '#ca3500'], dark: ['oklch(75% .183 55.934)',    '#ff8904'] },
+  { key: 'mythic',   word: 'MYTHIC',
+    light: ['oklch(50.5% .213 27.518)',  '#c10007'], dark: ['oklch(70.4% .191 22.216)',  '#ff6467'] },
+];
+
+// --favorite-ring-*, the five colours of prod's halo. Declared once, with no .dark
+// override - they are exactly the dark-theme tier colours of the top five tiers,
+// so the halo is the same rainbow whichever theme is on.
+const PROD_RINGS = ['#ff6467', '#c27aff', '#51a2ff', '#00d492', '#ff8904'];
+
+// The stops --cta-ring-a/b walk through in prod's cta-rarity-cycle keyframes.
+const PROD_CTA = ['#ec4899', '#a855f7', '#3b82f6', '#10b981', '#f97316'];
+
+// Prod's surface/ink tokens for both themes, so the preview strip sits on the
+// right ground - a box only reads correctly against the background it ships on.
+const PROD_SURFACES = {
+  light: { bg: '#fafafa', surface: '#ffffff', dim: '#f9fafb', raised: '#f3f4f6',
+           outline: '#e5e7eb', mid: '#d1d5db', strong: '#9ca3af',
+           prose: '#111827', prose2: '#4b5563', prose3: '#9ca3af' },
+  dark:  { bg: '#111017', surface: '#242229', dim: '#1a1820', raised: '#312f37',
+           outline: '#47454d', mid: '#525159', strong: '#63616a',
+           prose: '#f0f0f0', prose2: '#c4c4c4', prose3: '#9a9a9a' },
+};
+
+// The box recipes. src:'prod' means the rule is prod's, transcribed; src:'lab'
+// means prod ships the ingredient but not this box, so it is a suggestion. Keeping
+// the two apart matters - half the point of the page is knowing which is which.
+const BOX_STYLES = [
+  { key: 'card', name: 'Card', src: 'prod', on: true,
+    note: 'prod .polished-card: 1px --outline, --surface fill, 8px radius, a soft 1px/3px shadow. ' +
+      'Note what the tier colour does not do here - the box stays neutral and the colour lands only ' +
+      'on the word, which is the one thing prod emits a .text-tier-* utility for.' },
+  { key: 'tint', name: 'Tinted', src: 'lab', on: true,
+    note: 'The same card with the tier colour mixed 55% into the border and 8% into the fill. Prod ' +
+      'has the tokens for this and never does it.' },
+  { key: 'ring', name: 'Ring', src: 'lab', on: true,
+    note: 'Tier colour as a glow ring rather than a fill - the shape of prod&rsquo;s --favorite-ring-* ' +
+      'treatment, but keyed to one tier instead of all five at once.' },
+  { key: 'holo', name: 'Holographic', src: 'prod', on: true,
+    note: 'prod .card-holographic-overlay: a ten-stop 125&deg; rainbow at 200% size, mix-blend-mode ' +
+      'overlay, drifting on an 8s loop. Prod runs it at 3-5% alpha, which is very nearly invisible - ' +
+      'switch to Amplify to see the thing you are looking at.' },
+  { key: 'halo', name: 'Rainbow halo', src: 'prod', on: false,
+    note: 'prod .favorite-badge-empty-attention: five offset coloured shadows at ~42% each, held at ' +
+      '16% opacity and breathing to 42% once every 10s. It ignores the tier entirely - every box gets ' +
+      'the same rainbow.' },
+  { key: 'glow', name: 'Pulse', src: 'lab', on: false,
+    note: 'prod&rsquo;s signup-glow keyframes - a 2s box-shadow breath, hard-coded orange there - ' +
+      're-pointed at the tier colour.' },
+  { key: 'shimmer', name: 'Shimmer', src: 'lab', on: false,
+    note: 'prod&rsquo;s shimmer keyframes, a background sweeping 200% to -200%, clipped to the digits ' +
+      'instead of to a skeleton block.' },
+  { key: 'cycle', name: 'Rarity cycle', src: 'prod', on: false,
+    note: 'prod cta-rarity-cycle: two custom properties walking pink &rarr; purple &rarr; blue &rarr; ' +
+      'green &rarr; orange on a loop. Tier-blind by design - it is what a box does when it means ' +
+      '&ldquo;any rarity&rdquo;, not one.' },
+];
+
+function renderBoxes(ctx) {
+  const { CARD_TIERS, CARD_TIER_NAMES } = ctx;
+  // Prod's tier list is index-aligned with ours, so the EP floors come from the same
+  // CARD_TIERS the calculator card uses - which is what makes the number mean anything
+  // here: it lands in exactly one of these boxes for real.
+  const tiers = PROD_TIERS.map((t, i) => ({ ...t, lo: i === 0 ? 0 : CARD_TIERS[i - 1][0] }));
+  const aligned = CARD_TIER_NAMES.join(',') === PROD_TIERS.map(t => t.key).join(',');
+
+  const css = `
+  p.tag { margin:0 0 1.4rem; }
+  .small { font-size:.8rem; line-height:1.6; color:var(--muted); }
+  .card { margin-bottom:.9rem; }
+
+  /* --- controls --- */
+  .bar { display:flex; flex-wrap:wrap; align-items:flex-end; gap:.9rem 1.2rem; }
+  .bar .fld { display:flex; flex-direction:column; gap:.3rem; }
+  .bar label { font-size:.7rem; letter-spacing:.07em; text-transform:uppercase;
+    color:var(--faint); font-weight:600; }
+  #n { width:9rem; font-family:var(--mono); font-size:1.05rem; letter-spacing:.04em; }
+  .seg { display:inline-flex; border:1px solid var(--border-2); border-radius:var(--r-ctl);
+    overflow:hidden; }
+  .seg button { border:0; border-radius:0; background:var(--surface); color:var(--muted);
+    font-size:.8rem; padding:.42rem .7rem; cursor:pointer; }
+  .seg button + button { border-left:1px solid var(--border-2); }
+  .seg button.on { background:var(--accent-soft); color:var(--text); }
+  #read { display:flex; flex-wrap:wrap; gap:.5rem 1.1rem; align-items:baseline;
+    margin-top:.9rem; padding-top:.8rem; border-top:1px solid var(--border);
+    font-size:.85rem; color:var(--muted); }
+  #read b { font-family:var(--mono); color:var(--text); font-weight:600; }
+  #read .rt { font-weight:700; letter-spacing:.08em; }
+
+  /* --- style toggles --- */
+  .picks { display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.9rem; }
+  .pick { display:inline-flex; align-items:center; gap:.4rem; padding:.34rem .6rem;
+    border:1px solid var(--border-2); border-radius:var(--r-pill); background:var(--surface);
+    color:var(--muted); font-size:.8rem; cursor:pointer; user-select:none; }
+  .pick.on { color:var(--text); border-color:var(--accent); background:var(--accent-soft); }
+  .tag-src { font-style:normal; font-size:.6rem; letter-spacing:.09em; text-transform:uppercase;
+    padding:.08rem .32rem; border-radius:var(--r-pill); font-weight:700; }
+  .tag-src.prod { color:var(--ok); border:1px solid color-mix(in srgb, var(--ok) 40%, transparent); }
+  .tag-src.lab { color:var(--hl-lt); border:1px solid color-mix(in srgb, var(--hl) 40%, transparent); }
+
+  /* --- one style, one strip --- */
+  .srow { margin:1.6rem 0; }
+  .srow h2 { font-size:.98rem; font-weight:600; margin:0 0 .25rem;
+    display:flex; align-items:center; gap:.5rem; }
+  .srow > p { margin:0 0 .7rem; max-width:62rem; }
+  .palname { font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; color:var(--faint);
+    font-weight:700; margin:0 0 .45rem; }
+  .palname + .pv { margin-bottom:.9rem; }
+
+  /* ===== preview strip - prod's own tokens, scoped to the strip ============ */
+  .pv { --site-bg:${PROD_SURFACES.light.bg}; --surface:${PROD_SURFACES.light.surface};
+    --surface-dim:${PROD_SURFACES.light.dim}; --surface-raised:${PROD_SURFACES.light.raised};
+    --outline:${PROD_SURFACES.light.outline}; --outline-mid:${PROD_SURFACES.light.mid};
+    --outline-strong:${PROD_SURFACES.light.strong}; --prose:${PROD_SURFACES.light.prose};
+    --prose-2:${PROD_SURFACES.light.prose2}; --prose-3:${PROD_SURFACES.light.prose3};
+    background:var(--site-bg); border:1px solid var(--border); border-radius:var(--r-card);
+    padding:1rem; display:grid; grid-template-columns:repeat(auto-fit, minmax(min(128px,100%),1fr));
+    gap:.7rem; }
+  .pv[data-theme="dark"] { --site-bg:${PROD_SURFACES.dark.bg}; --surface:${PROD_SURFACES.dark.surface};
+    --surface-dim:${PROD_SURFACES.dark.dim}; --surface-raised:${PROD_SURFACES.dark.raised};
+    --outline:${PROD_SURFACES.dark.outline}; --outline-mid:${PROD_SURFACES.dark.mid};
+    --outline-strong:${PROD_SURFACES.dark.strong}; --prose:${PROD_SURFACES.dark.prose};
+    --prose-2:${PROD_SURFACES.dark.prose2}; --prose-3:${PROD_SURFACES.dark.prose3}; }
+
+  /* Base box = prod .polished-card, transcribed. isolation:isolate so the holographic
+     overlay blends against the card and not against the whole strip. */
+  .bx { position:relative; isolation:isolate; overflow:hidden; min-width:0;
+    border:1px solid var(--outline); background:var(--surface); border-radius:8px;
+    box-shadow:0 1px 3px 0 rgba(0,0,0,.1), 0 1px 2px -1px rgba(0,0,0,.1);
+    padding:.6rem .7rem 1.4rem;
+    font-family:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .bx.real { outline:2px solid var(--outline-strong); outline-offset:2px; }
+  .bx-hd { display:flex; align-items:baseline; justify-content:space-between; gap:.4rem; }
+  .bx-word { color:var(--tc); font-size:.66rem; font-weight:700; letter-spacing:.06em;
+    text-transform:uppercase; min-width:0; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; }
+  .bx-lo { color:var(--prose-3); font-size:.6rem; font-variant-numeric:tabular-nums;
+    white-space:nowrap; }
+  .bx-n { position:relative; margin:.3rem 0 .35rem; color:var(--prose);
+    font-family:var(--mono); font-size:1.3rem; font-weight:700; letter-spacing:.02em;
+    font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; }
+  .bx-ft { display:flex; justify-content:space-between; gap:.4rem; color:var(--prose-2);
+    font-size:.63rem; font-variant-numeric:tabular-nums; }
+  .bx-flag { position:absolute; inset:auto .6rem .5rem auto; color:var(--tc);
+    font-size:.58rem; font-weight:700; letter-spacing:.05em; }
+
+  /* --- tint (lab) --- */
+  .s-tint .bx { border-color:color-mix(in srgb, var(--tc) 55%, var(--outline));
+    background:color-mix(in srgb, var(--tc) 8%, var(--surface)); }
+
+  /* --- ring (lab) --- */
+  .s-ring .bx { border-color:color-mix(in srgb, var(--tc) 45%, var(--outline));
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--tc) 45%, transparent),
+               0 0 14px 2px color-mix(in srgb, var(--tc) 32%, transparent); }
+
+  /* --- holographic (prod) --- the alphas are prod's; .amp multiplies them ~6x, because
+     at prod's own values the effect is very nearly not there. */
+  .s-holo .bx::after { content:""; position:absolute; inset:0; pointer-events:none;
+    mix-blend-mode:overlay; background-size:200% 200%; background-position:0 0;
+    background-image:linear-gradient(125deg, rgba(0,0,0,0) 0%, rgba(255,0,0,.031) 10%,
+      rgba(255,154,0,.051) 20%, rgba(208,222,33,.051) 30%, rgba(79,220,74,.051) 40%,
+      rgba(63,218,216,.051) 50%, rgba(28,127,238,.051) 60%, rgba(95,21,242,.051) 70%,
+      rgba(186,12,248,.031) 80%, rgba(0,0,0,0) 100%);
+    animation:8s ease-in-out infinite bx-holo; }
+  .s-holo.amp .bx::after { background-image:linear-gradient(125deg, rgba(0,0,0,0) 0%,
+      rgba(255,0,0,.19) 10%, rgba(255,154,0,.31) 20%, rgba(208,222,33,.31) 30%,
+      rgba(79,220,74,.31) 40%, rgba(63,218,216,.31) 50%, rgba(28,127,238,.31) 60%,
+      rgba(95,21,242,.31) 70%, rgba(186,12,248,.19) 80%, rgba(0,0,0,0) 100%); }
+  @keyframes bx-holo {
+    0%, 100% { opacity:.6; background-position:0% 0%; }
+    25% { opacity:.8; background-position:50% 0; }
+    50% { opacity:.6; background-position:100% 100%; }
+    75% { opacity:.8; background-position:50% 100%; } }
+
+  /* --- rainbow halo (prod) - five offset shadows, tier-blind --- */
+  .s-halo .bx::before { content:""; position:absolute; inset:0; border-radius:inherit;
+    pointer-events:none; opacity:.16; animation:10s linear infinite bx-halo;
+    box-shadow:-2px -1px 6px color-mix(in srgb, ${PROD_RINGS[0]} 45%, transparent),
+               0 -3px 7px color-mix(in srgb, ${PROD_RINGS[1]} 43%, transparent),
+               3px -1px 7px color-mix(in srgb, ${PROD_RINGS[2]} 42%, transparent),
+               2px 3px 7px color-mix(in srgb, ${PROD_RINGS[3]} 40%, transparent),
+               -2px 2px 6px color-mix(in srgb, ${PROD_RINGS[4]} 42%, transparent); }
+  .s-halo.amp .bx::before { opacity:.5; }
+  @keyframes bx-halo { 0%, 100% { opacity:.16; } 10% { opacity:.42; } 24% { opacity:.16; } }
+
+  /* --- pulse (lab, prod's signup-glow re-pointed at the tier) --- */
+  .s-glow .bx { animation:2s ease-in-out infinite bx-glow; }
+  @keyframes bx-glow {
+    0%, 100% { box-shadow:0 0 0 0 rgba(0,0,0,0); }
+    50% { box-shadow:0 0 20px 4px color-mix(in srgb, var(--tc) 45%, transparent); } }
+
+  /* --- shimmer (lab, prod's shimmer clipped to the digits) --- */
+  .s-shimmer .bx-n { color:transparent; background-clip:text; -webkit-background-clip:text;
+    background-size:400% 100%;
+    background-image:linear-gradient(100deg, var(--prose) 0 42%, var(--tc) 50%, var(--prose) 58% 100%);
+    animation:3s linear infinite bx-shimmer; }
+  @keyframes bx-shimmer { from { background-position:200%; } to { background-position:-200%; } }
+
+  /* --- rarity cycle (prod) - @property so the stops interpolate instead of snapping,
+     which is the one thing prod's own version does not do --- */
+  @property --cta-a { syntax:"<color>"; inherits:true; initial-value:${PROD_CTA[0]}; }
+  @property --cta-b { syntax:"<color>"; inherits:true; initial-value:${PROD_CTA[1]}; }
+  .s-cycle .bx { border-color:var(--cta-a); animation:6s linear infinite bx-cycle;
+    box-shadow:0 0 0 1px var(--cta-b) inset, 0 0 12px -2px var(--cta-a); }
+  .s-cycle .bx-word { color:var(--cta-a); }
+  @keyframes bx-cycle {
+    0%, 100% { --cta-a:${PROD_CTA[0]}; --cta-b:${PROD_CTA[1]}; }
+    20% { --cta-a:${PROD_CTA[1]}; --cta-b:${PROD_CTA[2]}; }
+    40% { --cta-a:${PROD_CTA[2]}; --cta-b:${PROD_CTA[3]}; }
+    60% { --cta-a:${PROD_CTA[3]}; --cta-b:${PROD_CTA[4]}; }
+    80% { --cta-a:${PROD_CTA[4]}; --cta-b:${PROD_CTA[0]}; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .s-holo .bx::after, .s-halo .bx::before, .s-glow .bx, .s-shimmer .bx-n,
+    .s-cycle .bx { animation:none; } }
+
+  /* --- editor --- */
+  #ed { display:flex; flex-direction:column; gap:.4rem; margin:.5rem 0 .9rem; }
+  .edr, .edhd { display:grid; grid-template-columns:2.4rem minmax(0,1fr) 7rem 2rem; gap:.45rem;
+    align-items:center; }
+  .edhd { font-size:.66rem; letter-spacing:.07em; text-transform:uppercase; color:var(--faint);
+    font-weight:600; }
+  .edr input[type="color"] { width:2.4rem; height:2rem; padding:2px; cursor:pointer;
+    background:var(--surface); border:1px solid var(--border-2); border-radius:var(--r-sm); }
+  .edr input[type="text"] { text-transform:uppercase; letter-spacing:.05em; }
+  .edr input[type="number"] { font-family:var(--mono); font-size:.82rem; }
+  .edr button { padding:.3rem 0; color:var(--faint); background:var(--surface);
+    border:1px solid var(--border-2); }
+  .edr button:hover { color:var(--bad-lt); border-color:var(--bad-dk); }
+  .edbtns { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:.9rem; }
+  #ed-out { margin:0; padding:.75rem .85rem; background:var(--surface-2);
+    border:1px solid var(--border); border-radius:var(--r-ctl); font-family:var(--mono);
+    font-size:.74rem; line-height:1.65; color:var(--dim); overflow-x:auto; white-space:pre; }
+  #ed-note { margin:.6rem 0 0; color:var(--hl-lt); }
+
+  /* --- publish --- */
+  .pub { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(210px,100%),1fr)); gap:.6rem;
+    margin-top:1.1rem; padding-top:1rem; border-top:1px solid var(--border); }
+  .pub label { display:block; font-size:.66rem; letter-spacing:.07em; text-transform:uppercase;
+    color:var(--faint); font-weight:600; margin-bottom:.25rem; }
+  .pub input { width:100%; }
+  .pub-go { display:flex; flex-wrap:wrap; align-items:center; gap:.7rem; margin-top:.8rem; }
+  #pub-msg { font-size:.82rem; }
+  #pub-msg.bad { color:var(--bad-lt); }
+  #pub-msg.ok { color:var(--ok); }
+
+  /* --- gallery --- */
+  .gal-bar { display:flex; flex-wrap:wrap; align-items:center; gap:.6rem; margin:.9rem 0; }
+  #gal { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(300px,100%),1fr)); gap:.7rem; }
+  .gc { display:flex; flex-direction:column; gap:.5rem; padding:.75rem .8rem;
+    border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); }
+  .gc:hover { border-color:var(--border-2); }
+  .gc-hd { display:flex; align-items:baseline; justify-content:space-between; gap:.5rem; }
+  .gc-hd b { font-size:.92rem; font-weight:600; min-width:0; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; }
+  .gc-hd span { font-size:.72rem; color:var(--faint); white-space:nowrap; }
+  .gc-note { margin:0; font-size:.78rem; color:var(--muted); line-height:1.5; }
+  .gc-strip { display:flex; gap:2px; border-radius:var(--r-sm); overflow:hidden; }
+  .gc-sw { flex:1; min-width:0; height:2.2rem; display:flex; align-items:center; justify-content:center;
+    font-size:.52rem; font-weight:700; letter-spacing:.03em; white-space:nowrap; overflow:hidden; }
+  .gc-ft { display:flex; align-items:center; gap:.45rem; }
+  .gc-ft .sp { flex:1; }
+  .gc-ft .small { font-size:.72rem; }
+  .like.on { color:var(--bad-lt); border-color:var(--bad-dk); }
+  #gal-msg { margin:.9rem 0 0; }`;
+
+  const body = `<div class="wrap">
+  <div class="tool-head">
+    <h1>Box Lab <span class="beta-tag">beta</span></h1>
+    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+  </div>
+  <p class="tag">One number, dropped into every coloured box rngdle.com knows how to draw -
+    and then into whatever boxes you invent instead.</p>
+
+  <section class="card">
+    <div class="bar">
+      <div class="fld"><label for="n">Number</label>
+        <input id="n" type="text" inputmode="numeric" autocomplete="off" spellcheck="false"
+               maxlength="7" value="25891" aria-label="Number from 0 to 1,000,000"></div>
+      <div class="fld"><button id="roll" class="btn-sm" type="button">Roll</button></div>
+      <div class="fld"><label>Theme</label>
+        <div class="seg" id="theme"><button type="button" data-v="light">Light</button
+          ><button type="button" data-v="dark" class="on">Dark</button></div></div>
+      <div class="fld"><label>Palette</label>
+        <div class="seg" id="pal"><button type="button" data-v="prod" class="on">Prod</button
+          ><button type="button" data-v="mine">Mine</button
+          ><button type="button" data-v="both">Both</button></div></div>
+      <div class="fld"><label>Faint effects</label>
+        <div class="seg" id="amp"><button type="button" data-v="0" class="on">As shipped</button
+          ><button type="button" data-v="1">Amplify</button></div></div>
+    </div>
+    <div class="picks" id="picks"></div>
+    <div id="read"></div>
+  </section>
+
+  <div id="rows"></div>
+
+  <section class="card" id="editor">
+    <h2>Your tiers</h2>
+    <p class="small">Prod's seven words and seven colours are one answer, not the answer. Change a
+      colour, rename a tier, move a cutoff, or add an eighth - every box above redraws, and the
+      number re-lands in whichever of your tiers it now belongs to. Kept in this browser.</p>
+    <div class="edbtns">
+      <button type="button" class="btn-sm" id="ed-add">Add a tier</button>
+      <button type="button" class="btn-sm" id="ed-reset">Reset to prod</button>
+      <button type="button" class="btn-sm" id="ed-copy">Copy as CSS</button>
+    </div>
+    <div class="edhd"><span></span><span>Rarity name</span><span>From EP</span><span></span></div>
+    <div id="ed"></div>
+    <pre id="ed-out"></pre>
+    <p class="small" id="ed-note"></p>
+
+    <div class="pub">
+      <div><label for="pub-name">Name it</label>
+        <input id="pub-name" type="text" maxlength="40" placeholder="Deep Sea" autocomplete="off"></div>
+      <div><label for="pub-author">Submitter name (optional)</label>
+        <input id="pub-author" type="text" maxlength="24" placeholder="anon" autocomplete="off"></div>
+      <div><label for="pub-note">One line about it (optional)</label>
+        <input id="pub-note" type="text" maxlength="120" placeholder="what you were going for"
+               autocomplete="off"></div>
+    </div>
+    <div class="pub-go">
+      <button type="button" class="btn-primary btn-sm" id="pub-go">Publish to the gallery</button>
+      <span id="pub-msg"></span>
+    </div>
+    <p class="small">Publishing puts these words and colours on a page anyone can read. There is no
+      account and nothing about you is stored - submissions are rate-limited by a salted hash of your
+      IP address, which is not kept in any form that can be turned back into an address.</p>
+  </section>
+
+  <section class="card" id="gallery">
+    <h2>What other people suggested</h2>
+    <p class="small">Every palette published from this page. Load one and all the boxes above redraw
+      in someone else's words and colours - which is the fastest way to find out that your idea of
+      what MYTHIC should look like is not everybody's. <b>Hot</b> trades hearts off against age - one
+      heart is worth about three days of freshness - so a palette people like climbs back up while a
+      new one still gets seen. One heart per person per palette, capped per hour.</p>
+    <div class="gal-bar">
+      <div class="seg" id="gsort"><button type="button" data-v="hot" class="on">Hot</button
+        ><button type="button" data-v="new">Newest</button
+        ><button type="button" data-v="top">Most hearted</button></div>
+      <button type="button" class="btn-sm" id="gal-more">Load more</button>
+    </div>
+    <div id="gal"></div>
+    <p class="small" id="gal-msg"></p>
+  </section>
+
+  <footer>
+    Colours, keyframes and box recipes are read out of rngdle.com's stylesheet
+    (<code>/_next/static/chunks/40301e47118b0e38.css</code>, fetched 2026-08-19), not out of the JS
+    bundle the badge rules come from. Prod writes its tier colours in <b>oklch</b> and swaps the whole
+    set under <code>.dark</code>, so a tier has two colours and not one - the preview paints prod's
+    exact oklch and the editor seeds from the sRGB equivalent. Boxes marked <b>prod</b> are its rules
+    transcribed; <b>lab</b> ones use prod's ingredients in a way prod itself does not. EP floors are
+    the same <code>CARD_TIERS</code> the calculator card uses, and the number is scored by
+    <code>/api</code>, so it reflects the live badge rules.
+  </footer>
+</div>`;
+
+  const script = `(${boxesClient.toString()})(${JSON.stringify(tiers)}, ${JSON.stringify(BOX_STYLES)},
+  ${JSON.stringify(aligned)});`;
+
+  return betaShell({ title: 'RNGdle - Box Lab', width: '1180px', slug: 'boxes', css, body, script });
+}
+
+/**
+ * Box Lab client.
+ * @param {Array}   TIERS    prod's tiers: {key, word, light:[oklch,hex], dark:[oklch,hex], lo}
+ * @param {Array}   STYLES   box recipes: {key, name, src, on, note}
+ * @param {boolean} ALIGNED  whether CARD_TIER_NAMES still matches prod's tier order
+ */
+function boxesClient(TIERS, STYLES, ALIGNED) {
+  const KEY = 'rngdle-beta-boxes-v1';
+  const $ = id => document.getElementById(id);
+  const fmt = n => n.toLocaleString('en-US');
+  const esc = s => String(s).replace(/[&<>"]/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // Prod's tiers seed the editable set; after that the two are independent, which is
+  // the point - "mine" has to be free to disagree about words, colours AND how many.
+  const seed = () => TIERS.map(t => ({ word: t.word, hex: t.dark[1], lo: t.lo }));
+
+  const S = {
+    n: 25891,
+    theme: 'dark',
+    pal: 'prod',
+    amp: false,
+    on: new Set(STYLES.filter(s => s.on).map(s => s.key)),
+    mine: seed(),
+    data: null,
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (saved && Array.isArray(saved.mine) && saved.mine.length) S.mine = saved.mine;
+  } catch (e) { /* a corrupt entry is not worth a broken page */ }
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ mine: S.mine })); } catch (e) {} };
+
+  // The tier list a strip should draw, resolved for the current theme. Prod's entries
+  // paint with the literal oklch; edited ones only ever have a hex.
+  const listFor = pal => pal === 'prod'
+    ? TIERS.map(t => ({ word: t.word, colour: t[S.theme][0], lo: t.lo }))
+    : S.mine.map(t => ({ word: t.word || '?', colour: t.hex, lo: Number(t.lo) || 0 }));
+
+  // Which box the number actually lands in: the highest floor it clears. Reading the
+  // floors rather than the order means a hand-typed cutoff out of sequence still
+  // resolves to something sensible instead of silently picking the wrong box.
+  const landing = list => {
+    if (!S.data) return -1;
+    let best = -1, bestLo = -Infinity;
+    list.forEach((t, i) => {
+      if (t.lo <= S.data.totalEP && t.lo >= bestLo) { best = i; bestLo = t.lo; }
+    });
+    return best;
+  };
+
+  function boxHTML(t, i, real) {
+    const ep = S.data ? fmt(S.data.totalEP) + ' EP' : '-';
+    const cnt = S.data ? S.data.count + (S.data.count === 1 ? ' badge' : ' badges') : '';
+    return '<div class="bx' + (i === real ? ' real' : '') + '" style="--tc:' + t.colour + '">' +
+      '<div class="bx-hd"><span class="bx-word">' + esc(t.word) + '</span>' +
+      '<span class="bx-lo">' + fmt(t.lo) + '+</span></div>' +
+      '<div class="bx-n">' + fmt(S.n) + '</div>' +
+      '<div class="bx-ft"><span>' + ep + '</span><span>' + cnt + '</span></div>' +
+      (i === real ? '<span class="bx-flag">lands here</span>' : '') +
+      '</div>';
+  }
+
+  function stripHTML(styleKey, pal) {
+    const list = listFor(pal);
+    const real = landing(list);
+    return '<div class="pv s-' + styleKey + (S.amp ? ' amp' : '') + '" data-theme="' + S.theme + '">' +
+      list.map((t, i) => boxHTML(t, i, real)).join('') + '</div>';
+  }
+
+  function paintRows() {
+    const pals = S.pal === 'both' ? ['prod', 'mine'] : [S.pal];
+    $('rows').innerHTML = STYLES.filter(s => S.on.has(s.key)).map(s =>
+      '<section class="srow"><h2>' + esc(s.name) +
+        ' <i class="tag-src ' + s.src + '">' + s.src + '</i></h2>' +
+      '<p class="small">' + s.note + '</p>' +
+      pals.map(p =>
+        (pals.length > 1 ? '<p class="palname">' + (p === 'prod' ? 'Prod' : 'Mine') + '</p>' : '') +
+        stripHTML(s.key, p)).join('') +
+      '</section>').join('') ||
+      '<p class="small">No box styles selected.</p>';
+  }
+
+  function paintRead() {
+    if (!S.data) { $('read').innerHTML = '<span>Scoring&hellip;</span>'; return; }
+    const list = listFor(S.pal === 'mine' ? 'mine' : 'prod');
+    const t = list[landing(list)] || { word: '-', colour: 'var(--muted)' };
+    const top = S.data.badges.slice(0, 8).map(b => b.emoji).join(' ');
+    $('read').innerHTML =
+      '<span>Score <b>' + fmt(S.data.totalEP) + '</b> EP</span>' +
+      '<span><b>' + S.data.count + '</b> badges</span>' +
+      '<span>Tier <b class="rt" style="color:' + t.colour + '">' + esc(t.word) + '</b></span>' +
+      (top ? '<span>' + top + '</span>' : '');
+  }
+
+  function exportText() {
+    const slug = w => (w || 'tier').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'tier';
+    const vars = S.mine.map(t => '  --tier-' + slug(t.word) + ': ' + t.hex + ';').join('\n');
+    const rows = S.mine.slice(1).map((t, i) =>
+      '  [' + t.lo + ', ' + JSON.stringify(slug(S.mine[i].word)) + '],').join('\n');
+    const top = S.mine[S.mine.length - 1];
+    return ':root {\n' + vars + '\n}\n\n// EP floors, in the shape src/index.js wants\n' +
+      'const CARD_TIERS = [\n' + rows + '\n]; // >= ' + top.lo + ' -> ' + JSON.stringify(slug(top.word));
+  }
+
+  // Rebuilds the rows. Skipped while a word is being typed - replacing the input
+  // under the caret would drop it back to the start of the field on every keystroke.
+  function paintEditor() {
+    $('ed').innerHTML = S.mine.map((t, i) =>
+      '<div class="edr" data-i="' + i + '">' +
+      '<input type="color" value="' + t.hex + '" aria-label="Colour, tier ' + (i + 1) + '">' +
+      '<input type="text" class="edw" value="' + esc(t.word) + '" maxlength="18" ' +
+        'aria-label="Rarity name, tier ' + (i + 1) + '">' +
+      '<input type="number" class="edl" value="' + t.lo + '" min="0" step="1" ' +
+        'aria-label="EP floor, tier ' + (i + 1) + '">' +
+      '<button type="button" class="edx" title="Remove this tier">&times;</button></div>').join('');
+    paintExport();
+  }
+
+  function paintExport() {
+    $('ed-out').textContent = exportText();
+    const words = S.mine.map(t => (t.word || '').toUpperCase());
+    const dupes = [...new Set(words.filter((w, i) => w && words.indexOf(w) !== i))];
+    const notes = [];
+    if (S.mine.length !== TIERS.length) {
+      notes.push(S.mine.length + ' tiers against prod’s ' + TIERS.length + '.');
+    }
+    if (S.mine.some((t, i) => i && Number(t.lo) <= Number(S.mine[i - 1].lo))) {
+      notes.push('Some floors are not strictly increasing - a tier whose floor is at or below the ' +
+        'one before it can never be the landing tier.');
+    }
+    if (dupes.length) notes.push('Duplicate word: ' + dupes.join(', ') + '.');
+    if (!ALIGNED) {
+      notes.push('CARD_TIER_NAMES in index.js no longer matches prod’s tier order, so the ' +
+        'floors above may be paired with the wrong words.');
+    }
+    $('ed-note').textContent = notes.join(' ');
+  }
+
+  function paint() { paintRows(); paintRead(); paintEditor(); }
+
+  // --- scoring -------------------------------------------------------------
+  // /api is the same compute() the calculator uses, so nothing here can drift from
+  // the live badge rules. Responses can land out of order, hence the sequence check.
+  let seq = 0;
+  async function score() {
+    const mine = ++seq;
+    try {
+      const r = await fetch('/api?n=' + S.n);
+      const j = await r.json();
+      if (mine !== seq) return;
+      S.data = j.error ? null : j;
+    } catch (e) {
+      if (mine === seq) S.data = null;
+    }
+    if (mine === seq) { paintRows(); paintRead(); }
+  }
+
+  // --- wiring --------------------------------------------------------------
+  $('picks').innerHTML = STYLES.map(s =>
+    '<button type="button" class="pick' + (S.on.has(s.key) ? ' on' : '') + '" data-k="' + s.key + '">' +
+    esc(s.name) + ' <i class="tag-src ' + s.src + '">' + s.src + '</i></button>').join('');
+  $('picks').addEventListener('click', e => {
+    const b = e.target.closest('.pick');
+    if (!b) return;
+    const k = b.dataset.k;
+    if (S.on.has(k)) S.on.delete(k); else S.on.add(k);
+    b.classList.toggle('on', S.on.has(k));
+    paintRows();
+  });
+
+  const seg = (id, fn) => $(id).addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    [...$(id).children].forEach(c => c.classList.toggle('on', c === b));
+    fn(b.dataset.v);
+  });
+  seg('theme', v => { S.theme = v; paintRows(); paintRead(); });
+  seg('pal', v => { S.pal = v; paintRows(); paintRead(); });
+  seg('amp', v => { S.amp = v === '1'; paintRows(); });
+
+  let debounce = 0;
+  $('n').addEventListener('input', e => {
+    const raw = e.target.value.replace(/[^0-9]/g, '').slice(0, 7);
+    if (raw !== e.target.value) e.target.value = raw;
+    const n = raw === '' ? 0 : Math.min(1000000, Number(raw));
+    if (n === S.n) return;
+    S.n = n;
+    paintRows();                                  // the digits move on the keystroke
+    clearTimeout(debounce);
+    debounce = setTimeout(score, 180);            // the score catches up
+  });
+  $('roll').addEventListener('click', () => {
+    S.n = Math.floor(1000001 * Math.random());    // prod's own range, 0..1,000,000 inclusive
+    $('n').value = String(S.n);
+    paintRows();
+    score();
+  });
+
+  $('ed').addEventListener('input', e => {
+    const row = e.target.closest('.edr');
+    if (!row) return;
+    const rec = S.mine[Number(row.dataset.i)];
+    if (!rec) return;
+    if (e.target.type === 'color') rec.hex = e.target.value;
+    else if (e.target.classList.contains('edw')) rec.word = e.target.value.toUpperCase();
+    else if (e.target.classList.contains('edl')) rec.lo = Math.max(0, Number(e.target.value) || 0);
+    save();
+    paintRows(); paintRead(); paintExport();      // NOT paintEditor - see above
+  });
+  $('ed').addEventListener('click', e => {
+    if (!e.target.classList.contains('edx')) return;
+    if (S.mine.length <= 1) return;               // something has to be left to draw
+    S.mine.splice(Number(e.target.closest('.edr').dataset.i), 1);
+    save(); paint();
+  });
+  $('ed-add').addEventListener('click', () => {
+    const last = S.mine[S.mine.length - 1];
+    S.mine.push({ word: 'NEW', hex: '#8b5cf6', lo: last ? Number(last.lo) * 2 || 1000 : 0 });
+    save(); paint();
+  });
+  $('ed-reset').addEventListener('click', () => { S.mine = seed(); save(); paint(); });
+  $('ed-copy').addEventListener('click', async () => {
+    const b = $('ed-copy'), was = b.textContent;
+    try {
+      await navigator.clipboard.writeText($('ed-out').textContent);
+      b.textContent = 'Copied';
+    } catch (e) {
+      b.textContent = 'Select and copy';
+    }
+    setTimeout(() => { b.textContent = was; }, 1400);
+  });
+
+  // --- gallery -------------------------------------------------------------
+  // Published palettes, from D1 via /api/palettes. The whole section is optional:
+  // a deployment with no database answers 503 with unconfigured:true, and the page
+  // says so once and carries on - nothing else here depends on storage.
+  const G = { sort: 'hot', offset: 0, more: false, items: [], liked: new Set(), off: false };
+
+  // Black or white text on a swatch, by Rec.601 luma. Not a contrast-ratio check,
+  // but the right side of the line for every colour a colour input can produce.
+  const ink = hex => {
+    const v = parseInt(hex.slice(1), 16);
+    const y = 0.299 * ((v >> 16) & 255) + 0.587 * ((v >> 8) & 255) + 0.114 * (v & 255);
+    return y > 140 ? '#111111' : '#ffffff';
+  };
+
+  const ago = ms => {
+    const s = Math.max(0, (Date.now() - ms) / 1000);
+    if (s < 90) return 'just now';
+    const m = s / 60; if (m < 90) return Math.round(m) + 'm ago';
+    const h = m / 60; if (h < 36) return Math.round(h) + 'h ago';
+    return Math.round(h / 24) + 'd ago';
+  };
+
+  function galCard(p) {
+    const swatches = p.tiers.map(t =>
+      '<span class="gc-sw" style="background:' + t.hex + ';color:' + ink(t.hex) + '" title="' +
+      esc(t.word) + ' from ' + fmt(t.lo) + ' EP">' + esc(t.word) + '</span>').join('');
+    return '<article class="gc">' +
+      '<div class="gc-hd"><b>' + esc(p.name) + '</b><span>' +
+        (p.author ? esc(p.author) + ' &middot; ' : '') + ago(p.created) + '</span></div>' +
+      (p.note ? '<p class="gc-note">' + esc(p.note) + '</p>' : '') +
+      '<div class="gc-strip">' + swatches + '</div>' +
+      '<div class="gc-ft">' +
+        '<button type="button" class="btn-sm like' + (G.liked.has(p.id) ? ' on' : '') +
+          '" data-like="' + p.id + '">&hearts; ' + p.likes + '</button>' +
+        '<span class="sp"></span><span class="small">' + p.tierCount + ' tiers</span>' +
+        '<button type="button" class="btn-sm" data-use="' + p.id + '">Load</button>' +
+      '</div></article>';
+  }
+
+  function paintGallery() {
+    $('gal').innerHTML = G.items.map(galCard).join('');
+    $('gal-more').style.display = G.more ? '' : 'none';
+    if (!G.off) {
+      $('gal-msg').textContent = G.items.length
+        ? ''
+        : 'Nothing published yet. Yours would be the first.';
+    }
+  }
+
+  async function loadGallery(reset) {
+    if (G.off) return;
+    if (reset) { G.offset = 0; G.items = []; }
+    $('gal-msg').textContent = 'Loading\u2026';
+    try {
+      const r = await fetch('/api/palettes?sort=' + G.sort + '&offset=' + G.offset);
+      const j = await r.json();
+      if (j.unconfigured) {
+        G.off = true;
+        $('gal').innerHTML = '';
+        $('gal-more').style.display = 'none';
+        $('gal-msg').textContent = j.error + ' Everything else on this page works without it.';
+        return;
+      }
+      if (j.error) throw new Error(j.error);
+      G.items = G.items.concat(j.palettes);
+      G.more = j.more;
+      G.offset = G.items.length;
+      paintGallery();
+    } catch (e) {
+      $('gal-msg').textContent = 'Could not load the gallery.';
+    }
+  }
+
+  async function loadLikes() {
+    try {
+      const j = await (await fetch('/api/palettes-liked')).json();
+      G.liked = new Set(j.liked || []);
+    } catch (e) { /* the hearts just start empty */ }
+  }
+
+  $('gal').addEventListener('click', async e => {
+    const use = e.target.closest('[data-use]');
+    if (use) {
+      const p = G.items.find(x => x.id === use.dataset.use);
+      if (!p) return;
+      S.mine = p.tiers.map(t => ({ word: t.word, hex: t.hex, lo: t.lo }));
+      save();
+      S.pal = 'mine';
+      [...$('pal').children].forEach(c => c.classList.toggle('on', c.dataset.v === 'mine'));
+      paint();
+      $('rows').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const like = e.target.closest('[data-like]');
+    if (!like) return;
+    const id = like.dataset.like;
+    like.disabled = true;
+    try {
+      const r = await fetch('/api/palettes/' + id + '/like', { method: 'POST' });
+      const j = await r.json();
+      if (j.error) { $('gal-msg').textContent = j.error; return; }
+      $('gal-msg').textContent = '';
+      if (j.liked) G.liked.add(id); else G.liked.delete(id);
+      const item = G.items.find(x => x.id === id);
+      if (item) item.likes = j.likes;
+      like.classList.toggle('on', j.liked);
+      like.innerHTML = '&hearts; ' + j.likes;
+    } catch (e) { /* leave the button as it was */ }
+    finally { like.disabled = false; }
+  });
+
+  $('gal-more').addEventListener('click', () => loadGallery(false));
+  seg('gsort', v => { G.sort = v; loadGallery(true); });
+
+  $('pub-go').addEventListener('click', async () => {
+    const btn = $('pub-go'), msg = $('pub-msg');
+    msg.className = '';
+    const name = $('pub-name').value.trim();
+    if (!name) { msg.className = 'bad'; msg.textContent = 'Give it a name first.'; return; }
+    btn.disabled = true;
+    msg.textContent = 'Publishing\u2026';
+    try {
+      const r = await fetch('/api/palettes', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name, author: $('pub-author').value, note: $('pub-note').value, tiers: S.mine,
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) { msg.className = 'bad'; msg.textContent = j.error || 'Could not publish that.'; return; }
+      msg.className = 'ok';
+      msg.textContent = j.duplicate ? 'Already published - it is in the gallery below.' : 'Published.';
+      G.sort = 'new';
+      [...$('gsort').children].forEach(c => c.classList.toggle('on', c.dataset.v === 'new'));
+      await loadGallery(true);
+    } catch (e) {
+      msg.className = 'bad';
+      msg.textContent = 'Could not reach the gallery.';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  paint();
+  score();
+  loadLikes().then(() => loadGallery(true));
+}
+
+// ---------------------------------------------------------------------------
 // Route dispatch
 // ---------------------------------------------------------------------------
 
@@ -5801,4 +6589,5 @@ const RENDERERS = {
   anatomy: renderAnatomy,
   contact: renderContact,
   collection: renderCollection,
+  boxes: renderBoxes,
 };
