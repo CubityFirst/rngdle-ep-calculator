@@ -16,6 +16,6 @@
     "test:gallery": "node test/gallery.mjs"
   },
   "devDependencies": {
-    "wrangler": "^3"
+    "wrangler": "^4.124.0"
   }
 }
