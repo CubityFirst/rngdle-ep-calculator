@@ -5832,10 +5832,90 @@ const PROD_SURFACES = {
            prose: '#f0f0f0', prose2: '#c4c4c4', prose3: '#9a9a9a' },
 };
 
+// The scoring box, tier by tier, resolved from prod's own rarity table (the one keyed
+// `background`/`border`/`glow`/`innerGlow`/`textColor`/`shimmer` in chunk 13342e74).
+// Prod writes these as Tailwind utility strings; the CSS below is those utilities
+// resolved against prod's own v4 palette tokens - [light, dark] for every field.
+//
+// This table is the reason the tool stopped guessing. The boxes are hand-designed per
+// tier, not generated from one colour ramp: mythic spans three families (rose ->
+// purple -> cyan) and drops the tier colour off the digits entirely, while trash and
+// common have no glow at all and no shimmer layer. None of that is derivable from any
+// other tier, which is exactly what an earlier extrapolation here got wrong.
+//
+// Two details are deliberate, not typos. The glow literals are Tailwind v3 stops -
+// rgba(16,185,129) is v3's emerald-500, where the current token is #00bc7d - because
+// prod hard-codes them and never migrated; matching prod means keeping the literals.
+// And `shim:false` on trash/common is prod's own flag, which is why those two get a
+// plain drop shadow where the rest get a coloured glow.
+const SCORE_TIERS = {
+  trash: {
+    bg:  ['linear-gradient(to bottom right, #fffbeb, #ffffff, #fffbeb)',
+          'linear-gradient(to bottom right, rgba(123,51,6,0.6), #27272a, rgba(123,51,6,0.6))'],
+    bd:  ['#ffd230', '#973c00'],
+    sh:  ['0 10px 15px -3px rgba(16,24,40,0.2), 0 4px 6px -4px rgba(16,24,40,0.2), inset 0 2px 4px 0 rgba(254,243,198,0.5)',
+          '0 10px 15px -3px rgba(16,24,40,0.2), 0 4px 6px -4px rgba(16,24,40,0.2), inset 0 2px 4px 0 rgba(123,51,6,0.2)'],
+    ink: ['#973c00', '#ffd230'], shim: false,
+  },
+  common: {
+    bg:  ['linear-gradient(to bottom right, #f3f4f6, #ffffff, #f3f4f6)',
+          'linear-gradient(to bottom right, rgba(63,63,70,0.5), #27272a, rgba(63,63,70,0.5))'],
+    bd:  ['#99a1af', '#52525c'],
+    sh:  ['0 10px 15px -3px rgba(16,24,40,0.2), 0 4px 6px -4px rgba(16,24,40,0.2), inset 0 2px 4px 0 rgba(229,231,235,0.5)',
+          '0 10px 15px -3px rgba(16,24,40,0.2), 0 4px 6px -4px rgba(16,24,40,0.2), inset 0 2px 4px 0 rgba(39,39,42,0.5)'],
+    ink: ['#364153', '#d1d5dc'], shim: false,
+  },
+  uncommon: {
+    bg:  ['linear-gradient(to bottom right, #d0fae5, #f0fdf4, #d0fae5)',
+          'linear-gradient(to bottom right, rgba(0,79,59,0.6), #27272a, rgba(0,79,59,0.6))'],
+    bd:  ['#5ee9b5', '#006045'],
+    sh:  ['0 0 10px rgba(16,185,129,0.2), inset 0 2px 4px 0 rgba(164,244,207,0.6)',
+          '0 0 14px rgba(16,185,129,0.35), inset 0 2px 4px 0 rgba(0,79,59,0.3)'],
+    ink: ['#006045', '#00d492'], shim: true,
+  },
+  rare: {
+    bg:  ['linear-gradient(to bottom right, #dbeafe, #f0f9ff, #dbeafe)',
+          'linear-gradient(to bottom right, rgba(28,57,142,0.6), #27272a, rgba(28,57,142,0.6))'],
+    bd:  ['#8ec5ff', '#193cb8'],
+    sh:  ['0 0 12px rgba(59,130,246,0.25), inset 0 2px 4px 0 rgba(190,219,255,0.6)',
+          '0 0 16px rgba(59,130,246,0.4), inset 0 2px 4px 0 rgba(28,57,142,0.3)'],
+    ink: ['#193cb8', '#51a2ff'], shim: true,
+  },
+  epic: {
+    bg:  ['linear-gradient(to bottom right, #f3e8ff, #fdf4ff, #f3e8ff)',
+          'linear-gradient(to bottom right, rgba(89,22,139,0.6), #27272a, rgba(89,22,139,0.6))'],
+    bd:  ['#dab2ff', '#6e11b0'],
+    sh:  ['0 0 15px rgba(168,85,247,0.25), inset 0 2px 4px 0 rgba(233,212,255,0.6)',
+          '0 0 20px rgba(168,85,247,0.45), inset 0 2px 4px 0 rgba(89,22,139,0.3)'],
+    ink: ['#6e11b0', '#c27aff'], shim: true,
+  },
+  anomaly: {
+    bg:  ['linear-gradient(to bottom right, #ffedd4, #fffbeb, #ffedd4)',
+          'linear-gradient(to bottom right, rgba(126,42,12,0.6), #27272a, rgba(126,42,12,0.6))'],
+    bd:  ['#ffb86a', '#9f2d00'],
+    sh:  ['0 0 18px rgba(249,115,22,0.25), inset 0 2px 4px 0 rgba(255,214,167,0.6)',
+          '0 0 22px rgba(249,115,22,0.45), inset 0 2px 4px 0 rgba(126,42,12,0.3)'],
+    ink: ['#9f2d00', '#ff8904'], shim: true,
+  },
+  mythic: {
+    bg:  ['linear-gradient(to bottom right, #ffe4e6, #faf5ff, #cefafe)',
+          'linear-gradient(to bottom right, rgba(139,8,54,0.55), rgba(89,22,139,0.45), rgba(16,78,100,0.55))'],
+    bd:  ['#fda5d5', '#a3004c'],
+    sh:  ['0 0 20px rgba(236,72,153,0.25),0 0 35px rgba(168,85,247,0.1), inset 0 2px 4px 0 rgba(252,206,232,0.6)',
+          '0 0 24px rgba(236,72,153,0.5),0 0 42px rgba(168,85,247,0.25), inset 0 2px 4px 0 rgba(134,16,67,0.3)'],
+    ink: ['#101828', '#f3f4f6'], shim: true,
+  },
+};
+
 // The box recipes. src:'prod' means the rule is prod's, transcribed; src:'lab'
 // means prod ships the ingredient but not this box, so it is a suggestion. Keeping
 // the two apart matters - half the point of the page is knowing which is which.
 const BOX_STYLES = [
+  { key: 'score', name: 'Scoring box', src: 'prod', on: true,
+    note: 'The real thing, rebuilt from prod\u2019s rarity table: 3px border, a three-stop diagonal ' +
+      'gradient, a 135&deg; gloss sheet, a 105&deg; shimmer sweeping on a 4s loop, and the whole box ' +
+      'breathing between scale(1) and scale(1.015) every 3s. Trash and common are the odd ones out - ' +
+      'prod gives them a plain drop shadow and switches the shimmer off entirely.' },
   { key: 'card', name: 'Card', src: 'prod', on: true,
     note: 'prod .polished-card: 1px --outline, --surface fill, 8px radius, a soft 1px/3px shadow. ' +
       'Note what the tier colour does not do here - the box stays neutral and the colour lands only ' +
@@ -5954,6 +6034,46 @@ function renderBoxes(ctx) {
   .bx-flag { position:absolute; inset:auto .6rem .5rem auto; color:var(--tc);
     font-size:.58rem; font-weight:700; letter-spacing:.05em; }
 
+  /* ===== the scoring box, prod-exact ==================================== */
+  /* Geometry is prod's: px-8 py-5, rounded-xl, border-3, transition-all 500ms. */
+  .pv.s-score { grid-template-columns:repeat(auto-fit, minmax(min(216px,100%),1fr)); align-items:start; }
+  .sfig { display:flex; flex-direction:column; align-items:center; gap:.45rem; min-width:0; }
+  .sfig figcaption { font-size:.6rem; letter-spacing:.06em; text-transform:uppercase; font-weight:700;
+    color:var(--tc); text-align:center; min-width:0; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; max-width:100%; }
+  .sfig figcaption i { display:block; font-style:normal; font-weight:400; color:var(--prose-3);
+    letter-spacing:0; text-transform:none; font-variant-numeric:tabular-nums; }
+  .sfig.real figcaption i { color:var(--prose-2); }
+
+  .sbx { position:relative; overflow:hidden; display:inline-flex; align-items:center;
+    justify-content:center; padding:1.25rem 2rem; border-radius:.75rem;
+    border:3px solid var(--sb-bd); background-image:var(--sb-bg); box-shadow:var(--sb-sh);
+    transition:all .5s; animation:3s ease-in-out infinite sbx-breathe; max-width:100%; }
+  .sfig.real .sbx { outline:2px solid var(--outline-strong); outline-offset:3px; }
+
+  /* The gloss sheet and the shimmer are separate absolutely-positioned layers in
+     prod, inset by -1px so they cover the border too. Both are pointer-events:none. */
+  .sbx-gloss, .sbx-shimwrap { position:absolute; inset:-1px; overflow:hidden;
+    pointer-events:none; border-radius:.75rem; }
+  .sbx-gloss { background:linear-gradient(135deg, rgba(255,255,255,.4) 0%,
+    rgba(255,255,255,.1) 40%, transparent 60%); }
+  .pv[data-theme="dark"] .sbx-gloss { opacity:.4; }
+  .pv[data-theme="dark"] .sbx-shimwrap { opacity:.1; }
+  .sbx-shim { position:absolute; inset:0; animation:4s ease-in-out infinite sbx-shim;
+    background:linear-gradient(105deg, transparent 0%, transparent 40%, rgba(255,255,255,.35) 50%,
+      transparent 60%, transparent 100%) 0 0 / 200% 100%; }
+
+  /* font-roll is Space Mono in prod; the site's --mono stands in for it here. */
+  .sbx-n { position:relative; z-index:10; display:flex; align-items:center;
+    font-family:var(--mono); font-weight:700; font-variant-numeric:tabular-nums;
+    color:var(--sb-ink); transition:all .5s; line-height:1.1;
+    text-shadow:0 1px 2px rgba(255,255,255,.5); }
+  .pv[data-theme="dark"] .sbx-n { text-shadow:0 1px 2px rgba(255,255,255,.2); }
+  .sbx-n span { display:inline-block; transition:all .5s; }
+
+  @keyframes sbx-breathe { 0%, 100% { transform:scale(1); } 50% { transform:scale(1.015); } }
+  @keyframes sbx-shim { from { background-position:200% 0; } to { background-position:-200% 0; } }
+
   /* --- tint (lab) --- */
   .s-tint .bx { border-color:color-mix(in srgb, var(--tc) 55%, var(--outline));
     background:color-mix(in srgb, var(--tc) 8%, var(--surface)); }
@@ -6022,7 +6142,7 @@ function renderBoxes(ctx) {
 
   @media (prefers-reduced-motion: reduce) {
     .s-holo .bx::after, .s-halo .bx::before, .s-glow .bx, .s-shimmer .bx-n,
-    .s-cycle .bx { animation:none; } }
+    .s-cycle .bx, .sbx, .sbx-shim { animation:none; } }
 
   /* --- editor --- */
   #ed { display:flex; flex-direction:column; gap:.4rem; margin:.5rem 0 .9rem; }
@@ -6168,7 +6288,7 @@ function renderBoxes(ctx) {
 </div>`;
 
   const script = `(${boxesClient.toString()})(${JSON.stringify(tiers)}, ${JSON.stringify(BOX_STYLES)},
-  ${JSON.stringify(aligned)});`;
+  ${JSON.stringify(aligned)}, ${JSON.stringify(SCORE_TIERS)});`;
 
   return betaShell({ title: 'RNGdle - Box Lab', width: '1180px', slug: 'boxes', css, body, script });
 }
@@ -6178,8 +6298,9 @@ function renderBoxes(ctx) {
  * @param {Array}   TIERS    prod's tiers: {key, word, light:[oklch,hex], dark:[oklch,hex], lo}
  * @param {Array}   STYLES   box recipes: {key, name, src, on, note}
  * @param {boolean} ALIGNED  whether CARD_TIER_NAMES still matches prod's tier order
+ * @param {object}  SCORE    prod's scoring-box CSS per tier key, [light, dark] per field
  */
-function boxesClient(TIERS, STYLES, ALIGNED) {
+function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
   const KEY = 'rngdle-beta-boxes-v1';
   const $ = id => document.getElementById(id);
   const fmt = n => n.toLocaleString('en-US');
@@ -6208,8 +6329,8 @@ function boxesClient(TIERS, STYLES, ALIGNED) {
   // The tier list a strip should draw, resolved for the current theme. Prod's entries
   // paint with the literal oklch; edited ones only ever have a hex.
   const listFor = pal => pal === 'prod'
-    ? TIERS.map(t => ({ word: t.word, colour: t[S.theme][0], lo: t.lo }))
-    : S.mine.map(t => ({ word: t.word || '?', colour: t.hex, lo: Number(t.lo) || 0 }));
+    ? TIERS.map(t => ({ key: t.key, word: t.word, colour: t[S.theme][0], lo: t.lo }))
+    : S.mine.map(t => ({ key: null, word: t.word || '?', colour: t.hex, lo: Number(t.lo) || 0 }));
 
   // Which box the number actually lands in: the highest floor it clears. Reading the
   // floors rather than the order means a hand-typed cutoff out of sequence still
@@ -6235,11 +6356,49 @@ function boxesClient(TIERS, STYLES, ALIGNED) {
       '</div>';
   }
 
+  // Prod's scoring box. A tier from prod's palette gets its exact row out of SCORE; a
+  // tier you invented has only one colour, so the same shape is derived from it with
+  // color-mix against the live surface - close in spirit, honest about not being prod.
+  function scoreCSS(t) {
+    const row = t.key && SCORE[t.key];
+    if (row) {
+      const i = S.theme === 'dark' ? 1 : 0;
+      return '--sb-bg:' + row.bg[i] + ';--sb-bd:' + row.bd[i] +
+             ';--sb-sh:' + row.sh[i] + ';--sb-ink:' + row.ink[i];
+    }
+    const c = t.colour;
+    const mix = (pct, other) => 'color-mix(in srgb, ' + c + ' ' + pct + '%, ' + other + ')';
+    return '--sb-bg:linear-gradient(to bottom right,' + mix(22, 'var(--surface)') + ',var(--surface),' +
+             mix(22, 'var(--surface)') + ')' +
+           ';--sb-bd:' + mix(60, 'var(--surface)') +
+           ';--sb-sh:0 0 14px ' + mix(35, 'transparent') + ', inset 0 2px 4px 0 ' + mix(30, 'transparent') +
+           ';--sb-ink:' + c;
+  }
+
+  function scoreBoxHTML(t, i, real) {
+    const s = fmt(S.n).replace(/,/g, '');
+    // Prod sizes the digits by how many there are: text-5xl at five, text-4xl at six.
+    const size = s.length <= 5 ? '3rem' : '2.25rem';
+    const shim = (!t.key || SCORE[t.key].shim)
+      ? '<div class="sbx-shimwrap"><div class="sbx-shim"></div></div>' : '';
+    return '<figure class="sfig' + (i === real ? ' real' : '') + '" style="--tc:' + t.colour + '">' +
+      '<div class="sbx" style="' + scoreCSS(t) + '">' +
+        '<div class="sbx-gloss"></div>' + shim +
+        '<div class="sbx-n" style="font-size:' + size + '">' +
+          [...s].map(d => '<span>' + d + '</span>').join('') +
+        '</div>' +
+      '</div>' +
+      '<figcaption>' + esc(t.word) + '<i>' + fmt(t.lo) + '+ EP' +
+        (i === real ? ' \u00b7 lands here' : '') + '</i></figcaption>' +
+    '</figure>';
+  }
+
   function stripHTML(styleKey, pal) {
     const list = listFor(pal);
     const real = landing(list);
+    const draw = styleKey === 'score' ? scoreBoxHTML : boxHTML;
     return '<div class="pv s-' + styleKey + (S.amp ? ' amp' : '') + '" data-theme="' + S.theme + '">' +
-      list.map((t, i) => boxHTML(t, i, real)).join('') + '</div>';
+      list.map((t, i) => draw(t, i, real)).join('') + '</div>';
   }
 
   function paintRows() {
