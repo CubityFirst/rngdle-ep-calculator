@@ -10,6 +10,10 @@
 // it. That keeps beta.js free of any import from this module, and this module free
 // of any import at all.
 //
+// What is stored is ONE tier somebody designed - a name and the colours of a single
+// box. Prod's seven tiers are fixed reference in the UI and are never submitted or
+// edited, so nothing here can overwrite them.
+//
 // Trust model: the write endpoint is open, so treat every field as hostile. Length
 // caps, a strict shape check and a per-submitter rate limit are enforced below;
 // the submitter's IP is salted and hashed for rate limiting and never stored.
@@ -20,8 +24,7 @@ const LIMITS = {
   author: 24,
   note: 120,
   word: 18,
-  tiers: 24,         // a palette longer than this is not a palette
-  minTiers: 2,
+  glowSize: 60,      // px of blur; past this it stops being a box and becomes a lamp
   lo: 1e9,
   perHour: 5,        // submissions per author_key per hour
   heartsPerHour: 60, // heart/un-heart actions per voter_key per hour
@@ -94,32 +97,49 @@ function clean(v, max, field) {
   return s;
 }
 
-function cleanTiers(raw) {
-  if (!Array.isArray(raw)) throw new Invalid('Tiers must be a list.');
-  if (raw.length < LIMITS.minTiers) throw new Invalid(`A palette needs at least ${LIMITS.minTiers} tiers.`);
-  if (raw.length > LIMITS.tiers) throw new Invalid(`A palette can have at most ${LIMITS.tiers} tiers.`);
+// A submission is ONE tier that somebody designed - not a palette. Prod's seven are
+// fixed reference and are never sent, so everything below describes a single box:
+// its name, the colours of each part of it, and whether it shimmers.
+const HEX = /^#[0-9a-f]{6}$/;
 
-  const tiers = raw.map((t, i) => {
-    if (!t || typeof t !== 'object') throw new Invalid(`Tier ${i + 1} is not readable.`);
-    const word = clean(t.word, LIMITS.word, `Tier ${i + 1}'s word`).toUpperCase();
-    if (!word) throw new Invalid(`Tier ${i + 1} has no word.`);
-    const hex = String(t.hex || '').trim().toLowerCase();
-    if (!/^#[0-9a-f]{6}$/.test(hex)) throw new Invalid(`Tier ${i + 1} ("${word}") has no valid #rrggbb colour.`);
-    const lo = Math.floor(Number(t.lo));
-    if (!Number.isFinite(lo) || lo < 0 || lo > LIMITS.lo) throw new Invalid(`Tier ${i + 1} ("${word}") has an EP floor outside 0..${LIMITS.lo}.`);
-    return { word, hex, lo };
-  });
+function cleanDesign(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Invalid('No tier design was sent.');
 
-  // Sorting rather than rejecting: a palette typed out of order is a fine palette,
-  // it was just typed out of order. Equal floors are a real problem though - the
-  // second tier could never be anything's landing tier - so those are refused.
-  tiers.sort((a, b) => a.lo - b.lo);
-  for (let i = 1; i < tiers.length; i++) {
-    if (tiers[i].lo === tiers[i - 1].lo) {
-      throw new Invalid(`"${tiers[i - 1].word}" and "${tiers[i].word}" both start at ${tiers[i].lo} EP - one of them could never be reached.`);
-    }
+  const word = clean(raw.word, LIMITS.word, 'The rarity name').toUpperCase();
+  if (!word) throw new Invalid('Give the rarity a name.');
+
+  const colour = (key, label) => {
+    const v = String(raw[key] || '').trim().toLowerCase();
+    if (!HEX.test(v)) throw new Invalid(`${label} needs to be a #rrggbb colour.`);
+    return v;
+  };
+
+  const size = Math.round(Number(raw.glowSize));
+  if (!Number.isFinite(size) || size < 0 || size > LIMITS.glowSize) {
+    throw new Invalid(`Glow size has to be between 0 and ${LIMITS.glowSize}.`);
   }
-  return tiers;
+  const alpha = Math.round(Number(raw.glowAlpha));
+  if (!Number.isFinite(alpha) || alpha < 0 || alpha > 100) {
+    throw new Invalid('Glow strength has to be between 0 and 100.');
+  }
+  const lo = Math.floor(Number(raw.lo));
+  if (!Number.isFinite(lo) || lo < 0 || lo > LIMITS.lo) {
+    throw new Invalid(`The EP floor has to be between 0 and ${LIMITS.lo}.`);
+  }
+
+  return {
+    word,
+    bd: colour('bd', 'The border colour'),
+    from: colour('from', 'The gradient start'),
+    via: colour('via', 'The gradient middle'),
+    to: colour('to', 'The gradient end'),
+    ink: colour('ink', 'The digit colour'),
+    glow: colour('glow', 'The glow colour'),
+    glowSize: size,
+    glowAlpha: alpha,
+    shimmer: !!raw.shimmer,
+    lo,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -128,11 +148,11 @@ function cleanTiers(raw) {
 
 // DB row -> what the client sees. author_key and hidden never leave the server.
 function publicRow(row) {
-  let tiers = [];
-  try { tiers = JSON.parse(row.tiers); } catch (e) { tiers = []; }
+  let design = null;
+  try { design = JSON.parse(row.tiers); } catch (e) { design = null; }
   return {
     id: row.id, name: row.name, author: row.author, note: row.note,
-    tiers, tierCount: row.tier_count, created: row.created, likes: row.likes,
+    design, created: row.created, likes: row.likes,
   };
 }
 
@@ -247,7 +267,7 @@ async function createPalette(request, env, db) {
   if (!name) throw new Invalid('Give the palette a name.');
   const author = clean(payload.author, LIMITS.author, 'The author');
   const note = clean(payload.note, LIMITS.note, 'The note');
-  const tiers = cleanTiers(payload.tiers);
+  const design = cleanDesign(payload.design);
 
   const key = await callerKey(request, env);
   const now = Date.now();
@@ -261,19 +281,20 @@ async function createPalette(request, env, db) {
 
   // Republishing the identical palette is almost always a double-click or a retry,
   // so hand back what is already there instead of a duplicate row.
-  const body = JSON.stringify(tiers);
+  const body = JSON.stringify(design);
   const dupe = await db.prepare(
     'SELECT id FROM palettes WHERE author_key = ? AND tiers = ? AND hidden = 0 AND created > ?'
   ).bind(key, body, now - 86_400_000).first();
   if (dupe) return json({ id: dupe.id, duplicate: true });
 
   const id = newId();
+  // tier_count stays in the schema and is always 1 now - one design per submission.
   await db.prepare(
     `INSERT INTO palettes (id, name, author, note, tiers, tier_count, created, author_key, likes, hidden)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`
-  ).bind(id, name, author, note, body, tiers.length, now, key).run();
+     VALUES (?, ?, ?, ?, ?, 1, ?, ?, 0, 0)`
+  ).bind(id, name, author, note, body, now, key).run();
 
-  return json({ id, name, author, note, tiers, tierCount: tiers.length, created: now, likes: 0 }, 201);
+  return json({ id, name, author, note, design, created: now, likes: 0 }, 201);
 }
 
 async function likePalette(id, request, env, db) {

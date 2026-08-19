@@ -131,19 +131,36 @@ const INTERACTIONS = {
     }],
   ],
   // The Box Lab draws no data of its own - it restyles one number - so what is worth
-  // holding here is that every control still changes what is on screen, and that the
-  // gallery stays quiet on a dev server with no D1 binding.
+  // holding here is that every control still changes what is on screen, that prod's
+  // seven tiers stay read-only, and that the gallery stays quiet on a dev server with
+  // no D1 binding.
   '/beta/boxes': [
     ['boxes render', async p => {
       const m = await p.evaluate(() => ({
         strips: document.querySelectorAll('.pv').length,
         per: document.querySelector('.pv')?.children.length,
-        real: [...new Set([...document.querySelectorAll('.bx.real .bx-word')].map(e => e.textContent))],
+        real: [...new Set([...document.querySelectorAll('.sfig.real figcaption, .bx.real .bx-word')]
+          .map(e => e.textContent.replace(/[\d,].*$/, '')))],
       }));
       if (!m.strips) throw new Error('no preview strips');
-      if (m.per !== 7) throw new Error(`prod has 7 tiers, strip drew ${m.per}`);
+      if (m.per !== 8) throw new Error(`want prod's 7 plus yours, strip drew ${m.per}`);
       if (m.real.length !== 1) throw new Error(`the number should land in exactly one tier, got ${m.real.join('/')}`);
       return `${m.strips} strips x ${m.per}, lands in ${m.real[0]}`;
+    }],
+    // Prod's seven are reference. Nothing on the page may offer to repaint them.
+    ['prod tiers are read-only', async p => {
+      const m = await p.evaluate(() => {
+        const dials = [...document.querySelectorAll('#editor input')];
+        return {
+          stray: document.querySelectorAll('.edr, .edx, #ed-add, #ed-reset, #pal').length,
+          dials: dials.length,
+          nonDesign: dials.filter(i => i.id && i.id.slice(0, 2) !== 'd-' && i.id.slice(0, 4) !== 'pub-').length,
+        };
+      });
+      if (m.stray) throw new Error(`${m.stray} leftover per-tier editor controls`);
+      if (m.dials < 10) throw new Error(`only ${m.dials} inputs in the designer`);
+      if (m.nonDesign) throw new Error(`${m.nonDesign} inputs that are neither a dial nor a publish field`);
+      return `${m.dials} inputs, no per-tier editing`;
     }],
     ['theme swaps the tokens', async p => {
       const before = await p.evaluate(() => getComputedStyle(document.querySelector('.pv')).backgroundColor);
@@ -168,43 +185,37 @@ const INTERACTIONS = {
       await p.waitForTimeout(700);
       const m = await p.evaluate(() => ({
         read: document.getElementById('read').textContent.replace(/\s+/g, ' ').trim(),
-        n: document.querySelector('.bx-n')?.textContent,
-        real: document.querySelector('.bx.real .bx-word')?.textContent,
+        n: document.querySelector('.sbx-n')?.textContent,
       }));
-      if (m.n !== '999,999') throw new Error(`boxes show ${m.n}`);
+      if (m.n !== '999999') throw new Error(`the scoring box shows ${m.n}`);
       if (!/EP/.test(m.read)) throw new Error('the readout never scored it');
-      return `${m.n} -> ${m.real}`;
+      return m.read.slice(0, 42);
     }],
-    ['editing a tier reaches the boxes', async p => {
-      await p.click('#pal button[data-v="mine"]');
-      await p.waitForTimeout(150);
-      const row = (await p.$$('.edr')).pop();
-      await row.$eval('input[type="text"]', e => {
-        e.value = 'LEGENDARY';
-        e.dispatchEvent(new Event('input', { bubbles: true }));
-      });
-      await p.waitForTimeout(200);
-      const words = await p.$$eval('.pv:first-of-type .bx-word', e => e.map(x => x.textContent));
-      if (!words.includes('LEGENDARY')) throw new Error(`renamed tier never appeared: ${words.join(', ')}`);
+    ['a dial reaches every strip', async p => {
+      await p.fill('#d-word', 'ICEBOUND');
+      await p.waitForTimeout(300);
+      const words = await p.$$eval('.pv .sfig figcaption', e => e.map(x => x.textContent));
+      if (!words.some(w => /ICEBOUND/.test(w))) throw new Error(`renamed tier never appeared: ${words.join(', ')}`);
       const css = await p.textContent('#ed-out');
-      if (!/--tier-legendary/.test(css)) throw new Error('the export did not pick up the new word');
-      await p.click('#ed-reset');
-      await p.click('#pal button[data-v="prod"]');
-      return words.join(' ');
+      if (!/tier-icebound/.test(css)) throw new Error('the export did not pick up the new name');
+      return 'ICEBOUND reached ' + words.filter(w => /ICEBOUND/.test(w)).length + ' strip(s)';
     }],
-    ['add and remove a tier', async p => {
-      await p.click('#pal button[data-v="mine"]');
-      const before = await p.$eval('.pv', e => e.children.length);
-      await p.click('#ed-add');
-      await p.waitForTimeout(150);
-      const added = await p.$eval('.pv', e => e.children.length);
-      if (added !== before + 1) throw new Error(`add gave ${added}, wanted ${before + 1}`);
-      await (await p.$$('.edx')).pop().click();
-      await p.waitForTimeout(150);
-      const back = await p.$eval('.pv', e => e.children.length);
-      if (back !== before) throw new Error(`remove gave ${back}, wanted ${before}`);
-      await p.click('#pal button[data-v="prod"]');
-      return `${before} -> ${added} -> ${back}`;
+    ['glow dial moves the readout', async p => {
+      await p.$eval('#d-size', e => { e.value = '48'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+      await p.waitForTimeout(250);
+      const v = await p.textContent('#d-size-v');
+      if (v !== '48px') throw new Error(`glow readout says ${v}`);
+      return v;
+    }],
+    ['randomise keeps the name', async p => {
+      const before = await p.inputValue('#d-bd');
+      await p.click('#d-random');
+      await p.waitForTimeout(300);
+      const after = await p.inputValue('#d-bd');
+      const name = await p.inputValue('#d-word');
+      if (before === after) throw new Error('randomise changed nothing');
+      if (name !== 'ICEBOUND') throw new Error(`randomise clobbered the name: ${name}`);
+      return `${before} -> ${after}`;
     }],
     // Without a D1 binding the dev server has no gallery. That has to read as an
     // explained empty state rather than a broken one - and, because this harness

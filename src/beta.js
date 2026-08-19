@@ -6057,8 +6057,11 @@ function renderBoxes(ctx) {
     pointer-events:none; border-radius:.75rem; }
   .sbx-gloss { background:linear-gradient(135deg, rgba(255,255,255,.4) 0%,
     rgba(255,255,255,.1) 40%, transparent 60%); }
-  .pv[data-theme="dark"] .sbx-gloss { opacity:.4; }
-  .pv[data-theme="dark"] .sbx-shimwrap { opacity:.1; }
+  .pv[data-theme="dark"] .sbx-gloss, .dstage .sbx-gloss, .gc-stage .sbx-gloss { opacity:.4; }
+  .pv[data-theme="dark"] .sbx-shimwrap, .dstage .sbx-shimwrap, .gc-stage .sbx-shimwrap { opacity:.1; }
+  .gc-stage .sbx { padding:.55rem 1rem; }
+  .gc-stage .sbx-n { font-size:1.3rem; }
+  .dstage .sbx-n { font-size:2rem; }
   .sbx-shim { position:absolute; inset:0; animation:4s ease-in-out infinite sbx-shim;
     background:linear-gradient(105deg, transparent 0%, transparent 40%, rgba(255,255,255,.35) 50%,
       transparent 60%, transparent 100%) 0 0 / 200% 100%; }
@@ -6068,7 +6071,8 @@ function renderBoxes(ctx) {
     font-family:var(--mono); font-weight:700; font-variant-numeric:tabular-nums;
     color:var(--sb-ink); transition:all .5s; line-height:1.1;
     text-shadow:0 1px 2px rgba(255,255,255,.5); }
-  .pv[data-theme="dark"] .sbx-n { text-shadow:0 1px 2px rgba(255,255,255,.2); }
+  .pv[data-theme="dark"] .sbx-n, .dstage .sbx-n, .gc-stage .sbx-n {
+    text-shadow:0 1px 2px rgba(255,255,255,.2); }
   .sbx-n span { display:inline-block; transition:all .5s; }
 
   @keyframes sbx-breathe { 0%, 100% { transform:scale(1); } 50% { transform:scale(1.015); } }
@@ -6144,20 +6148,33 @@ function renderBoxes(ctx) {
     .s-holo .bx::after, .s-halo .bx::before, .s-glow .bx, .s-shimmer .bx-n,
     .s-cycle .bx, .sbx, .sbx-shim { animation:none; } }
 
-  /* --- editor --- */
-  #ed { display:flex; flex-direction:column; gap:.4rem; margin:.5rem 0 .9rem; }
-  .edr, .edhd { display:grid; grid-template-columns:2.4rem minmax(0,1fr) 7rem 2rem; gap:.45rem;
-    align-items:center; }
-  .edhd { font-size:.66rem; letter-spacing:.07em; text-transform:uppercase; color:var(--faint);
+  /* --- the tier designer --- */
+  .dz { display:grid; grid-template-columns:minmax(min(230px,100%),.9fr) minmax(min(300px,100%),1.4fr);
+    gap:1.1rem; align-items:start; }
+  @media (max-width: 780px) { .dz { grid-template-columns:1fr; } }
+  /* A 1fr track keeps an automatic minimum, so without this the column refuses to
+     shrink below the dial grid's min-content and the page scrolls sideways on a phone. */
+  .dz > * { min-width:0; }
+  .dials { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(140px,100%),1fr)); gap:.7rem; }
+  .dial { display:flex; flex-direction:column; gap:.28rem; min-width:0; }
+  .dial > label { font-size:.65rem; letter-spacing:.06em; text-transform:uppercase; color:var(--faint);
     font-weight:600; }
-  .edr input[type="color"] { width:2.4rem; height:2rem; padding:2px; cursor:pointer;
+  .dial input[type="color"] { width:100%; height:2rem; padding:2px; cursor:pointer;
     background:var(--surface); border:1px solid var(--border-2); border-radius:var(--r-sm); }
-  .edr input[type="text"] { text-transform:uppercase; letter-spacing:.05em; }
-  .edr input[type="number"] { font-family:var(--mono); font-size:.82rem; }
-  .edr button { padding:.3rem 0; color:var(--faint); background:var(--surface);
-    border:1px solid var(--border-2); }
-  .edr button:hover { color:var(--bad-lt); border-color:var(--bad-dk); }
-  .edbtns { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:.9rem; }
+  .dial input[type="range"] { width:100%; accent-color:var(--accent); }
+  .dial input[type="text"] { text-transform:uppercase; letter-spacing:.05em; }
+  .dial input[type="number"] { font-family:var(--mono); font-size:.82rem; }
+  .dial .val { font-family:var(--mono); font-size:.68rem; color:var(--muted); }
+  .dial.wide { grid-column:1 / -1; }
+  .dial.check { flex-direction:row; align-items:center; gap:.45rem; }
+  .dial.check label { text-transform:none; letter-spacing:0; font-size:.8rem; color:var(--dim);
+    font-weight:400; }
+  .dstage { display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:.6rem; padding:1.3rem 1rem; border-radius:var(--r-card); border:1px solid var(--border);
+    background:var(--site-bg); min-height:150px; }
+  .edbtns { display:flex; flex-wrap:wrap; gap:.5rem; margin:1rem 0 .9rem; }
+  .locked { display:flex; align-items:center; gap:.45rem; font-size:.78rem; color:var(--faint);
+    margin:.2rem 0 0; }
   #ed-out { margin:0; padding:.75rem .85rem; background:var(--surface-2);
     border:1px solid var(--border); border-radius:var(--r-ctl); font-family:var(--mono);
     font-size:.74rem; line-height:1.65; color:var(--dim); overflow-x:auto; white-space:pre; }
@@ -6185,9 +6202,8 @@ function renderBoxes(ctx) {
     text-overflow:ellipsis; white-space:nowrap; }
   .gc-hd span { font-size:.72rem; color:var(--faint); white-space:nowrap; }
   .gc-note { margin:0; font-size:.78rem; color:var(--muted); line-height:1.5; }
-  .gc-strip { display:flex; gap:2px; border-radius:var(--r-sm); overflow:hidden; }
-  .gc-sw { flex:1; min-width:0; height:2.2rem; display:flex; align-items:center; justify-content:center;
-    font-size:.52rem; font-weight:700; letter-spacing:.03em; white-space:nowrap; overflow:hidden; }
+  .gc-stage { display:flex; align-items:center; justify-content:center; padding:.7rem;
+    border-radius:var(--r-sm); background:var(--site-bg); border:1px solid var(--border); }
   .gc-ft { display:flex; align-items:center; gap:.45rem; }
   .gc-ft .sp { flex:1; }
   .gc-ft .small { font-size:.72rem; }
@@ -6211,10 +6227,6 @@ function renderBoxes(ctx) {
       <div class="fld"><label>Theme</label>
         <div class="seg" id="theme"><button type="button" data-v="light">Light</button
           ><button type="button" data-v="dark" class="on">Dark</button></div></div>
-      <div class="fld"><label>Palette</label>
-        <div class="seg" id="pal"><button type="button" data-v="prod" class="on">Prod</button
-          ><button type="button" data-v="mine">Mine</button
-          ><button type="button" data-v="both">Both</button></div></div>
       <div class="fld"><label>Faint effects</label>
         <div class="seg" id="amp"><button type="button" data-v="0" class="on">As shipped</button
           ><button type="button" data-v="1">Amplify</button></div></div>
@@ -6226,23 +6238,54 @@ function renderBoxes(ctx) {
   <div id="rows"></div>
 
   <section class="card" id="editor">
-    <h2>Your tiers</h2>
-    <p class="small">Prod's seven words and seven colours are one answer, not the answer. Change a
-      colour, rename a tier, move a cutoff, or add an eighth - every box above redraws, and the
-      number re-lands in whichever of your tiers it now belongs to. Kept in this browser.</p>
-    <div class="edbtns">
-      <button type="button" class="btn-sm" id="ed-add">Add a tier</button>
-      <button type="button" class="btn-sm" id="ed-reset">Reset to prod</button>
-      <button type="button" class="btn-sm" id="ed-copy">Copy as CSS</button>
+    <h2>Design a rarity</h2>
+    <p class="small">Prod's seven are fixed - they are the reference, and nothing here can repaint
+      them. What you get is an eighth of your own, built out of the same parts prod's box is built
+      from, and it sits in every strip above alongside the real ones.</p>
+
+    <div class="dz">
+      <div>
+        <div class="dials">
+          <div class="dial wide"><label for="d-word">Rarity name</label>
+            <input id="d-word" type="text" maxlength="18" value="LEGENDARY" autocomplete="off"></div>
+          <div class="dial"><label for="d-from">Gradient start</label>
+            <input id="d-from" type="color" value="#fde68a"></div>
+          <div class="dial"><label for="d-via">Gradient middle</label>
+            <input id="d-via" type="color" value="#fffbeb"></div>
+          <div class="dial"><label for="d-to">Gradient end</label>
+            <input id="d-to" type="color" value="#fde68a"></div>
+          <div class="dial"><label for="d-bd">Border</label>
+            <input id="d-bd" type="color" value="#f59e0b"></div>
+          <div class="dial"><label for="d-ink">Digits</label>
+            <input id="d-ink" type="color" value="#78350f"></div>
+          <div class="dial"><label for="d-glow">Glow</label>
+            <input id="d-glow" type="color" value="#f59e0b"></div>
+          <div class="dial"><label for="d-size">Glow size <span class="val" id="d-size-v"></span></label>
+            <input id="d-size" type="range" min="0" max="60" step="1" value="18"></div>
+          <div class="dial"><label for="d-alpha">Glow strength <span class="val" id="d-alpha-v"></span></label>
+            <input id="d-alpha" type="range" min="0" max="100" step="1" value="35"></div>
+          <div class="dial"><label for="d-lo">From EP</label>
+            <input id="d-lo" type="number" min="0" step="1" value="500000"></div>
+          <div class="dial check wide">
+            <input id="d-shim" type="checkbox" checked>
+            <label for="d-shim">Shimmer sweep (prod runs this on every tier above common)</label></div>
+        </div>
+        <div class="edbtns">
+          <button type="button" class="btn-sm" id="d-random">Randomise</button>
+          <button type="button" class="btn-sm" id="d-reset">Reset</button>
+          <button type="button" class="btn-sm" id="ed-copy">Copy as CSS</button>
+        </div>
+      </div>
+      <div>
+        <div class="dstage" id="d-stage"></div>
+        <pre id="ed-out"></pre>
+        <p class="small" id="ed-note"></p>
+      </div>
     </div>
-    <div class="edhd"><span></span><span>Rarity name</span><span>From EP</span><span></span></div>
-    <div id="ed"></div>
-    <pre id="ed-out"></pre>
-    <p class="small" id="ed-note"></p>
 
     <div class="pub">
-      <div><label for="pub-name">Name it</label>
-        <input id="pub-name" type="text" maxlength="40" placeholder="Deep Sea" autocomplete="off"></div>
+      <div><label for="pub-name">Name this submission</label>
+        <input id="pub-name" type="text" maxlength="40" placeholder="Molten Gold" autocomplete="off"></div>
       <div><label for="pub-author">Submitter name (optional)</label>
         <input id="pub-author" type="text" maxlength="24" placeholder="anon" autocomplete="off"></div>
       <div><label for="pub-note">One line about it (optional)</label>
@@ -6250,21 +6293,22 @@ function renderBoxes(ctx) {
                autocomplete="off"></div>
     </div>
     <div class="pub-go">
-      <button type="button" class="btn-primary btn-sm" id="pub-go">Publish to the gallery</button>
+      <button type="button" class="btn-primary btn-sm" id="pub-go">Publish this rarity</button>
       <span id="pub-msg"></span>
     </div>
-    <p class="small">Publishing puts these words and colours on a page anyone can read. There is no
-      account and nothing about you is stored - submissions are rate-limited by a salted hash of your
-      IP address, which is not kept in any form that can be turned back into an address.</p>
+    <p class="small">Only your own rarity is submitted - prod's seven are never sent and cannot be
+      changed from here. There is no account and nothing about you is stored; submissions are
+      rate-limited by a salted hash of your IP, which is not kept in any form that can be turned back
+      into an address.</p>
   </section>
 
   <section class="card" id="gallery">
     <h2>What other people suggested</h2>
-    <p class="small">Every palette published from this page. Load one and all the boxes above redraw
-      in someone else's words and colours - which is the fastest way to find out that your idea of
-      what MYTHIC should look like is not everybody's. <b>Hot</b> trades hearts off against age - one
-      heart is worth about three days of freshness - so a palette people like climbs back up while a
-      new one still gets seen. One heart per person per palette, capped per hour.</p>
+    <p class="small">Every rarity published from this page, each one drawn exactly as its author
+      set it up. Load one and it takes the eighth slot in every strip above, so you can see somebody
+      else's idea sitting next to the seven real ones. <b>Hot</b> trades hearts off against age - one
+      heart is worth about three days of freshness - so a rarity people like climbs back up while a
+      new one still gets seen. One heart per person per rarity, capped per hour.</p>
     <div class="gal-bar">
       <div class="seg" id="gsort"><button type="button" data-v="hot" class="on">Hot</button
         ><button type="button" data-v="new">Newest</button
@@ -6307,30 +6351,38 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
   const esc = s => String(s).replace(/[&<>"]/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  // Prod's tiers seed the editable set; after that the two are independent, which is
-  // the point - "mine" has to be free to disagree about words, colours AND how many.
-  const seed = () => TIERS.map(t => ({ word: t.word, hex: t.dark[1], lo: t.lo }));
+  // One tier, yours, described by every part prod's own box is made of. Prod's seven
+  // are not in here at all - they are fixed reference and the designer cannot reach them.
+  const seed = () => ({
+    word: 'LEGENDARY', from: '#fde68a', via: '#fffbeb', to: '#fde68a',
+    bd: '#f59e0b', ink: '#78350f', glow: '#f59e0b',
+    glowSize: 18, glowAlpha: 35, shimmer: true, lo: 500000,
+  });
+  const DIALS = ['word', 'from', 'via', 'to', 'bd', 'ink', 'glow', 'glowSize', 'glowAlpha', 'shimmer', 'lo'];
 
   const S = {
     n: 25891,
     theme: 'dark',
-    pal: 'prod',
     amp: false,
     on: new Set(STYLES.filter(s => s.on).map(s => s.key)),
-    mine: seed(),
+    design: seed(),
     data: null,
   };
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
-    if (saved && Array.isArray(saved.mine) && saved.mine.length) S.mine = saved.mine;
+    // Merge onto a fresh seed so an entry saved before a dial existed still opens.
+    if (saved && saved.design && typeof saved.design === 'object') {
+      S.design = Object.assign(seed(), saved.design);
+    }
   } catch (e) { /* a corrupt entry is not worth a broken page */ }
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ mine: S.mine })); } catch (e) {} };
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ design: S.design })); } catch (e) {} };
 
-  // The tier list a strip should draw, resolved for the current theme. Prod's entries
-  // paint with the literal oklch; edited ones only ever have a hex.
-  const listFor = pal => pal === 'prod'
-    ? TIERS.map(t => ({ key: t.key, word: t.word, colour: t[S.theme][0], lo: t.lo }))
-    : S.mine.map(t => ({ key: null, word: t.word || '?', colour: t.hex, lo: Number(t.lo) || 0 }));
+  // Prod's seven, resolved for the current theme, then yours as an eighth. Prod's
+  // entries paint with the literal oklch they ship; yours is whatever the dials say.
+  const tierList = () => TIERS
+    .map(t => ({ key: t.key, word: t.word, colour: t[S.theme][0], lo: t.lo }))
+    .concat([{ key: null, mine: true, word: S.design.word || 'YOURS',
+               colour: S.design.bd, lo: Math.max(0, Number(S.design.lo) || 0) }]);
 
   // Which box the number actually lands in: the highest floor it clears. Reading the
   // floors rather than the order means a hand-typed cutoff out of sequence still
@@ -6366,20 +6418,28 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
       return '--sb-bg:' + row.bg[i] + ';--sb-bd:' + row.bd[i] +
              ';--sb-sh:' + row.sh[i] + ';--sb-ink:' + row.ink[i];
     }
-    const c = t.colour;
-    const mix = (pct, other) => 'color-mix(in srgb, ' + c + ' ' + pct + '%, ' + other + ')';
-    return '--sb-bg:linear-gradient(to bottom right,' + mix(22, 'var(--surface)') + ',var(--surface),' +
-             mix(22, 'var(--surface)') + ')' +
-           ';--sb-bd:' + mix(60, 'var(--surface)') +
-           ';--sb-sh:0 0 14px ' + mix(35, 'transparent') + ', inset 0 2px 4px 0 ' + mix(30, 'transparent') +
-           ';--sb-ink:' + c;
+    // Yours: the dials, assembled the same way prod assembles a row of its table.
+    const d = S.design;
+    const glow = Number(d.glowSize) > 0
+      ? '0 0 ' + Number(d.glowSize) + 'px ' + rgba(d.glow, Number(d.glowAlpha) / 100) + ', '
+      : '';
+    return '--sb-bg:linear-gradient(to bottom right,' + d.from + ',' + d.via + ',' + d.to + ')' +
+           ';--sb-bd:' + d.bd +
+           ';--sb-sh:' + glow + 'inset 0 2px 4px 0 ' + rgba(d.from, .5) +
+           ';--sb-ink:' + d.ink;
+  }
+
+  // #rrggbb + alpha -> rgba(), so a glow can be dialled down without a second input.
+  function rgba(hex, a) {
+    const v = parseInt(String(hex).slice(1), 16) || 0;
+    return 'rgba(' + ((v >> 16) & 255) + ',' + ((v >> 8) & 255) + ',' + (v & 255) + ',' + a + ')';
   }
 
   function scoreBoxHTML(t, i, real) {
     const s = fmt(S.n).replace(/,/g, '');
     // Prod sizes the digits by how many there are: text-5xl at five, text-4xl at six.
     const size = s.length <= 5 ? '3rem' : '2.25rem';
-    const shim = (!t.key || SCORE[t.key].shim)
+    const shim = (t.key ? SCORE[t.key].shim : S.design.shimmer)
       ? '<div class="sbx-shimwrap"><div class="sbx-shim"></div></div>' : '';
     return '<figure class="sfig' + (i === real ? ' real' : '') + '" style="--tc:' + t.colour + '">' +
       '<div class="sbx" style="' + scoreCSS(t) + '">' +
@@ -6393,8 +6453,8 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     '</figure>';
   }
 
-  function stripHTML(styleKey, pal) {
-    const list = listFor(pal);
+  function stripHTML(styleKey) {
+    const list = tierList();
     const real = landing(list);
     const draw = styleKey === 'score' ? scoreBoxHTML : boxHTML;
     return '<div class="pv s-' + styleKey + (S.amp ? ' amp' : '') + '" data-theme="' + S.theme + '">' +
@@ -6402,21 +6462,18 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
   }
 
   function paintRows() {
-    const pals = S.pal === 'both' ? ['prod', 'mine'] : [S.pal];
     $('rows').innerHTML = STYLES.filter(s => S.on.has(s.key)).map(s =>
       '<section class="srow"><h2>' + esc(s.name) +
         ' <i class="tag-src ' + s.src + '">' + s.src + '</i></h2>' +
       '<p class="small">' + s.note + '</p>' +
-      pals.map(p =>
-        (pals.length > 1 ? '<p class="palname">' + (p === 'prod' ? 'Prod' : 'Mine') + '</p>' : '') +
-        stripHTML(s.key, p)).join('') +
+      stripHTML(s.key) +
       '</section>').join('') ||
       '<p class="small">No box styles selected.</p>';
   }
 
   function paintRead() {
     if (!S.data) { $('read').innerHTML = '<span>Scoring&hellip;</span>'; return; }
-    const list = listFor(S.pal === 'mine' ? 'mine' : 'prod');
+    const list = tierList();
     const t = list[landing(list)] || { word: '-', colour: 'var(--muted)' };
     const top = S.data.badges.slice(0, 8).map(b => b.emoji).join(' ');
     $('read').innerHTML =
@@ -6426,51 +6483,71 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
       (top ? '<span>' + top + '</span>' : '');
   }
 
-  function exportText() {
-    const slug = w => (w || 'tier').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'tier';
-    const vars = S.mine.map(t => '  --tier-' + slug(t.word) + ': ' + t.hex + ';').join('\n');
-    const rows = S.mine.slice(1).map((t, i) =>
-      '  [' + t.lo + ', ' + JSON.stringify(slug(S.mine[i].word)) + '],').join('\n');
-    const top = S.mine[S.mine.length - 1];
-    return ':root {\n' + vars + '\n}\n\n// EP floors, in the shape src/index.js wants\n' +
-      'const CARD_TIERS = [\n' + rows + '\n]; // >= ' + top.lo + ' -> ' + JSON.stringify(slug(top.word));
+  const DIAL_IDS = {
+    word: 'd-word', from: 'd-from', via: 'd-via', to: 'd-to', bd: 'd-bd', ink: 'd-ink',
+    glow: 'd-glow', glowSize: 'd-size', glowAlpha: 'd-alpha', lo: 'd-lo', shimmer: 'd-shim',
+  };
+
+  // State -> inputs. Only called when something other than typing changed the design
+  // (reset, randomise, loading someone else's), because writing a field's own value
+  // back into it mid-keystroke moves the caret to the end.
+  function syncDials() {
+    for (const k in DIAL_IDS) {
+      const el = $(DIAL_IDS[k]);
+      if (!el) continue;
+      if (el.type === 'checkbox') el.checked = !!S.design[k];
+      else el.value = S.design[k];
+    }
   }
 
-  // Rebuilds the rows. Skipped while a word is being typed - replacing the input
-  // under the caret would drop it back to the start of the field on every keystroke.
-  function paintEditor() {
-    $('ed').innerHTML = S.mine.map((t, i) =>
-      '<div class="edr" data-i="' + i + '">' +
-      '<input type="color" value="' + t.hex + '" aria-label="Colour, tier ' + (i + 1) + '">' +
-      '<input type="text" class="edw" value="' + esc(t.word) + '" maxlength="18" ' +
-        'aria-label="Rarity name, tier ' + (i + 1) + '">' +
-      '<input type="number" class="edl" value="' + t.lo + '" min="0" step="1" ' +
-        'aria-label="EP floor, tier ' + (i + 1) + '">' +
-      '<button type="button" class="edx" title="Remove this tier">&times;</button></div>').join('');
+  // Inputs -> state.
+  function readDials() {
+    const d = S.design;
+    d.word = ($('d-word').value || '').toUpperCase();
+    for (const k of ['from', 'via', 'to', 'bd', 'ink', 'glow']) d[k] = $(DIAL_IDS[k]).value;
+    d.glowSize = Number($('d-size').value);
+    d.glowAlpha = Number($('d-alpha').value);
+    d.lo = Math.max(0, Number($('d-lo').value) || 0);
+    d.shimmer = $('d-shim').checked;
+  }
+
+  function paintDesign() {
+    const d = S.design;
+    $('d-size-v').textContent = d.glowSize + 'px';
+    $('d-alpha-v').textContent = d.glowAlpha + '%';
+    $('d-stage').innerHTML = scoreBoxHTML(
+      { key: null, mine: true, word: d.word || 'YOURS', colour: d.bd, lo: d.lo }, 0, -1);
     paintExport();
   }
 
+  const slugOf = w => (w || 'tier').toLowerCase().replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'tier';
+
   function paintExport() {
-    $('ed-out').textContent = exportText();
-    const words = S.mine.map(t => (t.word || '').toUpperCase());
-    const dupes = [...new Set(words.filter((w, i) => w && words.indexOf(w) !== i))];
+    const d = S.design;
+    const glow = Number(d.glowSize) > 0
+      ? '0 0 ' + d.glowSize + 'px ' + rgba(d.glow, d.glowAlpha / 100) + ', ' : '';
+    $('ed-out').textContent =
+      '/* ' + (d.word || 'TIER') + ' - built the way prod builds a scoring box */\n' +
+      '.tier-' + slugOf(d.word) + ' {\n' +
+      '  --sb-bg: linear-gradient(to bottom right, ' + d.from + ', ' + d.via + ', ' + d.to + ');\n' +
+      '  --sb-bd: ' + d.bd + ';\n' +
+      '  --sb-sh: ' + glow + 'inset 0 2px 4px 0 ' + rgba(d.from, .5) + ';\n' +
+      '  --sb-ink: ' + d.ink + ';\n' +
+      '}\n/* shimmer ' + (d.shimmer ? 'on' : 'off') + ' · from ' + fmt(d.lo) + ' EP */';
+
     const notes = [];
-    if (S.mine.length !== TIERS.length) {
-      notes.push(S.mine.length + ' tiers against prod’s ' + TIERS.length + '.');
+    if (!String(d.word).trim()) notes.push('Give the rarity a name before publishing.');
+    if (TIERS.some(t => t.word === d.word)) {
+      notes.push('"' + d.word + '" is already one of prod\'s seven - yours will sit next to it.');
     }
-    if (S.mine.some((t, i) => i && Number(t.lo) <= Number(S.mine[i - 1].lo))) {
-      notes.push('Some floors are not strictly increasing - a tier whose floor is at or below the ' +
-        'one before it can never be the landing tier.');
-    }
-    if (dupes.length) notes.push('Duplicate word: ' + dupes.join(', ') + '.');
-    if (!ALIGNED) {
-      notes.push('CARD_TIER_NAMES in index.js no longer matches prod’s tier order, so the ' +
-        'floors above may be paired with the wrong words.');
+    if (Number(d.glowSize) === 0) {
+      notes.push('No glow at all, which is exactly what prod does for trash and common.');
     }
     $('ed-note').textContent = notes.join(' ');
   }
 
-  function paint() { paintRows(); paintRead(); paintEditor(); }
+  function paint() { paintRows(); paintRead(); paintDesign(); }
 
   // --- scoring -------------------------------------------------------------
   // /api is the same compute() the calculator uses, so nothing here can drift from
@@ -6509,7 +6586,6 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     fn(b.dataset.v);
   });
   seg('theme', v => { S.theme = v; paintRows(); paintRead(); });
-  seg('pal', v => { S.pal = v; paintRows(); paintRead(); });
   seg('amp', v => { S.amp = v === '1'; paintRows(); });
 
   let debounce = 0;
@@ -6530,29 +6606,43 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     score();
   });
 
-  $('ed').addEventListener('input', e => {
-    const row = e.target.closest('.edr');
-    if (!row) return;
-    const rec = S.mine[Number(row.dataset.i)];
-    if (!rec) return;
-    if (e.target.type === 'color') rec.hex = e.target.value;
-    else if (e.target.classList.contains('edw')) rec.word = e.target.value.toUpperCase();
-    else if (e.target.classList.contains('edl')) rec.lo = Math.max(0, Number(e.target.value) || 0);
+  // One handler for every dial: they all live inside #editor and all carry a d- id.
+  const onDial = e => {
+    if (!e.target.id || e.target.id.slice(0, 2) !== 'd-') return;
+    readDials();
     save();
-    paintRows(); paintRead(); paintExport();      // NOT paintEditor - see above
+    paint();
+  };
+  $('editor').addEventListener('input', onDial);
+  $('editor').addEventListener('change', onDial);
+
+  $('d-reset').addEventListener('click', () => { S.design = seed(); save(); syncDials(); paint(); });
+
+  // Randomise around one hue so the result still reads as a designed box rather than
+  // six unrelated colours - the gradient and the glow stay in the same family, which
+  // is what every one of prod's own tiers does.
+  $('d-random').addEventListener('click', () => {
+    const hex = (h, sat, l) => {
+      const a = sat * Math.min(l, 1 - l);
+      const f = n => {
+        const k = (n + h / 30) % 12;
+        const v = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+        return Math.round(255 * v).toString(16).padStart(2, '0');
+      };
+      return '#' + f(0) + f(8) + f(4);
+    };
+    const h = Math.floor(Math.random() * 360);
+    const h2 = (h + 25 + Math.floor(Math.random() * 60)) % 360;
+    S.design = Object.assign(S.design, {
+      from: hex(h, .75, .80), via: hex(h2, .70, .94), to: hex(h, .75, .80),
+      bd: hex(h, .80, .60), ink: hex(h, .85, .25), glow: hex(h, .90, .55),
+      glowSize: 6 + Math.floor(Math.random() * 40),
+      glowAlpha: 20 + Math.floor(Math.random() * 60),
+      shimmer: Math.random() < .75,
+    });
+    save(); syncDials(); paint();
   });
-  $('ed').addEventListener('click', e => {
-    if (!e.target.classList.contains('edx')) return;
-    if (S.mine.length <= 1) return;               // something has to be left to draw
-    S.mine.splice(Number(e.target.closest('.edr').dataset.i), 1);
-    save(); paint();
-  });
-  $('ed-add').addEventListener('click', () => {
-    const last = S.mine[S.mine.length - 1];
-    S.mine.push({ word: 'NEW', hex: '#8b5cf6', lo: last ? Number(last.lo) * 2 || 1000 : 0 });
-    save(); paint();
-  });
-  $('ed-reset').addEventListener('click', () => { S.mine = seed(); save(); paint(); });
+
   $('ed-copy').addEventListener('click', async () => {
     const b = $('ed-copy'), was = b.textContent;
     try {
@@ -6586,19 +6676,32 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     return Math.round(h / 24) + 'd ago';
   };
 
+  // The gallery draws each submission as the box its author actually designed - a
+  // row of colour chips would not show what any of them chose.
+  function miniBox(d) {
+    const glow = Number(d.glowSize) > 0
+      ? '0 0 ' + Number(d.glowSize) + 'px ' + rgba(d.glow, Number(d.glowAlpha) / 100) + ', ' : '';
+    const css = '--sb-bg:linear-gradient(to bottom right,' + d.from + ',' + d.via + ',' + d.to + ')' +
+      ';--sb-bd:' + d.bd + ';--sb-sh:' + glow + 'inset 0 2px 4px 0 ' + rgba(d.from, .5) +
+      ';--sb-ink:' + d.ink;
+    return '<div class="sbx" style="' + css + '">' +
+      '<div class="sbx-gloss"></div>' +
+      (d.shimmer ? '<div class="sbx-shimwrap"><div class="sbx-shim"></div></div>' : '') +
+      '<div class="sbx-n">' + String(S.n) + '</div></div>';
+  }
+
   function galCard(p) {
-    const swatches = p.tiers.map(t =>
-      '<span class="gc-sw" style="background:' + t.hex + ';color:' + ink(t.hex) + '" title="' +
-      esc(t.word) + ' from ' + fmt(t.lo) + ' EP">' + esc(t.word) + '</span>').join('');
+    const d = p.design || {};
     return '<article class="gc">' +
       '<div class="gc-hd"><b>' + esc(p.name) + '</b><span>' +
         (p.author ? esc(p.author) + ' &middot; ' : '') + ago(p.created) + '</span></div>' +
       (p.note ? '<p class="gc-note">' + esc(p.note) + '</p>' : '') +
-      '<div class="gc-strip">' + swatches + '</div>' +
+      (d.bd ? '<div class="gc-stage">' + miniBox(d) + '</div>' : '') +
       '<div class="gc-ft">' +
         '<button type="button" class="btn-sm like' + (G.liked.has(p.id) ? ' on' : '') +
           '" data-like="' + p.id + '">&hearts; ' + p.likes + '</button>' +
-        '<span class="sp"></span><span class="small">' + p.tierCount + ' tiers</span>' +
+        '<span class="sp"></span><span class="small">' + esc(d.word || '?') +
+          ' \u00b7 ' + fmt(Number(d.lo) || 0) + '+ EP</span>' +
         '<button type="button" class="btn-sm" data-use="' + p.id + '">Load</button>' +
       '</div></article>';
   }
@@ -6649,10 +6752,10 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     if (use) {
       const p = G.items.find(x => x.id === use.dataset.use);
       if (!p) return;
-      S.mine = p.tiers.map(t => ({ word: t.word, hex: t.hex, lo: t.lo }));
+      if (!p.design) return;
+      S.design = Object.assign(seed(), p.design);
       save();
-      S.pal = 'mine';
-      [...$('pal').children].forEach(c => c.classList.toggle('on', c.dataset.v === 'mine'));
+      syncDials();
       paint();
       $('rows').scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
@@ -6690,7 +6793,7 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          name, author: $('pub-author').value, note: $('pub-note').value, tiers: S.mine,
+          name, author: $('pub-author').value, note: $('pub-note').value, design: S.design,
         }),
       });
       const j = await r.json();
@@ -6708,6 +6811,7 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     }
   });
 
+  syncDials();
   paint();
   score();
   loadLikes().then(() => loadGallery(true));
