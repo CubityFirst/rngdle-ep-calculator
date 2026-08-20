@@ -6389,7 +6389,6 @@ function renderBoxes(ctx, shared) {
   <section class="card shared">
     <h2>${esc(shared.name)}<span>${shared.author ? 'by ' + esc(shared.author) : 'anonymous'}</span></h2>
     ${shared.note ? `<p class="small">${esc(shared.note)}</p>` : ''}
-    <p class="small">Loaded into the designer below - change anything and it becomes yours.</p>
   </section>` : '';
 
   const body = `<div class="wrap">
