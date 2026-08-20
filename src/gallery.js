@@ -57,14 +57,22 @@ const bad = (message, status = 400) => json({ error: message }, status);
 // ---------------------------------------------------------------------------
 
 /**
- * A stable per-submitter key: SHA-256 over the client IP and a salt, hex, truncated.
- * This is what rate limiting and like-dedupe key on, and it is deliberately all we
- * keep - the IP itself is never written anywhere.
+ * A stable per-submitter key: SHA-256 over a salt and the client IP, truncated.
+ * Rate limiting and heart-dedupe key on this; the IP itself is never written.
  *
- * `env.IP_SALT` should be set (`npx wrangler secret put IP_SALT`). Without it the
- * hash is still not reversible to an IP by anyone reading the table, but it is
- * guessable by anyone who can enumerate IPs, so the fallback is a dev convenience
- * and not a production one.
+ * Be precise about what that buys, because it is easy to overstate. Someone who
+ * reads the database alone cannot recover addresses. Someone who ALSO has IP_SALT
+ * can recover all of them: IPv4 is 2^32 addresses and SHA-256 is built to be fast,
+ * so enumerating the whole space is minutes of GPU time - and confirming one
+ * suspected address is a single hash, which works against IPv6 too. The protection
+ * is that the salt stays secret, not that the hash is one-way in practice.
+ *
+ * The key is also stable, so it links one person's submissions and hearts to each
+ * other. This is pseudonymous data, not anonymous data.
+ *
+ * `env.IP_SALT` must be set in production (`npx wrangler secret put IP_SALT`). The
+ * fallback below is a literal in this file, so with it every key is reversible by
+ * anyone who can read the source - it exists so the tests run, and nothing else.
  */
 async function callerKey(request, env) {
   const ip = request.headers.get('cf-connecting-ip')
@@ -375,6 +383,12 @@ async function likePalette(id, request, env, db) {
     return bad(`That is ${LIMITS.heartsPerHour} hearts in an hour. Try again later.`, 429);
   }
   await db.prepare('INSERT INTO like_events (voter_key, created) VALUES (?, ?)').bind(key, now).run();
+
+  // This table exists only to answer "how many hearts in the last hour", so anything
+  // older is dead weight - and dead weight here is a stored identifier that no longer
+  // does any work. Pruning on every write holds the table to roughly one hour of
+  // activity, which is also what keeps this delete scanning next to nothing.
+  await db.prepare('DELETE FROM like_events WHERE created <= ?').bind(now - 3600_000).run();
 
   // Toggle. The PK on (palette_id, voter_key) is what makes this idempotent per
   // voter; the count on palettes is a denormalisation kept in step right here.

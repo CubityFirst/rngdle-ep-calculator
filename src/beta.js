@@ -6531,9 +6531,9 @@ ${banner}
       <button type="button" class="btn-primary btn-sm" id="pub-go">Publish this rarity</button>
       <span id="pub-msg"></span>
     </div>
-    <p class="small">There is no account and nothing about you is stored; submissions are
-      rate-limited by a salted hash of your IP, which is not kept in any form that can be turned back
-      into an address.</p>
+    <p class="small">There is no account. Submissions are rate-limited by a salted hash of your
+      IP address - the address itself is never stored, though the hash stays the same between
+      submissions.</p>
   </section>
 
   <section class="card" id="gallery">

@@ -305,6 +305,28 @@ console.log('gallery');
   r = await api(env, '/api/palettes/' + young.body.id + '/like', { method: 'POST', ip: '10.9.9.8' });
   check('the cap is per caller, not global', r.status === 200, JSON.stringify(r.body));
 
+  // --- retention ----------------------------------------------------------
+  // like_events is only ever read over the last hour, so a spent row is a stored
+  // identifier doing no work. Every write prunes them.
+  const evCount = async () =>
+    (await env.DB.prepare('SELECT COUNT(*) AS c FROM like_events').first()).c;
+
+  await env.DB.prepare('INSERT INTO like_events (voter_key, created) VALUES (?, ?)')
+    .bind('ancient-caller', Date.now() - 5 * 3600_000).run();
+  await env.DB.prepare('INSERT INTO like_events (voter_key, created) VALUES (?, ?)')
+    .bind('recent-caller', Date.now() - 60_000).run();
+  const before = await evCount();
+
+  // Any heart triggers the prune.
+  await api(env, '/api/palettes/' + young.body.id + '/like', { method: 'POST', ip: '10.7.7.7' });
+
+  const stale = (await env.DB.prepare(
+    'SELECT COUNT(*) AS c FROM like_events WHERE created <= ?').bind(Date.now() - 3600_000).first()).c;
+  check('spent heart events are pruned', stale === 0, `${stale} rows older than the window survived`);
+  check('recent heart events are kept', (await evCount()) < before + 2 && (await env.DB.prepare(
+    'SELECT COUNT(*) AS c FROM like_events WHERE voter_key = ?').bind('recent-caller').first()).c === 1,
+    'a row inside the window was deleted');
+
   // --- paging -------------------------------------------------------------
   r = await api(env, '/api/palettes?limit=2');
   check('limit pages', r.body.palettes.length === 2 && r.body.more === true);

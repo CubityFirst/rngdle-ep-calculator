@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS palette_likes (
 -- state, so it cannot answer "how many times has this caller hearted in the last
 -- hour" - a toggle loop leaves no trace there. This table is that trace, and it is
 -- what the per-IP heart rate limit counts.
+--
+-- Rows here are transient: gallery.js deletes anything older than the rate-limit
+-- window on every write, so the table holds about an hour of activity and no more.
+-- Nothing reads it beyond that window, and a spent row is a stored identifier doing
+-- no work.
 CREATE TABLE IF NOT EXISTS like_events (
   voter_key TEXT    NOT NULL,
   created   INTEGER NOT NULL
