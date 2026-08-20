@@ -129,6 +129,8 @@ console.log('gallery');
     ['negative floor', { design: bend({ lo: -5 }) }],
     ['design is a list', { design: [DESIGN] }],
     ['design missing', { design: undefined }],
+    ['submission name is an object', { name: { toString: 1 } }],
+    ['author is an object', { author: { toString: 1 } }],
   ];
   for (const [label, over] of rejects) {
     const payload = { name: 'A rarity', design: bend({}), ...over };
@@ -136,6 +138,59 @@ console.log('gallery');
     check('reject: ' + label, rr.status === 400 && typeof rr.body.error === 'string',
       `got ${rr.status} ${JSON.stringify(rr.body)}`);
   }
+
+  // --- the effect dials ---------------------------------------------------
+  // Every one of these is rendered straight into CSS on other people's pages, so
+  // each has a stated ceiling and none of them may arrive unbounded.
+  const fxRejects = [
+    ['too many sparkles', { sparkles: 15 }],
+    ['negative sparkles', { sparkles: -1 }],
+    ['seed out of range', { seed: 10000 }],
+    ['radius too big', { radius: 29 }],
+    ['breathe too slow', { breathe: 81 }],
+    ['unknown digit style', { inkStyle: 'neon' }],
+    ['digit style is an object', { inkStyle: { toString: 1 } }],
+    // Same hazard, other fields: String({toString:1}) throws a TypeError, and an
+    // escaping TypeError would let a hostile payload choose the status code.
+    ['rarity name is an object', { word: { toString: 1 } }],
+    ['a colour is an object', { bd: { toString: 1 } }],
+  ];
+  for (const [label, over] of fxRejects) {
+    const rr = await publish(env, over, { name: 'fx ' + label, ip: '10.0.0.11' });
+    check('reject: ' + label, rr.status === 400 && typeof rr.body.error === 'string',
+      `got ${rr.status} ${JSON.stringify(rr.body)}`);
+  }
+
+  // Absent effect fields describe a box without those effects - not a bad request.
+  r = await publish(env, {}, { name: 'Plain', ip: '10.0.0.12' });
+  check('effects default when absent',
+    r.status === 201 && r.body.design.sparkles === 0 && r.body.design.holo === false
+      && r.body.design.ring === false && r.body.design.pulse === false
+      && r.body.design.radius === 12 && r.body.design.breathe === 30
+      && r.body.design.inkStyle === 'solid',
+    JSON.stringify(r.body.design));
+
+  // ...and a fully decorated one survives the round trip intact.
+  r = await publish(env, {
+    sparkles: 12, seed: 4242, holo: true, ring: true, pulse: true,
+    radius: 26, breathe: 55, inkStyle: 'gradient',
+  }, { name: 'Everything on', ip: '10.0.0.13' });
+  const fx = r.body.design;
+  check('effects round-trip',
+    fx.sparkles === 12 && fx.seed === 4242 && fx.holo === true && fx.ring === true
+      && fx.pulse === true && fx.radius === 26 && fx.breathe === 55 && fx.inkStyle === 'gradient',
+    JSON.stringify(fx));
+
+  // The seed is what makes a sparkle scatter reproducible everywhere it is drawn,
+  // so it has to survive as the exact number that was sent.
+  check('the sparkle seed is kept exactly', fx.seed === 4242, JSON.stringify(fx.seed));
+
+  // Truthiness is normalised, so a design never carries a string where the renderer
+  // expects a boolean.
+  r = await publish(env, { holo: 'yes', ring: 0, pulse: 1 }, { name: 'Coerced', ip: '10.0.0.14' });
+  check('booleans are normalised',
+    r.body.design.holo === true && r.body.design.ring === false && r.body.design.pulse === true,
+    JSON.stringify(r.body.design));
 
   // Cleaning keeps ordinary punctuation and drops only control characters.
   r = await publish(env, {}, { name: 'Bell\u0007Name', ip: '10.0.0.3' });

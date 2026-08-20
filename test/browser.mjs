@@ -207,6 +207,46 @@ const INTERACTIONS = {
       if (v !== '48px') throw new Error(`glow readout says ${v}`);
       return v;
     }],
+    // The extras stack: breathing, the spinning ring and the pulse all animate the
+    // same element, which only works because the animation list is composed in JS
+    // rather than assembled from CSS classes that would overwrite each other.
+    ['effects stack on one box', async p => {
+      for (const id of ['d-holo', 'd-ring', 'd-pulse']) await p.check('#' + id);
+      await p.$eval('#d-sparkles', e => { e.value = '10'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+      await p.selectOption('#d-ink-style', 'gradient');
+      await p.waitForTimeout(350);
+      const m = await p.evaluate(() => {
+        const box = document.querySelector('#d-stage .sbx');
+        return {
+          anim: getComputedStyle(box).animationName,
+          sparks: box.querySelectorAll('.sbx-sparks i').length,
+          holo: !!box.querySelector('.sbx-holo'),
+          ring: box.classList.contains('fx-ring'),
+          ink: box.querySelector('.sbx-n').className,
+        };
+      });
+      const want = ['sbx-breathe', 'sbx-ring', 'sbx-pulse'];
+      for (const a of want) if (!m.anim.includes(a)) throw new Error(`${a} missing from "${m.anim}"`);
+      if (m.sparks !== 10) throw new Error(`${m.sparks} sparkles, wanted 10`);
+      if (!m.holo) throw new Error('no holographic layer');
+      if (!m.ring) throw new Error('no spinning border');
+      if (!/ink-gradient/.test(m.ink)) throw new Error(`digit style did not apply: ${m.ink}`);
+      return `${m.anim} + ${m.sparks} sparkles`;
+    }],
+    // Scatter comes from the design's seed, so the same design has to look identical
+    // wherever it is drawn - otherwise a published rarity would not match its preview.
+    ['sparkle scatter is deterministic', async p => {
+      const stage = () => p.$$eval('#d-stage .sbx-sparks i', e => e.map(x => x.style.left).join(','));
+      const before = await stage();
+      await p.click('#d-reseed');
+      await p.waitForTimeout(300);
+      const after = await stage();
+      if (before === after) throw new Error('rescatter changed nothing');
+      const strip = await p.$$eval('.pv:last-of-type .sfig:last-child .sbx-sparks i',
+        e => e.map(x => x.style.left).join(','));
+      if (strip !== after) throw new Error('the strip and the stage scattered differently');
+      return after.split(',').length + ' sparkles, stage and strip agree';
+    }],
     ['randomise keeps the name', async p => {
       const before = await p.inputValue('#d-bd');
       await p.click('#d-random');

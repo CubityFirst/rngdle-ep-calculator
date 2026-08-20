@@ -5916,17 +5916,17 @@ const BOX_STYLES = [
       'gradient, a 135&deg; gloss sheet, a 105&deg; shimmer sweeping on a 4s loop, and the whole box ' +
       'breathing between scale(1) and scale(1.015) every 3s. Trash and common are the odd ones out - ' +
       'prod gives them a plain drop shadow and switches the shimmer off entirely.' },
-  { key: 'card', name: 'Card', src: 'prod', on: true,
+  { key: 'card', name: 'Card', src: 'prod', on: false,
     note: 'prod .polished-card: 1px --outline, --surface fill, 8px radius, a soft 1px/3px shadow. ' +
       'Note what the tier colour does not do here - the box stays neutral and the colour lands only ' +
       'on the word, which is the one thing prod emits a .text-tier-* utility for.' },
-  { key: 'tint', name: 'Tinted', src: 'lab', on: true,
+  { key: 'tint', name: 'Tinted', src: 'lab', on: false,
     note: 'The same card with the tier colour mixed 55% into the border and 8% into the fill. Prod ' +
       'has the tokens for this and never does it.' },
-  { key: 'ring', name: 'Ring', src: 'lab', on: true,
+  { key: 'ring', name: 'Ring', src: 'lab', on: false,
     note: 'Tier colour as a glow ring rather than a fill - the shape of prod&rsquo;s --favorite-ring-* ' +
       'treatment, but keyed to one tier instead of all five at once.' },
-  { key: 'holo', name: 'Holographic', src: 'prod', on: true,
+  { key: 'holo', name: 'Holographic', src: 'prod', on: false,
     note: 'prod .card-holographic-overlay: a ten-stop 125&deg; rainbow at 200% size, mix-blend-mode ' +
       'overlay, drifting on an 8s loop. Prod runs it at 3-5% alpha, which is very nearly invisible - ' +
       'switch to Amplify to see the thing you are looking at.' },
@@ -6046,15 +6046,33 @@ function renderBoxes(ctx) {
   .sfig.real figcaption i { color:var(--prose-2); }
 
   .sbx { position:relative; overflow:hidden; display:inline-flex; align-items:center;
-    justify-content:center; padding:1.25rem 2rem; border-radius:.75rem;
-    border:3px solid var(--sb-bd); background-image:var(--sb-bg); box-shadow:var(--sb-sh);
-    transition:all .5s; animation:3s ease-in-out infinite sbx-breathe; max-width:100%; }
+    justify-content:center; padding:1.25rem 2rem; border-radius:var(--sb-radius, .75rem);
+    border:3px solid var(--sb-bd); background:var(--sb-bg) padding-box; box-shadow:var(--sb-sh);
+    transition:all .5s; max-width:100%;
+    /* Composed in JS rather than stacked as classes: breathing, the rotating ring and
+       the glow pulse can all be on at once, and an animation shorthand in a later rule
+       would replace the whole list instead of adding to it. */
+    animation:var(--sb-anim, 3s ease-in-out infinite sbx-breathe); }
+
+  /* A conic gradient on the border box, the fill on the padding box - the standard
+     way to get a gradient border that still respects border-radius. */
+  .sbx.fx-ring { border-color:transparent;
+    background:var(--sb-bg) padding-box,
+      conic-gradient(from var(--sb-ring-a), var(--sb-bd), var(--sb-glow-c), var(--sb-bd)) border-box; }
+  @property --sb-ring-a { syntax:"<angle>"; inherits:false; initial-value:0deg; }
+  @keyframes sbx-ring { to { --sb-ring-a:360deg; } }
+
+  /* The pulse rides on filter, not box-shadow: overflow:hidden would clip an inner
+     glow layer, and a filter applies to the element itself so it escapes the clip. */
+  @keyframes sbx-pulse {
+    0%, 100% { filter:drop-shadow(0 0 0 transparent); }
+    50% { filter:drop-shadow(0 0 var(--sb-pulse, 14px) var(--sb-glow-c)); } }
   .sfig.real .sbx { outline:2px solid var(--outline-strong); outline-offset:3px; }
 
   /* The gloss sheet and the shimmer are separate absolutely-positioned layers in
      prod, inset by -1px so they cover the border too. Both are pointer-events:none. */
-  .sbx-gloss, .sbx-shimwrap { position:absolute; inset:-1px; overflow:hidden;
-    pointer-events:none; border-radius:.75rem; }
+  .sbx-gloss, .sbx-shimwrap, .sbx-holo { position:absolute; inset:-1px; overflow:hidden;
+    pointer-events:none; border-radius:inherit; }
   .sbx-gloss { background:linear-gradient(135deg, rgba(255,255,255,.4) 0%,
     rgba(255,255,255,.1) 40%, transparent 60%); }
   .pv[data-theme="dark"] .sbx-gloss, .dstage .sbx-gloss, .gc-stage .sbx-gloss { opacity:.4; }
@@ -6074,6 +6092,33 @@ function renderBoxes(ctx) {
   .pv[data-theme="dark"] .sbx-n, .dstage .sbx-n, .gc-stage .sbx-n {
     text-shadow:0 1px 2px rgba(255,255,255,.2); }
   .sbx-n span { display:inline-block; transition:all .5s; }
+
+  /* Prod's holographic sheen, borrowed onto a designed tier. Prod runs it at 3-5%
+     alpha on a card; here it is worth seeing, so the stops are stronger. */
+  .sbx-holo { mix-blend-mode:overlay; background-size:200% 200%; background-position:0 0;
+    animation:8s ease-in-out infinite bx-holo;
+    background-image:linear-gradient(125deg, rgba(0,0,0,0) 0%, rgba(255,0,0,.16) 10%,
+      rgba(255,154,0,.26) 20%, rgba(208,222,33,.26) 30%, rgba(79,220,74,.26) 40%,
+      rgba(63,218,216,.26) 50%, rgba(28,127,238,.26) 60%, rgba(95,21,242,.26) 70%,
+      rgba(186,12,248,.16) 80%, rgba(0,0,0,0) 100%); }
+
+  /* Sparkles sit above the digits on purpose - underneath them they read as dirt on
+     the gradient rather than as something twinkling on top of the box. */
+  .sbx-sparks { position:absolute; inset:0; pointer-events:none; z-index:11; }
+  .sbx-sparks i { position:absolute; width:var(--s); height:var(--s); opacity:0;
+    background:var(--sb-spark); animation:2.6s ease-in-out infinite sbx-spark;
+    clip-path:polygon(50% 0%, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0% 50%, 39% 39%); }
+  @keyframes sbx-spark {
+    0%, 100% { opacity:0; transform:scale(.3) rotate(0deg); }
+    45% { opacity:.95; transform:scale(1) rotate(45deg); }
+    70% { opacity:.25; transform:scale(.7) rotate(80deg); } }
+
+  /* Digit treatments. Both non-solid ones paint through the text, so they drop the
+     white text-shadow that prod uses - it would outline transparent glyphs. */
+  .sbx-n.ink-gradient { color:transparent; -webkit-background-clip:text; background-clip:text;
+    background-image:linear-gradient(180deg, var(--sb-ink), var(--sb-glow-c)); text-shadow:none; }
+  .sbx-n.ink-outline { color:transparent; text-shadow:none;
+    -webkit-text-stroke:1.5px var(--sb-ink); }
 
   @keyframes sbx-breathe { 0%, 100% { transform:scale(1); } 50% { transform:scale(1.015); } }
   @keyframes sbx-shim { from { background-position:200% 0; } to { background-position:-200% 0; } }
@@ -6146,7 +6191,8 @@ function renderBoxes(ctx) {
 
   @media (prefers-reduced-motion: reduce) {
     .s-holo .bx::after, .s-halo .bx::before, .s-glow .bx, .s-shimmer .bx-n,
-    .s-cycle .bx, .sbx, .sbx-shim { animation:none; } }
+    .s-cycle .bx, .sbx, .sbx-shim, .sbx-holo, .sbx-sparks i { animation:none; }
+    .sbx-sparks i { opacity:.8; } }
 
   /* --- the tier designer --- */
   .dz { display:grid; grid-template-columns:minmax(min(230px,100%),.9fr) minmax(min(300px,100%),1.4fr);
@@ -6241,7 +6287,9 @@ function renderBoxes(ctx) {
     <h2>Design a rarity</h2>
     <p class="small">Prod's seven are fixed - they are the reference, and nothing here can repaint
       them. What you get is an eighth of your own, built out of the same parts prod's box is built
-      from, and it sits in every strip above alongside the real ones.</p>
+      from, and it sits in every strip above alongside the real ones. The bottom half of the dials
+      goes past anything prod does: sparkles, a holographic sheen, a border that spins, a glow that
+      breathes.</p>
 
     <div class="dz">
       <div>
@@ -6266,12 +6314,30 @@ function renderBoxes(ctx) {
             <input id="d-alpha" type="range" min="0" max="100" step="1" value="35"></div>
           <div class="dial"><label for="d-lo">From EP</label>
             <input id="d-lo" type="number" min="0" step="1" value="500000"></div>
-          <div class="dial check wide">
-            <input id="d-shim" type="checkbox" checked>
-            <label for="d-shim">Shimmer sweep (prod runs this on every tier above common)</label></div>
+          <div class="dial"><label for="d-sparkles">Sparkles <span class="val" id="d-sparkles-v"></span></label>
+            <input id="d-sparkles" type="range" min="0" max="14" step="1" value="0"></div>
+          <div class="dial"><label for="d-radius">Corner radius <span class="val" id="d-radius-v"></span></label>
+            <input id="d-radius" type="range" min="0" max="28" step="1" value="12"></div>
+          <div class="dial"><label for="d-breathe">Breathing <span class="val" id="d-breathe-v"></span></label>
+            <input id="d-breathe" type="range" min="0" max="80" step="1" value="30"></div>
+          <div class="dial"><label for="d-ink-style">Digits</label>
+            <select id="d-ink-style">
+              <option value="solid">Solid</option>
+              <option value="gradient">Gradient fill</option>
+              <option value="outline">Outlined</option>
+            </select></div>
+          <div class="dial check"><input id="d-shim" type="checkbox" checked>
+            <label for="d-shim">Shimmer sweep</label></div>
+          <div class="dial check"><input id="d-holo" type="checkbox">
+            <label for="d-holo">Holographic sheen</label></div>
+          <div class="dial check"><input id="d-ring" type="checkbox">
+            <label for="d-ring">Spinning border</label></div>
+          <div class="dial check"><input id="d-pulse" type="checkbox">
+            <label for="d-pulse">Pulsing glow</label></div>
         </div>
         <div class="edbtns">
           <button type="button" class="btn-sm" id="d-random">Randomise</button>
+          <button type="button" class="btn-sm" id="d-reseed">Rescatter sparkles</button>
           <button type="button" class="btn-sm" id="d-reset">Reset</button>
           <button type="button" class="btn-sm" id="ed-copy">Copy as CSS</button>
         </div>
@@ -6357,8 +6423,10 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     word: 'LEGENDARY', from: '#fde68a', via: '#fffbeb', to: '#fde68a',
     bd: '#f59e0b', ink: '#78350f', glow: '#f59e0b',
     glowSize: 18, glowAlpha: 35, shimmer: true, lo: 500000,
+    // Past this line is everything prod does not have.
+    sparkles: 6, seed: 1234, holo: false, ring: false, pulse: false,
+    radius: 12, breathe: 30, inkStyle: 'solid',
   });
-  const DIALS = ['word', 'from', 'via', 'to', 'bd', 'ink', 'glow', 'glowSize', 'glowAlpha', 'shimmer', 'lo'];
 
   const S = {
     n: 25891,
@@ -6418,15 +6486,57 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
       return '--sb-bg:' + row.bg[i] + ';--sb-bd:' + row.bd[i] +
              ';--sb-sh:' + row.sh[i] + ';--sb-ink:' + row.ink[i];
     }
-    // Yours: the dials, assembled the same way prod assembles a row of its table.
-    const d = S.design;
+    return designCSS(S.design);
+  }
+
+  // Yours: the dials, assembled the way prod assembles a row of its table, plus the
+  // extras prod has no equivalent for. The animation list is built here rather than
+  // through CSS classes so breathing, the ring and the pulse can all run together.
+  function designCSS(d) {
     const glow = Number(d.glowSize) > 0
       ? '0 0 ' + Number(d.glowSize) + 'px ' + rgba(d.glow, Number(d.glowAlpha) / 100) + ', '
       : '';
+    const anim = [];
+    if (Number(d.breathe) > 0) {
+      anim.push((Number(d.breathe) / 10) + 's ease-in-out infinite sbx-breathe');
+    }
+    if (d.ring) anim.push('4s linear infinite sbx-ring');
+    if (d.pulse) anim.push('2.4s ease-in-out infinite sbx-pulse');
     return '--sb-bg:linear-gradient(to bottom right,' + d.from + ',' + d.via + ',' + d.to + ')' +
            ';--sb-bd:' + d.bd +
            ';--sb-sh:' + glow + 'inset 0 2px 4px 0 ' + rgba(d.from, .5) +
-           ';--sb-ink:' + d.ink;
+           ';--sb-ink:' + d.ink +
+           ';--sb-glow-c:' + d.glow +
+           // Sparkles lean toward white: the glow colour alone disappears against a box
+           // built from that same colour, which is most of them.
+           ';--sb-spark:color-mix(in srgb, ' + d.glow + ' 35%, #ffffff)' +
+           ';--sb-pulse:' + Math.max(6, Number(d.glowSize) || 14) + 'px' +
+           ';--sb-radius:' + Number(d.radius) + 'px' +
+           ';--sb-anim:' + (anim.join(', ') || 'none');
+  }
+
+  // Sparkle placement is scattered from the design's own seed, so the same design
+  // looks identical in the strip, on the stage and in the gallery.
+  function sparkHTML(d) {
+    const n = Number(d.sparkles) || 0;
+    if (!n) return '';
+    let x = (Number(d.seed) || 0) * 9301 + 49297;
+    const rnd = () => { x = (x * 9301 + 49297) % 233280; return x / 233280; };
+    let out = '';
+    for (let i = 0; i < n; i++) {
+      const l = (4 + rnd() * 92).toFixed(1), t = (6 + rnd() * 86).toFixed(1);
+      const sz = (5 + rnd() * 9).toFixed(1), dl = (rnd() * 2.6).toFixed(2);
+      out += '<i style="left:' + l + '%;top:' + t + '%;--s:' + sz + 'px;animation-delay:' + dl + 's"></i>';
+    }
+    return '<div class="sbx-sparks">' + out + '</div>';
+  }
+
+  // The layers inside a designed box, in paint order.
+  function designLayers(d) {
+    return '<div class="sbx-gloss"></div>' +
+      (d.holo ? '<div class="sbx-holo"></div>' : '') +
+      (d.shimmer ? '<div class="sbx-shimwrap"><div class="sbx-shim"></div></div>' : '') +
+      sparkHTML(d);
   }
 
   // #rrggbb + alpha -> rgba(), so a glow can be dialled down without a second input.
@@ -6439,13 +6549,17 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     const s = fmt(S.n).replace(/,/g, '');
     // Prod sizes the digits by how many there are: text-5xl at five, text-4xl at six.
     const size = s.length <= 5 ? '3rem' : '2.25rem';
-    const shim = (t.key ? SCORE[t.key].shim : S.design.shimmer)
-      ? '<div class="sbx-shimwrap"><div class="sbx-shim"></div></div>' : '';
+    const d = S.design;
+    const layers = t.key
+      ? '<div class="sbx-gloss"></div>' + (SCORE[t.key].shim
+          ? '<div class="sbx-shimwrap"><div class="sbx-shim"></div></div>' : '')
+      : designLayers(d);
+    const cls = 'sbx' + (!t.key && d.ring ? ' fx-ring' : '');
+    const inkCls = !t.key && d.inkStyle && d.inkStyle !== 'solid' ? ' ink-' + d.inkStyle : '';
     return '<figure class="sfig' + (i === real ? ' real' : '') + '" style="--tc:' + t.colour + '">' +
-      '<div class="sbx" style="' + scoreCSS(t) + '">' +
-        '<div class="sbx-gloss"></div>' + shim +
-        '<div class="sbx-n" style="font-size:' + size + '">' +
-          [...s].map(d => '<span>' + d + '</span>').join('') +
+      '<div class="' + cls + '" style="' + scoreCSS(t) + '">' + layers +
+        '<div class="sbx-n' + inkCls + '" style="font-size:' + size + '">' +
+          [...s].map(ch => '<span>' + ch + '</span>').join('') +
         '</div>' +
       '</div>' +
       '<figcaption>' + esc(t.word) + '<i>' + fmt(t.lo) + '+ EP' +
@@ -6486,6 +6600,8 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
   const DIAL_IDS = {
     word: 'd-word', from: 'd-from', via: 'd-via', to: 'd-to', bd: 'd-bd', ink: 'd-ink',
     glow: 'd-glow', glowSize: 'd-size', glowAlpha: 'd-alpha', lo: 'd-lo', shimmer: 'd-shim',
+    sparkles: 'd-sparkles', radius: 'd-radius', breathe: 'd-breathe', inkStyle: 'd-ink-style',
+    holo: 'd-holo', ring: 'd-ring', pulse: 'd-pulse',
   };
 
   // State -> inputs. Only called when something other than typing changed the design
@@ -6508,13 +6624,20 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     d.glowSize = Number($('d-size').value);
     d.glowAlpha = Number($('d-alpha').value);
     d.lo = Math.max(0, Number($('d-lo').value) || 0);
-    d.shimmer = $('d-shim').checked;
+    d.sparkles = Number($('d-sparkles').value);
+    d.radius = Number($('d-radius').value);
+    d.breathe = Number($('d-breathe').value);
+    d.inkStyle = $('d-ink-style').value;
+    for (const k of ['shimmer', 'holo', 'ring', 'pulse']) d[k] = $(DIAL_IDS[k]).checked;
   }
 
   function paintDesign() {
     const d = S.design;
     $('d-size-v').textContent = d.glowSize + 'px';
     $('d-alpha-v').textContent = d.glowAlpha + '%';
+    $('d-sparkles-v').textContent = d.sparkles ? d.sparkles : 'off';
+    $('d-radius-v').textContent = d.radius + 'px';
+    $('d-breathe-v').textContent = d.breathe ? (d.breathe / 10).toFixed(1) + 's' : 'still';
     $('d-stage').innerHTML = scoreBoxHTML(
       { key: null, mine: true, word: d.word || 'YOURS', colour: d.bd, lo: d.lo }, 0, -1);
     paintExport();
@@ -6534,7 +6657,17 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
       '  --sb-bd: ' + d.bd + ';\n' +
       '  --sb-sh: ' + glow + 'inset 0 2px 4px 0 ' + rgba(d.from, .5) + ';\n' +
       '  --sb-ink: ' + d.ink + ';\n' +
-      '}\n/* shimmer ' + (d.shimmer ? 'on' : 'off') + ' · from ' + fmt(d.lo) + ' EP */';
+      '  --sb-radius: ' + d.radius + 'px;\n' +
+      '}\n/* ' + [
+        'shimmer ' + (d.shimmer ? 'on' : 'off'),
+        d.sparkles ? d.sparkles + ' sparkles (seed ' + d.seed + ')' : 'no sparkles',
+        d.holo ? 'holographic' : null,
+        d.ring ? 'spinning border' : null,
+        d.pulse ? 'pulsing glow' : null,
+        d.breathe ? 'breathes every ' + (d.breathe / 10).toFixed(1) + 's' : 'still',
+        d.inkStyle + ' digits',
+        'from ' + fmt(d.lo) + ' EP',
+      ].filter(Boolean).join(' · ') + ' */';
 
     const notes = [];
     if (!String(d.word).trim()) notes.push('Give the rarity a name before publishing.');
@@ -6639,7 +6772,22 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
       glowSize: 6 + Math.floor(Math.random() * 40),
       glowAlpha: 20 + Math.floor(Math.random() * 60),
       shimmer: Math.random() < .75,
+      sparkles: Math.random() < .55 ? 3 + Math.floor(Math.random() * 9) : 0,
+      seed: Math.floor(Math.random() * 10000),
+      holo: Math.random() < .3,
+      ring: Math.random() < .25,
+      pulse: Math.random() < .3,
+      radius: 4 + Math.floor(Math.random() * 22),
+      breathe: Math.random() < .8 ? 15 + Math.floor(Math.random() * 45) : 0,
+      inkStyle: ['solid', 'solid', 'gradient', 'outline'][Math.floor(Math.random() * 4)],
     });
+    save(); syncDials(); paint();
+  });
+
+  // Same sparkle count, different scatter.
+  $('d-reseed').addEventListener('click', () => {
+    S.design.seed = Math.floor(Math.random() * 10000);
+    if (!S.design.sparkles) S.design.sparkles = 6;
     save(); syncDials(); paint();
   });
 
@@ -6679,15 +6827,10 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
   // The gallery draws each submission as the box its author actually designed - a
   // row of colour chips would not show what any of them chose.
   function miniBox(d) {
-    const glow = Number(d.glowSize) > 0
-      ? '0 0 ' + Number(d.glowSize) + 'px ' + rgba(d.glow, Number(d.glowAlpha) / 100) + ', ' : '';
-    const css = '--sb-bg:linear-gradient(to bottom right,' + d.from + ',' + d.via + ',' + d.to + ')' +
-      ';--sb-bd:' + d.bd + ';--sb-sh:' + glow + 'inset 0 2px 4px 0 ' + rgba(d.from, .5) +
-      ';--sb-ink:' + d.ink;
-    return '<div class="sbx" style="' + css + '">' +
-      '<div class="sbx-gloss"></div>' +
-      (d.shimmer ? '<div class="sbx-shimwrap"><div class="sbx-shim"></div></div>' : '') +
-      '<div class="sbx-n">' + String(S.n) + '</div></div>';
+    const inkCls = d.inkStyle && d.inkStyle !== 'solid' ? ' ink-' + d.inkStyle : '';
+    return '<div class="sbx' + (d.ring ? ' fx-ring' : '') + '" style="' + designCSS(d) + '">' +
+      designLayers(d) +
+      '<div class="sbx-n' + inkCls + '">' + String(S.n) + '</div></div>';
   }
 
   function galCard(p) {

@@ -25,6 +25,9 @@ const LIMITS = {
   note: 120,
   word: 18,
   glowSize: 60,      // px of blur; past this it stops being a box and becomes a lamp
+  sparkles: 14,      // any more and they stop reading as sparkles and start as noise
+  radius: 28,        // px corner radius
+  breathe: 8,        // seconds per breath; 0 turns it off
   lo: 1e9,
   perHour: 5,        // submissions per author_key per hour
   heartsPerHour: 60, // heart/un-heart actions per voter_key per hour
@@ -90,6 +93,12 @@ class Invalid extends Error {}
 // Strip C0/C1 controls and collapse whitespace. Nothing below is rendered as HTML
 // by the server, but the client interpolates it, so keep it boring.
 function clean(v, max, field) {
+  // Only ever stringify a primitive. String({toString: 1}) throws a TypeError rather
+  // than returning something useless, and a TypeError here would escape as a 500 -
+  // so a hostile payload could pick the status code. Refuse the shape instead.
+  if (v != null && typeof v !== 'string' && typeof v !== 'number') {
+    throw new Invalid(`${field} has to be text.`);
+  }
   const s = String(v == null ? '' : v)
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
     .replace(/\s+/g, ' ').trim();
@@ -109,6 +118,7 @@ function cleanDesign(raw) {
   if (!word) throw new Invalid('Give the rarity a name.');
 
   const colour = (key, label) => {
+    if (raw[key] != null && typeof raw[key] !== 'string') throw new Invalid(`${label} has to be text.`);
     const v = String(raw[key] || '').trim().toLowerCase();
     if (!HEX.test(v)) throw new Invalid(`${label} needs to be a #rrggbb colour.`);
     return v;
@@ -127,6 +137,20 @@ function cleanDesign(raw) {
     throw new Invalid(`The EP floor has to be between 0 and ${LIMITS.lo}.`);
   }
 
+  // Whole-number dials, each with a stated ceiling. A design is rendered straight
+  // into CSS on everyone else's page, so none of these may arrive unbounded.
+  const count = (v, max, label) => {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n) || n < 0 || n > max) throw new Invalid(`${label} has to be between 0 and ${max}.`);
+    return n;
+  };
+
+  const INK_STYLES = ['solid', 'gradient', 'outline'];
+  const inkStyle = raw.inkStyle == null ? 'solid' : raw.inkStyle;
+  if (typeof inkStyle !== 'string' || INK_STYLES.indexOf(inkStyle) < 0) {
+    throw new Invalid(`Digit style has to be one of: ${INK_STYLES.join(', ')}.`);
+  }
+
   return {
     word,
     bd: colour('bd', 'The border colour'),
@@ -138,6 +162,21 @@ function cleanDesign(raw) {
     glowSize: size,
     glowAlpha: alpha,
     shimmer: !!raw.shimmer,
+    // --- the extras, none of which prod has ---
+    // Each of these defaults when absent rather than being required: a design is a
+    // description of a box, and a caller that says nothing about sparkles means a box
+    // without sparkles, not a bad request.
+    sparkles: raw.sparkles == null ? 0 : count(raw.sparkles, LIMITS.sparkles, 'Sparkle count'),
+    // Sparkle placement is scattered from this seed, so one design looks the same
+    // in the strip, in the gallery and on anyone else's screen.
+    seed: raw.seed == null ? 0 : count(raw.seed, 9999, 'The sparkle seed'),
+    holo: !!raw.holo,
+    ring: !!raw.ring,
+    pulse: !!raw.pulse,
+    radius: raw.radius == null ? 12 : count(raw.radius, LIMITS.radius, 'Corner radius'),
+    // Tenths of a second, so the whole design stays integers over the wire.
+    breathe: raw.breathe == null ? 30 : count(raw.breathe, LIMITS.breathe * 10, 'Breathing speed'),
+    inkStyle,
     lo,
   };
 }
