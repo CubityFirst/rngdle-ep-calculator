@@ -27,6 +27,8 @@ const LIMITS = {
   glowSize: 60,      // px of blur; past this it stops being a box and becomes a lamp
   sparkles: 14,      // any more and they stop reading as sparkles and start as noise
   radius: 28,        // px corner radius
+  borderW: 8,        // px border width
+  angle: 360,        // gradient angle in degrees
   breathe: 8,        // seconds per breath; 0 turns it off
   lo: 1e9,
   perHour: 5,        // submissions per author_key per hour
@@ -148,11 +150,22 @@ function cleanDesign(raw) {
     return n;
   };
 
-  const INK_STYLES = ['solid', 'gradient', 'outline'];
-  const inkStyle = raw.inkStyle == null ? 'solid' : raw.inkStyle;
-  if (typeof inkStyle !== 'string' || INK_STYLES.indexOf(inkStyle) < 0) {
-    throw new Invalid(`Digit style has to be one of: ${INK_STYLES.join(', ')}.`);
-  }
+  // Enumerated values are whitelists, never free text. Each of these is interpolated
+  // into a CSS class name on everyone else's page, so an unknown value is refused
+  // rather than passed through and hoped about.
+  const oneOf = (v, allowed, label, dflt) => {
+    if (v == null) return dflt;
+    if (typeof v !== 'string' || allowed.indexOf(v) < 0) {
+      throw new Invalid(`${label} has to be one of: ${allowed.join(', ')}.`);
+    }
+    return v;
+  };
+  const inkStyle = oneOf(raw.inkStyle, ['solid', 'gradient', 'outline'], 'Digit style', 'solid');
+  const sparkShape = oneOf(raw.sparkShape,
+    ['star', 'star5', 'diamond', 'dot', 'ring', 'plus', 'heart', 'hexagon', 'shard', 'confetti'],
+    'Particle shape', 'star');
+  const sparkMotion = oneOf(raw.sparkMotion,
+    ['twinkle', 'rise', 'fall', 'orbit', 'spin'], 'Particle motion', 'twinkle');
 
   return {
     word,
@@ -172,6 +185,8 @@ function cleanDesign(raw) {
     sparkles: raw.sparkles == null ? 0 : count(raw.sparkles, LIMITS.sparkles, 'Sparkle count'),
     spark: optColour('spark', 'The sparkle colour', '#ffffff'),
     sparkShadow: !!raw.sparkShadow,
+    sparkShape,
+    sparkMotion,
     // Sparkle placement is scattered from this seed, so one design looks the same
     // in the strip, in the gallery and on anyone else's screen.
     seed: raw.seed == null ? 0 : count(raw.seed, 9999, 'The sparkle seed'),
@@ -179,6 +194,8 @@ function cleanDesign(raw) {
     ring: !!raw.ring,
     pulse: !!raw.pulse,
     radius: raw.radius == null ? 12 : count(raw.radius, LIMITS.radius, 'Corner radius'),
+    borderW: raw.borderW == null ? 3 : count(raw.borderW, LIMITS.borderW, 'Border width'),
+    angle: raw.angle == null ? 135 : count(raw.angle, LIMITS.angle, 'Gradient angle'),
     // Tenths of a second, so the whole design stays integers over the wire.
     breathe: raw.breathe == null ? 30 : count(raw.breathe, LIMITS.breathe * 10, 'Breathing speed'),
     inkStyle,

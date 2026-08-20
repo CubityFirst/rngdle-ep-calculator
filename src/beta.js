@@ -6048,7 +6048,8 @@ function renderBoxes(ctx) {
 
   .sbx { position:relative; overflow:hidden; display:inline-flex; align-items:center;
     justify-content:center; padding:1.25rem 2rem; border-radius:var(--sb-radius, .75rem);
-    border:3px solid var(--sb-bd); background:var(--sb-bg) padding-box; box-shadow:var(--sb-sh);
+    border:var(--sb-bw, 3px) solid var(--sb-bd); background:var(--sb-bg) padding-box;
+    box-shadow:var(--sb-sh);
     transition:all .5s; max-width:100%;
     /* Composed in JS rather than stacked as classes: breathing, the rotating ring and
        the glow pulse can all be on at once, and an animation shorthand in a later rule
@@ -6110,6 +6111,54 @@ function renderBoxes(ctx) {
   /* Optional: lifts a sparkle off the box. Worth having because the default sparkle
      is white, and white on a pale gradient is exactly where they disappear. */
   .sbx-sparks.lit i { filter:drop-shadow(0 1px 2px rgba(0,0,0,.55)); }
+
+  /* --- particle shapes ---------------------------------------------------
+     All clip-path or border-radius, so they scale with --s and need no assets.
+     The class comes from a server-side whitelist, never from raw input. */
+  .sbx-sparks.sh-star5 i { clip-path:polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%,
+    50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+  .sbx-sparks.sh-diamond i { clip-path:polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); }
+  .sbx-sparks.sh-dot i { clip-path:none; border-radius:50%; }
+  .sbx-sparks.sh-ring i { clip-path:none; border-radius:50%; background:none;
+    border:2px solid var(--sb-spark); }
+  .sbx-sparks.sh-plus i { clip-path:polygon(38% 0%, 62% 0%, 62% 38%, 100% 38%, 100% 62%,
+    62% 62%, 62% 100%, 38% 100%, 38% 62%, 0% 62%, 0% 38%, 38% 38%); }
+  .sbx-sparks.sh-heart i { clip-path:polygon(50% 100%, 14% 62%, 0% 34%, 12% 11%, 32% 7%,
+    50% 24%, 68% 7%, 88% 11%, 100% 34%, 86% 62%); }
+  .sbx-sparks.sh-hexagon i { clip-path:polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); }
+  .sbx-sparks.sh-shard i { clip-path:polygon(50% 0%, 60% 100%, 40% 100%); }
+  .sbx-sparks.sh-confetti i { clip-path:none; border-radius:1px;
+    height:calc(var(--s) * 1.7); }
+
+  /* --- particle motion ---------------------------------------------------
+     Rise and fall are prod's own float-up-fade idea; spin is its spin keyframe.
+     Each sets a duration as well as a name, because a drift wants a longer,
+     more even cycle than a twinkle does. */
+  .sbx-sparks.mo-rise i { animation-name:sbx-rise; animation-duration:3.4s;
+    animation-timing-function:ease-out; }
+  .sbx-sparks.mo-fall i { animation-name:sbx-fall; animation-duration:4s;
+    animation-timing-function:linear; }
+  .sbx-sparks.mo-orbit i { animation-name:sbx-orbit; animation-duration:5s;
+    animation-timing-function:ease-in-out; }
+  .sbx-sparks.mo-spin i { animation-name:sbx-spin; animation-duration:3s;
+    animation-timing-function:linear; }
+
+  @keyframes sbx-rise {
+    0% { opacity:0; transform:translateY(8px) scale(.5); }
+    25% { opacity:.95; }
+    100% { opacity:0; transform:translateY(-28px) scale(.9); } }
+  @keyframes sbx-fall {
+    0% { opacity:0; transform:translateY(-16px) scale(.6); }
+    25% { opacity:.9; }
+    100% { opacity:0; transform:translateY(28px) scale(.85); } }
+  @keyframes sbx-orbit {
+    0%, 100% { opacity:.9; transform:translate(0, 0) rotate(0deg); }
+    25% { transform:translate(7px, -6px) rotate(90deg); }
+    50% { opacity:.55; transform:translate(0, -12px) rotate(180deg); }
+    75% { transform:translate(-7px, -6px) rotate(270deg); } }
+  @keyframes sbx-spin {
+    0%, 100% { opacity:.85; transform:rotate(0deg) scale(.85); }
+    50% { opacity:1; transform:rotate(180deg) scale(1.15); } }
   @keyframes sbx-spark {
     0%, 100% { opacity:0; transform:scale(.3) rotate(0deg); }
     45% { opacity:.95; transform:scale(1) rotate(45deg); }
@@ -6319,6 +6368,31 @@ function renderBoxes(ctx) {
             <label for="d-spark-shadow">Sparkle drop shadow</label></div>
           <div class="dial"><label for="d-radius">Corner radius <span class="val" id="d-radius-v"></span></label>
             <input id="d-radius" type="range" min="0" max="28" step="1" value="12"></div>
+          <div class="dial"><label for="d-border">Border width <span class="val" id="d-border-v"></span></label>
+            <input id="d-border" type="range" min="0" max="8" step="1" value="3"></div>
+          <div class="dial"><label for="d-angle">Gradient angle <span class="val" id="d-angle-v"></span></label>
+            <input id="d-angle" type="range" min="0" max="360" step="5" value="135"></div>
+          <div class="dial"><label for="d-shape">Particle shape</label>
+            <select id="d-shape">
+              <option value="star">Sparkle</option>
+              <option value="star5">Five-point star</option>
+              <option value="diamond">Diamond</option>
+              <option value="dot">Dot</option>
+              <option value="ring">Ring</option>
+              <option value="plus">Plus</option>
+              <option value="heart">Heart</option>
+              <option value="hexagon">Hexagon</option>
+              <option value="shard">Shard</option>
+              <option value="confetti">Confetti</option>
+            </select></div>
+          <div class="dial"><label for="d-motion">Particle motion</label>
+            <select id="d-motion">
+              <option value="twinkle">Twinkle</option>
+              <option value="rise">Rise</option>
+              <option value="fall">Fall</option>
+              <option value="orbit">Orbit</option>
+              <option value="spin">Spin</option>
+            </select></div>
           <div class="dial"><label for="d-breathe">Breathing <span class="val" id="d-breathe-v"></span></label>
             <input id="d-breathe" type="range" min="0" max="80" step="1" value="30"></div>
           <div class="dial"><label for="d-ink-style">Digits</label>
@@ -6335,6 +6409,12 @@ function renderBoxes(ctx) {
             <label for="d-ring">Spinning border</label></div>
           <div class="dial check"><input id="d-pulse" type="checkbox">
             <label for="d-pulse">Pulsing glow</label></div>
+        </div>
+        <div class="edbtns" id="d-presets">
+          <button type="button" class="btn-sm" data-preset="ember">Ember</button>
+          <button type="button" class="btn-sm" data-preset="ice">Ice</button>
+          <button type="button" class="btn-sm" data-preset="void">Void</button>
+          <button type="button" class="btn-sm" data-preset="bubblegum">Bubblegum</button>
         </div>
         <div class="edbtns">
           <button type="button" class="btn-sm" id="d-random">Randomise</button>
@@ -6410,9 +6490,38 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     glowSize: 18, glowAlpha: 35, shimmer: true, lo: 500000,
     // Past this line is everything prod does not have.
     sparkles: 6, seed: 1234, spark: '#ffffff', sparkShadow: false,
+    sparkShape: 'star', sparkMotion: 'twinkle',
     holo: false, ring: false, pulse: false,
-    radius: 12, breathe: 30, inkStyle: 'solid',
+    radius: 12, borderW: 3, angle: 135, breathe: 30, inkStyle: 'solid',
   });
+
+  // Whitelists, mirroring the server's. They double as the fallback for a design
+  // saved before a dial existed, since both reach a CSS class name.
+  const SHAPES = ['star', 'star5', 'diamond', 'dot', 'ring', 'plus', 'heart',
+    'hexagon', 'shard', 'confetti'];
+  const MOTIONS = ['twinkle', 'rise', 'fall', 'orbit', 'spin'];
+  const pick = (v, list, dflt) => (list.indexOf(v) >= 0 ? v : dflt);
+
+  // Starting points, so a design does not have to begin from the same amber box
+  // every time. Each is a partial - anything it does not name is left alone.
+  const PRESETS = {
+    ember: { from: '#7c2d12', via: '#b45309', to: '#7c2d12', bd: '#f97316', ink: '#ffedd4',
+      glow: '#f97316', glowSize: 26, glowAlpha: 60, spark: '#ffd230', sparkShape: 'star',
+      sparkMotion: 'rise', sparkles: 9, sparkShadow: false, radius: 14, borderW: 3, angle: 20,
+      breathe: 34, holo: false, ring: false, pulse: true, inkStyle: 'solid' },
+    ice: { from: '#cffafe', via: '#f0f9ff', to: '#a5f3fc', bd: '#67e8f9', ink: '#0e7490',
+      glow: '#22d3ee', glowSize: 20, glowAlpha: 40, spark: '#ffffff', sparkShape: 'star5',
+      sparkMotion: 'fall', sparkles: 11, sparkShadow: true, radius: 6, borderW: 2, angle: 200,
+      breathe: 60, holo: true, ring: false, pulse: false, inkStyle: 'solid' },
+    void: { from: '#0b1020', via: '#1e1b4b', to: '#0b1020', bd: '#6366f1', ink: '#c7d2fe',
+      glow: '#818cf8', glowSize: 34, glowAlpha: 55, spark: '#e0e7ff', sparkShape: 'dot',
+      sparkMotion: 'orbit', sparkles: 12, sparkShadow: false, radius: 20, borderW: 1, angle: 135,
+      breathe: 70, holo: false, ring: true, pulse: true, inkStyle: 'gradient' },
+    bubblegum: { from: '#fbcfe8', via: '#fdf2f8', to: '#c7d2fe', bd: '#f472b6', ink: '#9d174d',
+      glow: '#f472b6', glowSize: 22, glowAlpha: 45, spark: '#ffffff', sparkShape: 'heart',
+      sparkMotion: 'twinkle', sparkles: 8, sparkShadow: true, radius: 28, borderW: 4, angle: 300,
+      breathe: 26, holo: true, ring: false, pulse: false, inkStyle: 'solid' },
+  };
 
   const S = {
     n: 25891,
@@ -6488,8 +6597,9 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     }
     if (d.ring) anim.push('4s linear infinite sbx-ring');
     if (d.pulse) anim.push('2.4s ease-in-out infinite sbx-pulse');
-    return '--sb-bg:linear-gradient(to bottom right,' + d.from + ',' + d.via + ',' + d.to + ')' +
+    return '--sb-bg:linear-gradient(' + num(d.angle, 135) + 'deg,' + d.from + ',' + d.via + ',' + d.to + ')' +
            ';--sb-bd:' + d.bd +
+           ';--sb-bw:' + num(d.borderW, 3) + 'px' +
            ';--sb-sh:' + glow + 'inset 0 2px 4px 0 ' + rgba(d.from, .5) +
            ';--sb-ink:' + d.ink +
            ';--sb-glow-c:' + d.glow +
@@ -6512,7 +6622,9 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
       const sz = (5 + rnd() * 9).toFixed(1), dl = (rnd() * 2.6).toFixed(2);
       out += '<i style="left:' + l + '%;top:' + t + '%;--s:' + sz + 'px;animation-delay:' + dl + 's"></i>';
     }
-    return '<div class="sbx-sparks' + (d.sparkShadow ? ' lit' : '') + '">' + out + '</div>';
+    return '<div class="sbx-sparks' + (d.sparkShadow ? ' lit' : '') +
+      ' sh-' + pick(d.sparkShape, SHAPES, 'star') +
+      ' mo-' + pick(d.sparkMotion, MOTIONS, 'twinkle') + '">' + out + '</div>';
   }
 
   // The layers inside a designed box, in paint order.
@@ -6593,7 +6705,9 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     word: 'd-word', from: 'd-from', via: 'd-via', to: 'd-to', bd: 'd-bd', ink: 'd-ink',
     glow: 'd-glow', glowSize: 'd-size', glowAlpha: 'd-alpha', lo: 'd-lo', shimmer: 'd-shim',
     sparkles: 'd-sparkles', spark: 'd-spark', sparkShadow: 'd-spark-shadow',
-    radius: 'd-radius', breathe: 'd-breathe', inkStyle: 'd-ink-style',
+    sparkShape: 'd-shape', sparkMotion: 'd-motion',
+    radius: 'd-radius', borderW: 'd-border', angle: 'd-angle',
+    breathe: 'd-breathe', inkStyle: 'd-ink-style',
     holo: 'd-holo', ring: 'd-ring', pulse: 'd-pulse',
   };
 
@@ -6619,6 +6733,10 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     d.lo = Math.max(0, Number($('d-lo').value) || 0);
     d.sparkles = Number($('d-sparkles').value);
     d.radius = Number($('d-radius').value);
+    d.borderW = Number($('d-border').value);
+    d.angle = Number($('d-angle').value);
+    d.sparkShape = $('d-shape').value;
+    d.sparkMotion = $('d-motion').value;
     d.breathe = Number($('d-breathe').value);
     d.inkStyle = $('d-ink-style').value;
     for (const k of ['shimmer', 'holo', 'ring', 'pulse', 'sparkShadow']) d[k] = $(DIAL_IDS[k]).checked;
@@ -6630,6 +6748,8 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     $('d-alpha-v').textContent = d.glowAlpha + '%';
     $('d-sparkles-v').textContent = d.sparkles ? d.sparkles : 'off';
     $('d-radius-v').textContent = d.radius + 'px';
+    $('d-border-v').textContent = d.borderW + 'px';
+    $('d-angle-v').textContent = d.angle + '\u00b0';
     $('d-breathe-v').textContent = d.breathe ? (d.breathe / 10).toFixed(1) + 's' : 'still';
     $('d-stage').innerHTML = scoreBoxHTML(
       { key: null, mine: true, word: d.word || 'YOURS', colour: d.bd, lo: d.lo }, 0, -1);
@@ -6652,6 +6772,7 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
       '  --sb-ink: ' + d.ink + ';\n' +
       (d.sparkles ? '  --sb-spark: ' + (d.spark || '#ffffff') + ';\n' : '') +
       '  --sb-radius: ' + d.radius + 'px;\n' +
+      '  --sb-bw: ' + num(d.borderW, 3) + 'px;\n' +
       '}\n/* ' + [
         'shimmer ' + (d.shimmer ? 'on' : 'off'),
         d.sparkles
@@ -6662,6 +6783,8 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
         d.pulse ? 'pulsing glow' : null,
         d.breathe ? 'breathes every ' + (d.breathe / 10).toFixed(1) + 's' : 'still',
         d.inkStyle + ' digits',
+        pick(d.sparkShape, SHAPES, 'star') + ' particles, ' +
+          pick(d.sparkMotion, MOTIONS, 'twinkle'),
         'from ' + fmt(d.lo) + ' EP',
       ].filter(Boolean).join(' · ') + ' */';
 
@@ -6778,9 +6901,23 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
       ring: Math.random() < .25,
       pulse: Math.random() < .3,
       radius: 4 + Math.floor(Math.random() * 22),
+      borderW: 1 + Math.floor(Math.random() * 5),
+      angle: Math.floor(Math.random() * 72) * 5,
+      sparkShape: SHAPES[Math.floor(Math.random() * SHAPES.length)],
+      sparkMotion: MOTIONS[Math.floor(Math.random() * MOTIONS.length)],
       breathe: Math.random() < .8 ? 15 + Math.floor(Math.random() * 45) : 0,
       inkStyle: ['solid', 'solid', 'gradient', 'outline'][Math.floor(Math.random() * 4)],
     });
+    save(); syncDials(); paint();
+  });
+
+  $('d-presets').addEventListener('click', e => {
+    const b = e.target.closest('[data-preset]');
+    if (!b) return;
+    // The name, the EP floor and the sparkle seed are the author's - a preset
+    // restyles the box, it does not rename what they are designing.
+    const keep = { word: S.design.word, lo: S.design.lo, seed: S.design.seed };
+    S.design = Object.assign(seed(), PRESETS[b.dataset.preset] || {}, keep);
     save(); syncDials(); paint();
   });
 

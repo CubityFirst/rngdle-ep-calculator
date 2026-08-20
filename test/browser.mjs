@@ -247,15 +247,83 @@ const INTERACTIONS = {
       if (strip !== after) throw new Error('the strip and the stage scattered differently');
       return after.split(',').length + ' sparkles, stage and strip agree';
     }],
+    // Each shape has to produce real geometry. A typo in a clip-path polygon does not
+    // throw - the declaration is dropped and the particle silently becomes a square.
+    ['every particle shape has geometry', async p => {
+      await p.$eval('#d-sparkles', e => { e.value = '8'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+      const shapes = await p.$$eval('#d-shape option', o => o.map(x => x.value));
+      if (shapes.length < 8) throw new Error(`only ${shapes.length} shapes offered`);
+      const flat = [];
+      for (const sh of shapes) {
+        await p.selectOption('#d-shape', sh);
+        await p.waitForTimeout(60);
+        const ok = await p.evaluate(() => {
+          const cs = getComputedStyle(document.querySelector('#d-stage .sbx-sparks i'));
+          return (cs.clipPath && cs.clipPath !== 'none') || cs.borderRadius !== '0px'
+            || cs.borderTopWidth !== '0px';
+        });
+        if (!ok) flat.push(sh);
+      }
+      if (flat.length) throw new Error(`shapes with no geometry: ${flat.join(', ')}`);
+      return `${shapes.length} shapes, all shaped`;
+    }],
+    // Each motion must bind its own keyframes; a missing @keyframes leaves the
+    // previous animation running and the dial looks broken only in motion.
+    ['every particle motion binds keyframes', async p => {
+      const motions = await p.$$eval('#d-motion option', o => o.map(x => x.value));
+      const seen = new Set();
+      for (const mo of motions) {
+        await p.selectOption('#d-motion', mo);
+        await p.waitForTimeout(60);
+        const name = await p.$eval('#d-stage .sbx-sparks i', e => getComputedStyle(e).animationName);
+        if (!name || name === 'none') throw new Error(`${mo} bound no animation`);
+        seen.add(name);
+      }
+      if (seen.size !== motions.length) {
+        throw new Error(`${motions.length} motions share only ${seen.size} keyframes: ${[...seen].join(', ')}`);
+      }
+      return `${motions.length} motions, ${seen.size} distinct keyframes`;
+    }],
+    ['angle and border width reach the box', async p => {
+      await p.$eval('#d-angle', e => { e.value = '300'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+      await p.$eval('#d-border', e => { e.value = '7'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+      await p.waitForTimeout(200);
+      const m = await p.evaluate(() => {
+        const cs = getComputedStyle(document.querySelector('#d-stage .sbx'));
+        return { bw: cs.borderTopWidth, deg: (cs.backgroundImage.match(/([\d.]+)deg/) || [])[1] };
+      });
+      if (m.bw !== '7px') throw new Error(`border width is ${m.bw}`);
+      if (m.deg !== '300') throw new Error(`gradient angle is ${m.deg}`);
+      return `${m.deg}deg, ${m.bw} border`;
+    }],
+    // A preset restyles the box; it must not rename what the author is designing.
+    ['presets restyle without renaming', async p => {
+      await p.fill('#d-word', 'KEEPME');
+      await p.waitForTimeout(150);
+      const before = await p.inputValue('#d-bd');
+      await p.click('[data-preset="void"]');
+      await p.waitForTimeout(250);
+      const m = await p.evaluate(() => ({
+        bd: document.getElementById('d-bd').value,
+        word: document.getElementById('d-word').value,
+        shape: document.getElementById('d-shape').value,
+      }));
+      if (m.word !== 'KEEPME') throw new Error(`the preset clobbered the name: ${m.word}`);
+      if (m.bd === before) throw new Error('the preset changed nothing');
+      return `${before} -> ${m.bd}, ${m.shape} particles, name kept`;
+    }],
     ['randomise keeps the name', async p => {
+      // Read the name rather than expecting a literal: an earlier check leaving a
+      // different one behind is not this check's failure.
+      const wasName = await p.inputValue('#d-word');
       const before = await p.inputValue('#d-bd');
       await p.click('#d-random');
       await p.waitForTimeout(300);
       const after = await p.inputValue('#d-bd');
       const name = await p.inputValue('#d-word');
       if (before === after) throw new Error('randomise changed nothing');
-      if (name !== 'ICEBOUND') throw new Error(`randomise clobbered the name: ${name}`);
-      return `${before} -> ${after}`;
+      if (name !== wasName) throw new Error(`randomise clobbered the name: ${wasName} -> ${name}`);
+      return `${before} -> ${after}, name kept`;
     }],
     // Without a D1 binding the dev server has no gallery. That has to read as an
     // explained empty state rather than a broken one - and, because this harness
