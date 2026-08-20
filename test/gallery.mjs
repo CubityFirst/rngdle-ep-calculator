@@ -154,6 +154,7 @@ console.log('gallery');
     // escaping TypeError would let a hostile payload choose the status code.
     ['rarity name is an object', { word: { toString: 1 } }],
     ['a colour is an object', { bd: { toString: 1 } }],
+    ['bad sparkle colour', { spark: 'silver' }],
   ];
   for (const [label, over] of fxRejects) {
     const rr = await publish(env, over, { name: 'fx ' + label, ip: '10.0.0.11' });
@@ -167,18 +168,20 @@ console.log('gallery');
     r.status === 201 && r.body.design.sparkles === 0 && r.body.design.holo === false
       && r.body.design.ring === false && r.body.design.pulse === false
       && r.body.design.radius === 12 && r.body.design.breathe === 30
-      && r.body.design.inkStyle === 'solid',
+      && r.body.design.inkStyle === 'solid' && r.body.design.spark === '#ffffff'
+      && r.body.design.sparkShadow === false,
     JSON.stringify(r.body.design));
 
   // ...and a fully decorated one survives the round trip intact.
   r = await publish(env, {
     sparkles: 12, seed: 4242, holo: true, ring: true, pulse: true,
-    radius: 26, breathe: 55, inkStyle: 'gradient',
+    radius: 26, breathe: 55, inkStyle: 'gradient', spark: '#A7F3D0', sparkShadow: true,
   }, { name: 'Everything on', ip: '10.0.0.13' });
   const fx = r.body.design;
   check('effects round-trip',
     fx.sparkles === 12 && fx.seed === 4242 && fx.holo === true && fx.ring === true
-      && fx.pulse === true && fx.radius === 26 && fx.breathe === 55 && fx.inkStyle === 'gradient',
+      && fx.pulse === true && fx.radius === 26 && fx.breathe === 55 && fx.inkStyle === 'gradient'
+      && fx.spark === '#a7f3d0' && fx.sparkShadow === true,
     JSON.stringify(fx));
 
   // The seed is what makes a sparkle scatter reproducible everywhere it is drawn,

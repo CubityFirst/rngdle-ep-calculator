@@ -123,6 +123,9 @@ function cleanDesign(raw) {
     if (!HEX.test(v)) throw new Invalid(`${label} needs to be a #rrggbb colour.`);
     return v;
   };
+  // Same rules, but absent means the default rather than a bad request - so a design
+  // written before this colour existed still loads.
+  const optColour = (key, label, fallback) => (raw[key] == null ? fallback : colour(key, label));
 
   const size = Math.round(Number(raw.glowSize));
   if (!Number.isFinite(size) || size < 0 || size > LIMITS.glowSize) {
@@ -167,6 +170,8 @@ function cleanDesign(raw) {
     // description of a box, and a caller that says nothing about sparkles means a box
     // without sparkles, not a bad request.
     sparkles: raw.sparkles == null ? 0 : count(raw.sparkles, LIMITS.sparkles, 'Sparkle count'),
+    spark: optColour('spark', 'The sparkle colour', '#ffffff'),
+    sparkShadow: !!raw.sparkShadow,
     // Sparkle placement is scattered from this seed, so one design looks the same
     // in the strip, in the gallery and on anyone else's screen.
     seed: raw.seed == null ? 0 : count(raw.seed, 9999, 'The sparkle seed'),
