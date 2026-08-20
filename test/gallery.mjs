@@ -174,7 +174,8 @@ console.log('gallery');
       && r.body.design.ring === false && r.body.design.pulse === false
       && r.body.design.radius === 12 && r.body.design.breathe === 30
       && r.body.design.inkStyle === 'solid' && r.body.design.spark === '#ffffff'
-      && r.body.design.sparkShadow === false && r.body.design.sparkShape === 'star'
+      && r.body.design.sparkShadow === false && r.body.design.spill === false
+      && r.body.design.sparkShape === 'star'
       && r.body.design.sparkMotion === 'twinkle' && r.body.design.borderW === 3
       && r.body.design.angle === 135,
     JSON.stringify(r.body.design));
@@ -183,14 +184,14 @@ console.log('gallery');
   r = await publish(env, {
     sparkles: 12, seed: 4242, holo: true, ring: true, pulse: true,
     radius: 26, breathe: 55, inkStyle: 'gradient', spark: '#A7F3D0', sparkShadow: true,
-    sparkShape: 'heart', sparkMotion: 'orbit', borderW: 6, angle: 300,
+    sparkShape: 'heart', sparkMotion: 'orbit', borderW: 6, angle: 300, spill: true,
   }, { name: 'Everything on', ip: '10.0.0.13' });
   const fx = r.body.design;
   check('effects round-trip',
     fx.sparkles === 12 && fx.seed === 4242 && fx.holo === true && fx.ring === true
       && fx.pulse === true && fx.radius === 26 && fx.breathe === 55 && fx.inkStyle === 'gradient'
       && fx.spark === '#a7f3d0' && fx.sparkShadow === true
-      && fx.sparkShape === 'heart' && fx.sparkMotion === 'orbit'
+      && fx.sparkShape === 'heart' && fx.sparkMotion === 'orbit' && fx.spill === true
       && fx.borderW === 6 && fx.angle === 300,
     JSON.stringify(fx));
 

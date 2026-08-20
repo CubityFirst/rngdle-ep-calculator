@@ -185,6 +185,7 @@ function cleanDesign(raw) {
     sparkles: raw.sparkles == null ? 0 : count(raw.sparkles, LIMITS.sparkles, 'Sparkle count'),
     spark: optColour('spark', 'The sparkle colour', '#ffffff'),
     sparkShadow: !!raw.sparkShadow,
+    spill: !!raw.spill,
     sparkShape,
     sparkMotion,
     // Sparkle placement is scattered from this seed, so one design looks the same

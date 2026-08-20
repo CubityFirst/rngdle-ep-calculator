@@ -6159,6 +6159,12 @@ function renderBoxes(ctx, shared) {
     animation-timing-function:ease-in-out; }
   .sbx-sparks.mo-spin i { animation-name:sbx-spin; animation-duration:3s;
     animation-timing-function:linear; }
+  /* Particles escaping the box. prod's recipe is overflow:hidden, and that stays the
+     default - but the three surface layers each self-clip (their own overflow:hidden
+     plus border-radius:inherit) and the gradient is clipped by the border-radius
+     whatever this says, so turning it off frees the particles and nothing else. */
+  .sbx.fx-spill { overflow:visible; }
+
   /* Burst is the one motion with real physics, so it sets its easing per keyframe
      rather than for the whole animation - see the comment on sbx-burst. */
   .sbx-sparks.mo-burst i { animation-name:sbx-burst; animation-duration:2.8s;
@@ -6167,11 +6173,11 @@ function renderBoxes(ctx, shared) {
   @keyframes sbx-rise {
     0% { opacity:0; transform:translateY(8px) scale(.5); }
     25% { opacity:.95; }
-    100% { opacity:0; transform:translateY(-28px) scale(.9); } }
+    100% { opacity:0; transform:translateY(calc(var(--sb-fly, 24px) * -1.2)) scale(.9); } }
   @keyframes sbx-fall {
-    0% { opacity:0; transform:translateY(-16px) scale(.6); }
+    0% { opacity:0; transform:translateY(calc(var(--sb-fly, 24px) * -.7)) scale(.6); }
     25% { opacity:.9; }
-    100% { opacity:0; transform:translateY(28px) scale(.85); } }
+    100% { opacity:0; transform:translateY(calc(var(--sb-fly, 24px) * 1.2)) scale(.85); } }
   @keyframes sbx-orbit {
     0%, 100% { opacity:.9; transform:translate(0, 0) rotate(0deg); }
     25% { transform:translate(7px, -6px) rotate(90deg); }
@@ -6190,10 +6196,12 @@ function renderBoxes(ctx, shared) {
     0% { opacity:0; transform:translate(0, 0) scale(.4) rotate(0deg);
       animation-timing-function:cubic-bezier(.12, .68, .36, 1); }
     12% { opacity:1; }
-    50% { transform:translate(calc(var(--dx, 0px) * .6), -24px) scale(1) rotate(150deg);
+    50% { transform:translate(calc(var(--dx, 0px) * .6), calc(var(--sb-fly, 24px) * -1))
+      scale(1) rotate(150deg);
       animation-timing-function:cubic-bezier(.55, 0, .85, .45); }
     85% { opacity:.85; }
-    100% { opacity:0; transform:translate(var(--dx, 0px), 30px) scale(.8) rotate(330deg); } }
+    100% { opacity:0; transform:translate(var(--dx, 0px), calc(var(--sb-fly, 24px) * 1.25))
+      scale(.8) rotate(330deg); } }
   @keyframes sbx-spark {
     0%, 100% { opacity:0; transform:scale(.3) rotate(0deg); }
     45% { opacity:.95; transform:scale(1) rotate(45deg); }
@@ -6343,6 +6351,10 @@ function renderBoxes(ctx, shared) {
   .gc-ft .sp { flex:1; }
   .gc-ft .small { font-size:.72rem; }
   .like.on { color:var(--bad-lt); border-color:var(--bad-dk); }
+  .gc-ft .ico { display:inline-flex; align-items:center; justify-content:center;
+    padding:.3rem .45rem; line-height:0; }
+  .gc-ft .ico svg { width:1rem; height:1rem; }
+  .gc-ft .ico.done { color:var(--ok); border-color:color-mix(in srgb, var(--ok) 45%, transparent); }
   #gal-msg { margin:.9rem 0 0; }`;
 
   // Unfurl metadata for a shared rarity. Crawlers do not run JavaScript, so this has
@@ -6440,6 +6452,8 @@ ${banner}
             <input id="d-spark" type="color" value="#ffffff"></div>
           <div class="dial check"><input id="d-spark-shadow" type="checkbox">
             <label for="d-spark-shadow">Sparkle drop shadow</label></div>
+          <div class="dial check"><input id="d-spill" type="checkbox">
+            <label for="d-spill">Particles escape the box</label></div>
           <div class="dial"><label for="d-radius">Corner radius <span class="val" id="d-radius-v"></span></label>
             <input id="d-radius" type="range" min="0" max="28" step="1" value="12"></div>
           <div class="dial"><label for="d-border">Border width <span class="val" id="d-border-v"></span></label>
@@ -6569,7 +6583,7 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
     glowSize: 18, glowAlpha: 35, shimmer: true, lo: 500000,
     // Past this line is everything prod does not have.
     sparkles: 6, seed: 1234, spark: '#ffffff', sparkShadow: false,
-    sparkShape: 'star', sparkMotion: 'twinkle',
+    sparkShape: 'star', sparkMotion: 'twinkle', spill: false,
     holo: false, ring: false, pulse: false,
     radius: 12, borderW: 3, angle: 135, breathe: 30, inkStyle: 'solid',
   });
@@ -6690,6 +6704,7 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
            ';--sb-glow-c:' + d.glow +
            ';--sb-spark:' + (d.spark || '#ffffff') +
            ';--sb-pulse:' + Math.max(6, num(d.glowSize, 14) || 14) + 'px' +
+           ';--sb-fly:' + (d.spill ? 56 : 24) + 'px' +
            ';--sb-radius:' + num(d.radius, 12) + 'px' +
            ';--sb-anim:' + (anim.join(', ') || 'none');
   }
@@ -6707,7 +6722,10 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
       const sz = (5 + rnd() * 9).toFixed(1), dl = (rnd() * 2.6).toFixed(2);
       // Which way this piece flies when the motion is a burst: outward from the
       // middle, so the spray opens up instead of drifting one way as a block.
-      const dx = ((l - 50) * 0.55 + (rnd() - 0.5) * 14).toFixed(1);
+      // Spilling doubles the sideways throw as well, or the spray would go up and
+      // over the edge but never out past the corners.
+      const reach = d.spill ? 1.2 : 0.55;
+      const dx = ((l - 50) * reach + (rnd() - 0.5) * (d.spill ? 30 : 14)).toFixed(1);
       out += '<i style="left:' + l.toFixed(1) + '%;top:' + t.toFixed(1) + '%;--s:' + sz +
         'px;--dx:' + dx + 'px;animation-delay:' + dl + 's"></i>';
     }
@@ -6747,7 +6765,8 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
       ? '<div class="sbx-gloss"></div>' + (SCORE[t.key].shim
           ? '<div class="sbx-shimwrap"><div class="sbx-shim"></div></div>' : '')
       : designLayers(d);
-    const cls = 'sbx' + (!t.key && d.ring ? ' fx-ring' : '');
+    const cls = 'sbx' + (!t.key && d.ring ? ' fx-ring' : '')
+      + (!t.key && d.spill ? ' fx-spill' : '');
     const inkCls = !t.key && d.inkStyle && d.inkStyle !== 'solid' ? ' ink-' + d.inkStyle : '';
     return '<figure class="sfig' + (i === real ? ' real' : '') + '" style="--tc:' + t.colour + '">' +
       '<div class="' + cls + '" style="' + scoreCSS(t) + '">' + layers +
@@ -6794,7 +6813,7 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
     word: 'd-word', from: 'd-from', via: 'd-via', to: 'd-to', bd: 'd-bd', ink: 'd-ink',
     glow: 'd-glow', glowSize: 'd-size', glowAlpha: 'd-alpha', lo: 'd-lo', shimmer: 'd-shim',
     sparkles: 'd-sparkles', spark: 'd-spark', sparkShadow: 'd-spark-shadow',
-    sparkShape: 'd-shape', sparkMotion: 'd-motion',
+    sparkShape: 'd-shape', sparkMotion: 'd-motion', spill: 'd-spill',
     radius: 'd-radius', borderW: 'd-border', angle: 'd-angle',
     breathe: 'd-breathe', inkStyle: 'd-ink-style',
     holo: 'd-holo', ring: 'd-ring', pulse: 'd-pulse',
@@ -6828,7 +6847,9 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
     d.sparkMotion = $('d-motion').value;
     d.breathe = Number($('d-breathe').value);
     d.inkStyle = $('d-ink-style').value;
-    for (const k of ['shimmer', 'holo', 'ring', 'pulse', 'sparkShadow']) d[k] = $(DIAL_IDS[k]).checked;
+    for (const k of ['shimmer', 'holo', 'ring', 'pulse', 'sparkShadow', 'spill']) {
+      d[k] = $(DIAL_IDS[k]).checked;
+    }
   }
 
   function paintDesign() {
@@ -6865,7 +6886,8 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
       '}\n/* ' + [
         'shimmer ' + (d.shimmer ? 'on' : 'off'),
         d.sparkles
-          ? d.sparkles + ' sparkles (seed ' + d.seed + (d.sparkShadow ? ', shadowed' : '') + ')'
+          ? d.sparkles + ' sparkles (seed ' + d.seed + (d.sparkShadow ? ', shadowed' : '')
+            + (d.spill ? ', escaping' : '') + ')'
           : 'no sparkles',
         d.holo ? 'holographic' : null,
         d.ring ? 'spinning border' : null,
@@ -6986,6 +7008,7 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
       // colour as the box it sits on is not a sparkle.
       spark: Math.random() < .6 ? '#ffffff' : hex((h + 180) % 360, .55, .88),
       sparkShadow: Math.random() < .5,
+      spill: Math.random() < .35,
       holo: Math.random() < .3,
       ring: Math.random() < .25,
       pulse: Math.random() < .3,
@@ -7034,6 +7057,15 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
   // says so once and carries on - nothing else here depends on storage.
   const G = { sort: 'hot', offset: 0, more: false, items: [], liked: new Set(), off: false };
 
+  // Lucide's link and check glyphs, inline so they inherit currentColor and need no
+  // network fetch. Same 24-unit grid and stroke settings the set is drawn on.
+  const svg = body => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    body + '</svg>';
+  const ICON_LINK = svg('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>' +
+    '<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>');
+  const ICON_CHECK = svg('<path d="M20 6 9 17l-5-5"/>');
+
   // Black or white text on a swatch, by Rec.601 luma. Not a contrast-ratio check,
   // but the right side of the line for every colour a colour input can produce.
   const ink = hex => {
@@ -7059,8 +7091,8 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
     // reads as a completely different design from the one its author approved.
     const n = String(S.n);
     const size = n.length <= 5 ? '3rem' : '2.25rem';
-    return '<div class="sbx' + (d.ring ? ' fx-ring' : '') + '" style="' + designCSS(d) + '">' +
-      designLayers(d) +
+    return '<div class="sbx' + (d.ring ? ' fx-ring' : '') + (d.spill ? ' fx-spill' : '') +
+      '" style="' + designCSS(d) + '">' + designLayers(d) +
       '<div class="sbx-n' + inkCls + '" style="font-size:' + size + '">' + n + '</div></div>';
   }
 
@@ -7076,8 +7108,8 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
           '" data-like="' + p.id + '">&hearts; ' + p.likes + '</button>' +
         '<span class="sp"></span><span class="small">' + esc(d.word || '?') +
           ' \u00b7 ' + fmt(Number(d.lo) || 0) + '+ EP</span>' +
-        '<button type="button" class="btn-sm" data-link="' + p.id + '">Link</button>' +
-        '<a class="btn-sm" href="/beta/boxes/r/' + p.id + '">Open</a>' +
+        '<button type="button" class="btn-sm ico" data-link="' + p.id +
+          '" title="Copy link" aria-label="Copy link">' + ICON_LINK + '</button>' +
       '</div></article>';
   }
 
@@ -7126,15 +7158,18 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
     const link = e.target.closest('[data-link]');
     if (link) {
       const url = location.origin + '/beta/boxes/r/' + link.dataset.link;
-      const was = link.textContent;
+      // innerHTML, not textContent - the button is an icon now, and setting text
+      // would throw the glyph away and never put it back.
+      const was = link.innerHTML;
       try {
         await navigator.clipboard.writeText(url);
-        link.textContent = 'Copied';
+        link.innerHTML = ICON_CHECK;
+        link.classList.add('done');
       } catch (err) {
-        link.textContent = 'Ctrl+C';
+        // Clipboard access can be refused outright; a prompt still lets them copy.
         prompt('Copy this link', url);
       }
-      setTimeout(() => { link.textContent = was; }, 1400);
+      setTimeout(() => { link.innerHTML = was; link.classList.remove('done'); }, 1400);
       return;
     }
     const like = e.target.closest('[data-like]');
