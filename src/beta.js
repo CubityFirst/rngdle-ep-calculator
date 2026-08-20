@@ -289,6 +289,18 @@ function workerSrc(fn) {
 // A small abstract mark per tool, so the index reads as a gallery rather than a list.
 // Drawn on the card's own accent, 64x40, no text.
 const THUMBS = {
+  // A row of tier boxes, each with a number in it, and a couple of sparkles above -
+  // the two things the tool is about. Same 64x40 viewBox and currentColor stroke as
+  // the rest, with opacity standing in for the tiers being differently styled.
+  boxes: `<rect x="3" y="14" width="17" height="14" rx="3" opacity=".4"/>
+    <rect x="23.5" y="14" width="17" height="14" rx="3"/>
+    <rect x="44" y="14" width="17" height="14" rx="3" opacity=".65"/>
+    <path d="M7.5 21h8" opacity=".3"/>
+    <path d="M28 21h8" opacity=".85"/>
+    <path d="M48.5 21h8" opacity=".5"/>
+    <path d="M32 4.5v6M29 7.5h6" opacity=".9"/>
+    <path d="M52.5 7v4M50.5 9h4" opacity=".5"/>
+    <path d="M11.5 8v4M9.5 10h4" opacity=".35"/>`,
   atlas: `<path d="M2 30 L14 18 L22 26 L34 10 L46 22 L62 6" />
     <path d="M2 36 L14 26 L22 33 L34 20 L46 30 L62 16" opacity=".5"/>
     <path d="M2 24 L14 11 L22 19 L34 3 L46 15 L62 1" opacity=".28"/>`,
@@ -6142,6 +6154,10 @@ function renderBoxes(ctx) {
     animation-timing-function:ease-in-out; }
   .sbx-sparks.mo-spin i { animation-name:sbx-spin; animation-duration:3s;
     animation-timing-function:linear; }
+  /* Burst is the one motion with real physics, so it sets its easing per keyframe
+     rather than for the whole animation - see the comment on sbx-burst. */
+  .sbx-sparks.mo-burst i { animation-name:sbx-burst; animation-duration:2.8s;
+    animation-timing-function:linear; }
 
   @keyframes sbx-rise {
     0% { opacity:0; transform:translateY(8px) scale(.5); }
@@ -6159,6 +6175,20 @@ function renderBoxes(ctx) {
   @keyframes sbx-spin {
     0%, 100% { opacity:.85; transform:rotate(0deg) scale(.85); }
     50% { opacity:1; transform:rotate(180deg) scale(1.15); } }
+
+  /* Confetti with gravity. The arc is what sells it, and an arc needs two different
+     easings: decelerating on the way up, accelerating on the way down. A single
+     animation-level easing cannot do both, so each keyframe names the curve that
+     governs the segment starting at it. --dx is per particle and set inline, which
+     is what makes the burst go outward rather than every piece flying the same way. */
+  @keyframes sbx-burst {
+    0% { opacity:0; transform:translate(0, 0) scale(.4) rotate(0deg);
+      animation-timing-function:cubic-bezier(.12, .68, .36, 1); }
+    12% { opacity:1; }
+    50% { transform:translate(calc(var(--dx, 0px) * .6), -24px) scale(1) rotate(150deg);
+      animation-timing-function:cubic-bezier(.55, 0, .85, .45); }
+    85% { opacity:.85; }
+    100% { opacity:0; transform:translate(var(--dx, 0px), 30px) scale(.8) rotate(330deg); } }
   @keyframes sbx-spark {
     0%, 100% { opacity:0; transform:scale(.3) rotate(0deg); }
     45% { opacity:.95; transform:scale(1) rotate(45deg); }
@@ -6392,6 +6422,7 @@ function renderBoxes(ctx) {
               <option value="fall">Fall</option>
               <option value="orbit">Orbit</option>
               <option value="spin">Spin</option>
+              <option value="burst">Confetti burst</option>
             </select></div>
           <div class="dial"><label for="d-breathe">Breathing <span class="val" id="d-breathe-v"></span></label>
             <input id="d-breathe" type="range" min="0" max="80" step="1" value="30"></div>
@@ -6499,7 +6530,7 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
   // saved before a dial existed, since both reach a CSS class name.
   const SHAPES = ['star', 'star5', 'diamond', 'dot', 'ring', 'plus', 'heart',
     'hexagon', 'shard', 'confetti'];
-  const MOTIONS = ['twinkle', 'rise', 'fall', 'orbit', 'spin'];
+  const MOTIONS = ['twinkle', 'rise', 'fall', 'orbit', 'spin', 'burst'];
   const pick = (v, list, dflt) => (list.indexOf(v) >= 0 ? v : dflt);
 
   // Starting points, so a design does not have to begin from the same amber box
@@ -6618,9 +6649,13 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     const rnd = () => { x = (x * 9301 + 49297) % 233280; return x / 233280; };
     let out = '';
     for (let i = 0; i < n; i++) {
-      const l = (4 + rnd() * 92).toFixed(1), t = (6 + rnd() * 86).toFixed(1);
+      const l = (4 + rnd() * 92), t = (6 + rnd() * 86);
       const sz = (5 + rnd() * 9).toFixed(1), dl = (rnd() * 2.6).toFixed(2);
-      out += '<i style="left:' + l + '%;top:' + t + '%;--s:' + sz + 'px;animation-delay:' + dl + 's"></i>';
+      // Which way this piece flies when the motion is a burst: outward from the
+      // middle, so the spray opens up instead of drifting one way as a block.
+      const dx = ((l - 50) * 0.55 + (rnd() - 0.5) * 14).toFixed(1);
+      out += '<i style="left:' + l.toFixed(1) + '%;top:' + t.toFixed(1) + '%;--s:' + sz +
+        'px;--dx:' + dx + 'px;animation-delay:' + dl + 's"></i>';
     }
     return '<div class="sbx-sparks' + (d.sparkShadow ? ' lit' : '') +
       ' sh-' + pick(d.sparkShape, SHAPES, 'star') +

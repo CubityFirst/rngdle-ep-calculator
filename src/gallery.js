@@ -165,7 +165,7 @@ function cleanDesign(raw) {
     ['star', 'star5', 'diamond', 'dot', 'ring', 'plus', 'heart', 'hexagon', 'shard', 'confetti'],
     'Particle shape', 'star');
   const sparkMotion = oneOf(raw.sparkMotion,
-    ['twinkle', 'rise', 'fall', 'orbit', 'spin'], 'Particle motion', 'twinkle');
+    ['twinkle', 'rise', 'fall', 'orbit', 'spin', 'burst'], 'Particle motion', 'twinkle');
 
   return {
     word,
