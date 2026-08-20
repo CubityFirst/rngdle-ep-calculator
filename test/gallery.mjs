@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { handleGallery, handleMyLikes } from '../src/gallery.js';
+import { handleGallery, handleMyLikes, loadDesign } from '../src/gallery.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const schema = fs.readFileSync(path.join(here, '..', 'schema.sql'), 'utf8');
@@ -323,6 +323,25 @@ console.log('gallery');
   check('hidden rarity is gone from the api', r.status === 404);
   r = await api(modEnv, '/api/palettes');
   check('hidden rarity is gone from the list', !r.body.palettes.some(p => p.id === id));
+
+  // --- loadDesign, which the share page renders from -----------------------
+  // It hands back plain data rather than a Response, and has to fail closed: the
+  // share route calls it before deciding between a page and a 404.
+  const live = (await api(env, '/api/palettes?sort=new')).body.palettes[0];
+  let got = await loadDesign(env, live.id);
+  check('loadDesign returns the design', got && got.id === live.id && got.design
+    && typeof got.design.word === 'string', JSON.stringify(got && got.id));
+  check('loadDesign hides the private columns',
+    got && !('author_key' in got) && !('hidden' in got));
+
+  check('loadDesign: unknown id -> null', (await loadDesign(env, 'nosuchid9')) === null);
+  check('loadDesign: no database -> null', (await loadDesign({}, live.id)) === null);
+  check('loadDesign: rubbish id -> null', (await loadDesign(env, '../../etc')) === null);
+  check('loadDesign: empty id -> null', (await loadDesign(env, '')) === null);
+
+  // A hidden rarity must stop resolving, or moderation would not reach shared links.
+  await api(modEnv, '/api/palettes/' + live.id, { method: 'DELETE', headers: { 'x-admin-token': 'sekrit' } });
+  check('loadDesign: hidden -> null', (await loadDesign(env, live.id)) === null);
 
   // --- routing ------------------------------------------------------------
   r = await api(env, '/api/palettes', { method: 'PUT', body: {} });

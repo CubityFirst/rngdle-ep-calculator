@@ -24,10 +24,10 @@ import { PROBABILITIES } from './probabilities.gen.js';
 import { pageShell } from './ui.js';
 // /beta - the experimental data-vis lab. Its pages render from the same badge table and
 // the same client-side sweep as everything else; betaCtx() below is the one hand-off.
-import { handleBeta } from './beta.js';
+import { handleBeta, renderSharedBox } from './beta.js';
 
 // Palette gallery for /beta/boxes - the only route that reads or writes storage.
-import { handleGallery, handleMyLikes } from './gallery.js';
+import { handleGallery, handleMyLikes, loadDesign } from './gallery.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -5534,6 +5534,19 @@ export default {
           'cache-control': 'public, max-age=900',
           'access-control-allow-origin': '*',
         },
+      });
+    }
+
+    // A published rarity, by link. Has to be matched before handleBeta, which would
+    // read the whole tail as a tool slug and 404. Rendered server-side because the
+    // unfurl metadata has to be in the HTML - crawlers do not run the page's script.
+    const shareId = url.pathname.match(/^\/beta\/boxes\/r\/([a-z0-9]{4,32})$/);
+    if (shareId) {
+      const found = await loadDesign(env, shareId[1]);
+      // Plain text, matching the worker's own 404 for every other unmatched path.
+      if (!found) return new Response('No rarity with that link.', { status: 404 });
+      return new Response(renderSharedBox(betaCtx(), { ...found, url: url.href }), {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
       });
     }
 

@@ -405,6 +405,25 @@ async function hidePalette(id, request, env, db) {
   return json({ id, hidden: true, changed: res && res.meta ? res.meta.changes : undefined });
 }
 
+/**
+ * One published rarity, as plain data rather than a Response - for the share page,
+ * which needs the design in hand to render OG tags and seed the editor.
+ * Returns null when there is no database, no such id, or it has been hidden.
+ */
+export async function loadDesign(env, id) {
+  const db = env && env.DB;
+  if (!db || !/^[a-z0-9]{4,32}$/.test(String(id || ''))) return null;
+  try {
+    const row = await db.prepare(
+      `SELECT id, name, author, note, tiers, tier_count, created, likes
+         FROM palettes WHERE id = ? AND hidden = 0`
+    ).bind(id).first();
+    return row ? publicRow(row) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // Which likes belong to this caller, so the gallery can show its own votes as
 // already cast. Separate from the list so the list stays cacheable.
 export async function handleMyLikes(url, request, env) {

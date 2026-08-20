@@ -5954,8 +5954,13 @@ const BOX_STYLES = [
       '&ldquo;any rarity&rdquo;, not one.' },
 ];
 
-function renderBoxes(ctx) {
-  const { CARD_TIERS, CARD_TIER_NAMES } = ctx;
+/**
+ * @param {object} ctx     server data - see betaCtx() in index.js
+ * @param {object} [shared] a published rarity being shared: {id, name, author, note,
+ *                          design, url}. Present only on /beta/boxes/r/<id>.
+ */
+function renderBoxes(ctx, shared) {
+  const { CARD_TIERS, CARD_TIER_NAMES, esc } = ctx;
   // Prod's tier list is index-aligned with ours, so the EP floors come from the same
   // CARD_TIERS the calculator card uses - which is what makes the number mean anything
   // here: it lands in exactly one of these boxes for real.
@@ -6318,6 +6323,9 @@ function renderBoxes(ctx) {
   #pub-msg.bad { color:var(--bad-lt); }
   #pub-msg.ok { color:var(--ok); }
 
+  .shared h2 { display:flex; align-items:baseline; gap:.6rem; flex-wrap:wrap; margin:0 0 .3rem; }
+  .shared h2 span { font-size:.78rem; font-weight:400; color:var(--muted); }
+
   /* --- gallery --- */
   .gal-bar { display:flex; flex-wrap:wrap; align-items:center; gap:.6rem; margin:.9rem 0; }
   #gal { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(300px,100%),1fr)); gap:.7rem; }
@@ -6337,11 +6345,47 @@ function renderBoxes(ctx) {
   .like.on { color:var(--bad-lt); border-color:var(--bad-dk); }
   #gal-msg { margin:.9rem 0 0; }`;
 
+  // Unfurl metadata for a shared rarity. Crawlers do not run JavaScript, so this has
+  // to be in the served HTML - which it is, because the worker renders the page.
+  //
+  // Deliberately no og:image: nothing here rasterises a PNG yet, and every major
+  // crawler rejects SVG and data: URIs, so there is no image we could honestly point
+  // at. When one exists, add og:image with og:image:width/height and move
+  // twitter:card up to summary_large_image.
+  //
+  // noindex stays on, as it is for the whole lab. It keeps the page out of search
+  // results without blocking Discord, Slack or X from unfurling it.
+  const head = shared ? (() => {
+    const title = shared.name + ' - a rarity for RNGdle';
+    const desc = shared.note
+      || (shared.design.word + ', a rarity designed in the RNGdle Box Lab'
+          + (shared.author ? ' by ' + shared.author : '') + '.');
+    return [
+      ['name', 'description', desc],
+      ['property', 'og:type', 'website'],
+      ['property', 'og:site_name', 'RNGdle'],
+      ['property', 'og:url', shared.url],
+      ['property', 'og:title', title],
+      ['property', 'og:description', desc],
+      ['name', 'twitter:card', 'summary'],
+      ['name', 'twitter:title', title],
+      ['name', 'twitter:description', desc],
+    ].map(([k, n, v]) => '<meta ' + k + '="' + n + '" content="' + esc(String(v)) + '">').join('\n');
+  })() : '';
+
+  const banner = shared ? `
+  <section class="card shared">
+    <h2>${esc(shared.name)}<span>${shared.author ? 'by ' + esc(shared.author) : 'anonymous'}</span></h2>
+    ${shared.note ? `<p class="small">${esc(shared.note)}</p>` : ''}
+    <p class="small">Loaded into the designer below - change anything and it becomes yours.</p>
+  </section>` : '';
+
   const body = `<div class="wrap">
   <div class="tool-head">
     <h1>Box Lab <span class="beta-tag">beta</span></h1>
     <a class="tool-back" href="/beta">&larr; Beta lab</a>
   </div>
+${banner}
 
   <section class="card">
     <div class="bar">
@@ -6494,9 +6538,12 @@ function renderBoxes(ctx) {
 </div>`;
 
   const script = `(${boxesClient.toString()})(${JSON.stringify(tiers)}, ${JSON.stringify(BOX_STYLES)},
-  ${JSON.stringify(aligned)}, ${JSON.stringify(SCORE_TIERS)});`;
+  ${JSON.stringify(aligned)}, ${JSON.stringify(SCORE_TIERS)}, ${JSON.stringify(shared ? shared.design : null)});`;
 
-  return betaShell({ title: 'RNGdle - Box Lab', width: '1180px', slug: 'boxes', css, body, script });
+  return betaShell({
+    title: shared ? `RNGdle - ${esc(shared.name)}` : 'RNGdle - Box Lab',
+    width: '1180px', slug: 'boxes', css, body, script, head,
+  });
 }
 
 /**
@@ -6505,8 +6552,9 @@ function renderBoxes(ctx) {
  * @param {Array}   STYLES   box recipes: {key, name, src, on, note}
  * @param {boolean} ALIGNED  whether CARD_TIER_NAMES still matches prod's tier order
  * @param {object}  SCORE    prod's scoring-box CSS per tier key, [light, dark] per field
+ * @param {object}  SHARED   a published design being viewed, or null
  */
-function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
+function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
   const KEY = 'rngdle-beta-boxes-v1';
   const $ = id => document.getElementById(id);
   const fmt = n => n.toLocaleString('en-US');
@@ -6562,13 +6610,19 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
     design: seed(),
     data: null,
   };
-  try {
-    const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
-    // Merge onto a fresh seed so an entry saved before a dial existed still opens.
-    if (saved && saved.design && typeof saved.design === 'object') {
-      S.design = Object.assign(seed(), saved.design);
-    }
-  } catch (e) { /* a corrupt entry is not worth a broken page */ }
+  if (SHARED) {
+    // Arriving on somebody's share link: show their rarity, not the last thing this
+    // browser was working on. Nothing is written back until a dial is touched.
+    S.design = Object.assign(seed(), SHARED);
+  } else {
+    try {
+      const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+      // Merge onto a fresh seed so an entry saved before a dial existed still opens.
+      if (saved && saved.design && typeof saved.design === 'object') {
+        S.design = Object.assign(seed(), saved.design);
+      }
+    } catch (e) { /* a corrupt entry is not worth a broken page */ }
+  }
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ design: S.design })); } catch (e) {} };
 
   // Prod's seven, resolved for the current theme, then yours as an eighth. Prod's
@@ -7022,7 +7076,8 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
           '" data-like="' + p.id + '">&hearts; ' + p.likes + '</button>' +
         '<span class="sp"></span><span class="small">' + esc(d.word || '?') +
           ' \u00b7 ' + fmt(Number(d.lo) || 0) + '+ EP</span>' +
-        '<button type="button" class="btn-sm" data-use="' + p.id + '">Load</button>' +
+        '<button type="button" class="btn-sm" data-link="' + p.id + '">Link</button>' +
+        '<a class="btn-sm" href="/beta/boxes/r/' + p.id + '">Open</a>' +
       '</div></article>';
   }
 
@@ -7068,16 +7123,18 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
   }
 
   $('gal').addEventListener('click', async e => {
-    const use = e.target.closest('[data-use]');
-    if (use) {
-      const p = G.items.find(x => x.id === use.dataset.use);
-      if (!p) return;
-      if (!p.design) return;
-      S.design = Object.assign(seed(), p.design);
-      save();
-      syncDials();
-      paint();
-      $('rows').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const link = e.target.closest('[data-link]');
+    if (link) {
+      const url = location.origin + '/beta/boxes/r/' + link.dataset.link;
+      const was = link.textContent;
+      try {
+        await navigator.clipboard.writeText(url);
+        link.textContent = 'Copied';
+      } catch (err) {
+        link.textContent = 'Ctrl+C';
+        prompt('Copy this link', url);
+      }
+      setTimeout(() => { link.textContent = was; }, 1400);
       return;
     }
     const like = e.target.closest('[data-like]');
@@ -7119,7 +7176,8 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
       const j = await r.json();
       if (!r.ok) { msg.className = 'bad'; msg.textContent = j.error || 'Could not publish that.'; return; }
       msg.className = 'ok';
-      msg.textContent = j.duplicate ? 'Already published - it is in the gallery below.' : 'Published.';
+      msg.textContent = (j.duplicate ? 'Already published' : 'Published')
+        + ' - ' + location.origin + '/beta/boxes/r/' + j.id;
       G.sort = 'new';
       [...$('gsort').children].forEach(c => c.classList.toggle('on', c.dataset.v === 'new'));
       await loadGallery(true);
@@ -7148,6 +7206,10 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE) {
  * @param {string} path   url.pathname
  * @param {object} ctx    server data the tools render from - see betaCtx() in index.js
  */
+export function renderSharedBox(ctx, shared) {
+  return renderBoxes(ctx, shared);
+}
+
 export function handleBeta(path, ctx) {
   if (path === '/beta' || path === '/beta/') return renderBetaIndex();
   if (!path.startsWith('/beta/')) return null;

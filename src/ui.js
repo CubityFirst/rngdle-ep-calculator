@@ -365,6 +365,7 @@ export const NAV_BOOT_JS = `
  * @param {boolean}[o.full]    full-bleed app layout: no body padding, no page scroll.
  *                             The page must offset its own fixed overlays by --rail-w.
  * @param {boolean}[o.noindex] emit <meta name="robots" content="noindex">
+ * @param {string} [o.head]    extra <head> markup (meta/link tags), escaped by the caller
  * @param {string} [o.viewport] override the viewport meta (canvas pages lock pinch-zoom)
  */
 // Inline so the browser never requests /favicon.ico - the Worker has no route for it,
@@ -390,6 +391,7 @@ export function pageShell(o) {
 <meta charset="utf-8"><meta name="color-scheme" content="dark"><meta name="viewport" content="${o.viewport || 'width=device-width,initial-scale=1'}">
 ${o.noindex ? '<meta name="robots" content="noindex">\n' : ''}<link rel="icon" href="${FAVICON}">
 <title>${o.title}</title>
+${o.head || ''}
 <style>${TOKENS_CSS}
   :root { --wrap:${o.width || '960px'}; }
 ${BASE_CSS}
