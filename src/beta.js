@@ -6360,8 +6360,7 @@ function renderBoxes(ctx) {
       <button type="button" class="btn-primary btn-sm" id="pub-go">Publish this rarity</button>
       <span id="pub-msg"></span>
     </div>
-    <p class="small">Only your own rarity is submitted - prod's seven are never sent and cannot be
-      changed from here. There is no account and nothing about you is stored; submissions are
+    <p class="small">There is no account and nothing about you is stored; submissions are
       rate-limited by a salted hash of your IP, which is not kept in any form that can be turned back
       into an address.</p>
   </section>
@@ -6378,16 +6377,6 @@ function renderBoxes(ctx) {
     <p class="small" id="gal-msg"></p>
   </section>
 
-  <footer>
-    Colours, keyframes and box recipes are read out of rngdle.com's stylesheet
-    (<code>/_next/static/chunks/40301e47118b0e38.css</code>, fetched 2026-08-19), not out of the JS
-    bundle the badge rules come from. Prod writes its tier colours in <b>oklch</b> and swaps the whole
-    set under <code>.dark</code>, so a tier has two colours and not one - the preview paints prod's
-    exact oklch and the editor seeds from the sRGB equivalent. Boxes marked <b>prod</b> are its rules
-    transcribed; <b>lab</b> ones use prod's ingredients in a way prod itself does not. EP floors are
-    the same <code>CARD_TIERS</code> the calculator card uses, and the number is scored by
-    <code>/api</code>, so it reflects the live badge rules.
-  </footer>
 </div>`;
 
   const script = `(${boxesClient.toString()})(${JSON.stringify(tiers)}, ${JSON.stringify(BOX_STYLES)},
