@@ -5951,7 +5951,6 @@ function renderBoxes(ctx) {
   const aligned = CARD_TIER_NAMES.join(',') === PROD_TIERS.map(t => t.key).join(',');
 
   const css = `
-  p.tag { margin:0 0 1.4rem; }
   .small { font-size:.8rem; line-height:1.6; color:var(--muted); }
   .card { margin-bottom:.9rem; }
 
@@ -6032,8 +6031,14 @@ function renderBoxes(ctx) {
 
   /* ===== the scoring box, prod-exact ==================================== */
   /* Geometry is prod's: px-8 py-5, rounded-xl, border-3, transition-all 500ms. */
-  .pv.s-score { grid-template-columns:repeat(auto-fit, minmax(min(216px,100%),1fr)); align-items:start; }
-  .sfig { display:flex; flex-direction:column; align-items:center; gap:.45rem; min-width:0; }
+  /* The scoring box is a fixed-size object: 2rem of padding either side plus digits at
+     3rem. A track narrower than that does not shrink it - the box overflows and
+     overflow:hidden eats the number. So the track is sized for the widest box and the
+     strip wraps to more rows instead of squeezing more into one. */
+  .pv.s-score { grid-template-columns:repeat(auto-fit, minmax(min(100%, 258px), 1fr));
+    align-items:start; justify-items:center; }
+  .sfig { display:flex; flex-direction:column; align-items:center; gap:.45rem;
+    width:100%; min-width:0; }
   .sfig figcaption { font-size:.6rem; letter-spacing:.06em; text-transform:uppercase; font-weight:700;
     color:var(--tc); text-align:center; min-width:0; overflow:hidden; text-overflow:ellipsis;
     white-space:nowrap; max-width:100%; }
@@ -6258,8 +6263,6 @@ function renderBoxes(ctx) {
     <h1>Box Lab <span class="beta-tag">beta</span></h1>
     <a class="tool-back" href="/beta">&larr; Beta lab</a>
   </div>
-  <p class="tag">One number, dropped into every coloured box rngdle.com knows how to draw -
-    and then into whatever boxes you invent instead.</p>
 
   <section class="card">
     <div class="bar">
