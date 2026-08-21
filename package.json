@@ -13,7 +13,8 @@
     "test:browser": "node test/browser.mjs",
     "test:deploy": "node test/browser.mjs --bundle",
     "test:supersession": "node test/supersession.mjs",
-    "test:gallery": "node test/gallery.mjs"
+    "test:gallery": "node test/gallery.mjs",
+    "test:gallery-ui": "node test/gallery-ui.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.124.0"

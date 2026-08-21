@@ -10,6 +10,8 @@ npm test             # badge-logic test harness
 npm run test:browser # real-browser smoke test of the /beta tools
 npm run test:deploy  # the same, against the esbuild bundle - run before deploying
 npm run test:supersession  # /beta's family rule vs research/badge-tally.json (~2 min)
+npm run test:gallery # the /beta/boxes gallery's routes, against schema.sql
+npm run test:gallery-ui    # the same gallery in a browser, against a real D1
 npm run deploy       # publish to Cloudflare (runs the generator via predeploy)
 ```
 
@@ -17,6 +19,18 @@ npm run deploy       # publish to Cloudflare (runs the generator via predeploy)
 sweep, and then drives its controls, failing on any console error, any horizontal
 overflow, or any control that does nothing. It skips itself (exit 0) when
 playwright-core is not installed.
+
+`test:gallery` runs the gallery's routes against `schema.sql` through a node:sqlite
+stand-in, so every query it checks is the query production runs. It also replays each
+statement the Worker issued through `EXPLAIN QUERY PLAN` and fails on a full table scan
+or a temp B-tree - D1 bills rows read, so a query that quietly stopped using its index
+costs more per call for ever without breaking, slowing down, or saying anything.
+
+`test:gallery-ui` covers the half of the gallery that only exists in the browser: the
+cursor paging, the hearts and the sort tabs. It needs a database to do anything, so it
+starts `wrangler dev` against a throwaway one (`--persist-to` a temp directory, seeded
+and then deleted) - your own local gallery is never touched. Like `test:browser`, it
+skips itself with exit 0 when playwright-core or wrangler cannot be started.
 
 `test:supersession` matters because `/beta/economy` and `/beta/collector` re-implement
 the family rule in a Web Worker, over the sweep bitmask rather than through `compute()`.
