@@ -27,3 +27,12 @@ CONTRIBUTING.md. Pre-2026-07-21 history uses an older style; don't rewrite it.
   it, so an edge back would be a cycle. Everything it needs arrives through `betaCtx()`.
   New tools need a `BETA_TOOLS` entry *and* a `RENDERERS` entry or the route 404s.
 - Wrangler is invoked via npm scripts / `npx wrangler`, never a global install.
+- `HOT_RANK` in `src/gallery.js` and the `palettes_hot` index in `schema.sql` must spell
+  the same expression character for character - SQLite only uses an expression index
+  when the `ORDER BY` matches it exactly, so changing `HEART_DAYS` on one side alone
+  silently drops the default sort back to reading and sorting every visible row.
+  `node test/gallery.mjs` catches this: it replays every statement the Worker issued
+  through `EXPLAIN QUERY PLAN` and fails on a full scan or a temp B-tree.
+- `schema.sql` is all `IF NOT EXISTS`, so it is also the migration - after adding an
+  index, re-apply it (`npx wrangler d1 execute rngdle --file=schema.sql --remote`) or
+  production keeps the old plan. Deploying the Worker does not touch the database.

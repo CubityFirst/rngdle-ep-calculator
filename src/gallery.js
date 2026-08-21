@@ -2,9 +2,15 @@
 // stores anything. Everything else is a pure function of the number you typed;
 // this holds what other people invented, so it needs a database.
 //
-// Storage is D1, bound as `env.DB`. `node serve.mjs` binds a node:sqlite shim that
-// speaks the same prepare/bind/first/all/run surface against a local file, so the
-// SQL below is the only copy and dev and prod cannot drift. Schema: schema.sql.
+// Storage is D1, bound as `env.DB`. test/gallery.mjs stands up node:sqlite behind the
+// same prepare/bind/first/all/run/batch surface, so the SQL below is the only copy and
+// what the tests exercise is what production runs. Schema: schema.sql.
+//
+// Round trips are the cost that matters here, not CPU: every statement is a hop to a
+// database that is not in this datacentre, and D1 bills the rows each one reads. So
+// independent reads are folded into one statement with scalar subqueries, writes that
+// belong together go through batch() (one hop, and one transaction), and every query
+// has an index behind it - see schema.sql, where each index names the query it serves.
 //
 // Nothing here renders HTML - the routes return JSON and the Box Lab client draws
 // it. That keeps beta.js free of any import from this module, and this module free
@@ -34,6 +40,7 @@ const LIMITS = {
   perHour: 5,        // submissions per author_key per hour
   heartsPerHour: 60, // heart/un-heart actions per voter_key per hour
   page: 24,
+  likedCap: 1000,    // hearts /api/palettes-liked will report for one caller
 };
 
 // Default ordering: one heart is worth three days of freshness. Hearts and age are
@@ -43,14 +50,45 @@ const LIMITS = {
 // hearts, which is the opposite of what hearting is for. Plain arithmetic on
 // purpose: SQLite's POWER() and LOG() sit behind a compile flag, and this has to
 // run identically on D1 and under test.
+//
+// The rank was once written `(created - now)` and took `now` as a bind parameter. It
+// no longer does, and the reason is worth keeping: `now` is one value for the whole
+// query, so subtracting it shifts every row equally and cannot change the order. What
+// it did change was whether the ordering could be indexed at all - a rank that depends
+// on a parameter has to be computed per row and sorted, which meant the default sort
+// read every visible palette and built a temp B-tree on each page load. Dropping the
+// term leaves an expression of columns alone, which schema.sql indexes as palettes_hot.
+//
+// That index has to spell this expression identically, so the two move together.
 const HEART_DAYS = 3;
-const HOT_RANK = `(likes * ${HEART_DAYS}.0 + (created - ?) / 86400000.0)`;
+const HOT_RANK = `(likes * ${HEART_DAYS}.0 + created / 86400000.0)`;
+
+// The columns any palette is handed back with. tier_count is deliberately absent: it
+// is always 1 and publicRow has never read it, so selecting it only paid to move it.
+const COLS = 'id, name, author, note, tiers, created, likes';
 
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), {
   status,
   headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
 });
 const bad = (message, status = 400) => json({ error: message }, status);
+
+/**
+ * Run several statements as one unit. D1's batch() sends them in a single round trip
+ * and wraps them in a transaction, which is what the heart toggle needs - its delete
+ * and its counter update are one change to the gallery, not two.
+ *
+ * The sequential fallback is for any binding without batch(). It is a real fallback,
+ * not a pretence: the statements still run, just in as many hops and without the
+ * transaction. Nothing in this file depends on it, and D1 always has batch().
+ */
+function runAll(db, statements) {
+  if (typeof db.batch === 'function') return db.batch(statements);
+  return statements.reduce(
+    (chain, s) => chain.then(async acc => [...acc, await s.run()]),
+    Promise.resolve([]),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -260,7 +298,10 @@ export async function handleGallery(url, request, env) {
     // and answering 200 keeps a page load free of console errors on a deployment
     // that never had a database. Trying to WRITE to one is a real 503.
     if (request.method === 'GET') {
-      return json({ error: NO_DB, unconfigured: true, palettes: [], more: false, sort: 'new', offset: 0 });
+      return json({
+        error: NO_DB, unconfigured: true,
+        palettes: [], more: false, sort: 'new', offset: 0, cursor: null,
+      });
     }
     return json({ error: NO_DB, unconfigured: true }, 503);
   }
@@ -292,38 +333,132 @@ export async function handleGallery(url, request, env) {
   }
 }
 
+// What each sort ranks by. `new` ranks by created, which is also every other sort's
+// tiebreak - so for `new` the rank and the tiebreak are one column, and one comparison
+// settles a position instead of two.
+const RANK_BY = { top: 'likes', new: 'created', hot: HOT_RANK };
+
+// Every ordering ends in rowid, and it is not decoration. A cursor says "resume strictly
+// after this position", so the position has to identify exactly one row - if two
+// palettes tie on rank and on created, a cursor cut from one of them excludes both and
+// the other is never handed out. rowid is unique by construction, so the full sort key
+// is too. SQLite appends rowid to every non-unique index in ascending order, which is
+// why adding it costs no sort: it is the order the index was already in.
+const TIEBREAK = 'rowid';
+
+/**
+ * Decode a page cursor: the sort position of the last row of the previous page.
+ *
+ * Cursors are opaque - read one out of a response, never build one. Anything that does
+ * not parse is treated as absent rather than as an error, so a stale, truncated or
+ * hand-edited link shows the first page instead of a 400.
+ */
+function parseCursor(raw) {
+  if (!raw) return null;
+  const parts = String(raw).split('_').map(Number);
+  if (parts.length !== 3 || parts.some(n => !Number.isFinite(n))) return null;
+  return { rank: parts[0], created: parts[1], rid: parts[2] };
+}
+
+const cursorOf = row => `${row.rank}_${row.created}_${row.rid}`;
+
+/**
+ * The "strictly after this position" predicate for a lexicographic ordering, built as
+ * the usual nested comparison: earlier terms decide, and a tie on one defers to the
+ * next. Terms carry their own comparison because the ordering is not all one way -
+ * rank and created descend, rowid ascends.
+ *
+ * @param {Array<{sql: string, cmp: string, value: number}>} terms  in ordering order
+ * @returns {{sql: string, args: number[]}}  bind args, in the order the sql needs them
+ */
+function keysetAfter(terms) {
+  const step = i => {
+    const { sql, cmp, value } = terms[i];
+    if (i === terms.length - 1) return { sql: `${sql} ${cmp} ?`, args: [value] };
+    const rest = step(i + 1);
+    return {
+      sql: `(${sql} ${cmp} ? OR (${sql} = ? AND ${rest.sql}))`,
+      args: [value, value, ...rest.args],
+    };
+  };
+  return step(0);
+}
+
 async function listPalettes(url, db) {
   const asked = url.searchParams.get('sort');
   const sort = asked === 'top' || asked === 'new' ? asked : 'hot';
   const limit = Math.min(LIMITS.page, Math.max(1, Number(url.searchParams.get('limit')) || LIMITS.page));
-  const offset = Math.max(0, Math.min(5000, Number(url.searchParams.get('offset')) || 0));
+
+  // Two ways to ask for a later page, and they cost very different amounts. OFFSET
+  // makes the database walk and discard every row of every earlier page - rows D1
+  // charges for and nobody ever sees, so page five costs five pages. A cursor seeks
+  // straight into the index at the point the last page stopped, so every page costs
+  // exactly one page. OFFSET stays for links and clients written before cursors
+  // existed; a request carrying both is honouring the cursor, because a position is
+  // more accurate than a page number.
+  const cursor = parseCursor(url.searchParams.get('cursor'));
+  const offset = cursor ? 0
+    : Math.max(0, Math.min(5000, Number(url.searchParams.get('offset')) || 0));
 
   //  hot  hearts, decayed by age (the default)
   //  top  most hearted outright
   //  new  newest first
-  const order = sort === 'top' ? 'likes DESC, created DESC'
-    : sort === 'new' ? 'created DESC'
-    : `${HOT_RANK} DESC, created DESC`;
-  // The rank expression is the only ordering that binds a parameter, and it has to
-  // bind ahead of the LIMIT/OFFSET pair because it appears earlier in the statement.
-  const args = sort === 'hot' ? [Date.now(), limit + 1, offset] : [limit + 1, offset];
+  //
+  // For `new` the rank IS created, so naming it twice in the ordering would just be
+  // comparing a column with itself - the sort key is (created DESC, rowid).
+  //
+  // Each term carries how it sorts, how "after" compares under that direction, and
+  // where its value lives on a cursor - the three always move together.
+  const rank = RANK_BY[sort];
+  const BY_RANK    = { sql: rank,     dir: ' DESC', cmp: '<', of: c => c.rank };
+  const BY_CREATED = { sql: 'created', dir: ' DESC', cmp: '<', of: c => c.created };
+  const BY_ROWID   = { sql: TIEBREAK,  dir: '',      cmp: '>', of: c => c.rid };
+  const keyTerms = sort === 'new'
+    ? [BY_CREATED, BY_ROWID]
+    : [BY_RANK, BY_CREATED, BY_ROWID];
+  const order = keyTerms.map(t => t.sql + t.dir).join(', ');
+
+  // Seek straight to the cursor's position in the index. Every sort has an index
+  // leading with hidden, so this is a seek rather than a filter applied to rows that
+  // had to be read first.
+  const where = ['hidden = 0'];
+  const args = [];
+  if (cursor) {
+    const seek = keysetAfter(keyTerms.map(t => ({ ...t, value: t.of(cursor) })));
+    where.push(seek.sql);
+    args.push(...seek.args);
+  }
 
   // limit + 1 is the "is there another page" probe - cheaper than a second COUNT.
+  // The rank and rowid come back with the row so the next cursor can be cut from it;
+  // publicRow builds its output field by field, so neither reaches the client.
   const rows = await db.prepare(
-    `SELECT id, name, author, note, tiers, tier_count, created, likes
-       FROM palettes WHERE hidden = 0 ORDER BY ${order} LIMIT ? OFFSET ?`
-  ).bind(...args).all();
+    `SELECT ${COLS}, ${rank} AS rank, ${TIEBREAK} AS rid FROM palettes
+      WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?`
+  ).bind(...args, limit + 1, offset).all();
 
-  const list = (rows.results || []).map(publicRow);
-  const more = list.length > limit;
-  return json({ sort, offset, palettes: more ? list.slice(0, limit) : list, more });
+  const found = rows.results || [];
+  const more = found.length > limit;
+  const page = more ? found.slice(0, limit) : found;
+  const last = page[page.length - 1];
+  return json({
+    sort,
+    offset,
+    palettes: page.map(publicRow),
+    more,
+    cursor: more && last ? cursorOf(last) : null,
+  });
 }
 
+// The one query that reads a palette by id: getPalette answers a request with it and
+// loadDesign hands the same row to the share page as plain data. Two copies of one
+// SELECT is two things to keep in step, and hidden = 0 is the half that matters -
+// forget it in one copy and moderation stops reaching one of the two routes.
+const selectOne = (db, id) =>
+  db.prepare(`SELECT ${COLS} FROM palettes WHERE id = ? AND hidden = 0`).bind(id).first();
+
 async function getPalette(id, db) {
-  const row = await db.prepare(
-    `SELECT id, name, author, note, tiers, tier_count, created, likes
-       FROM palettes WHERE id = ? AND hidden = 0`
-  ).bind(id).first();
+  const row = await selectOne(db, id);
   return row ? json(publicRow(row)) : bad('No palette with that id.', 404);
 }
 
@@ -341,21 +476,27 @@ async function createPalette(request, env, db) {
 
   const key = await callerKey(request, env);
   const now = Date.now();
+  const body = JSON.stringify(design);
 
-  const recent = await db.prepare(
-    'SELECT COUNT(*) AS c FROM palettes WHERE author_key = ? AND created > ?'
-  ).bind(key, now - 3600_000).first();
-  if (recent && recent.c >= LIMITS.perHour) {
+  // Both of the questions a publish has to answer first, in one round trip. They are
+  // independent - how many palettes this author posted in the last hour, and whether
+  // this exact design is already up - and both are seeks on the same (author_key,
+  // created) index, so asking separately bought nothing but a second hop.
+  const pre = await db.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM palettes
+          WHERE author_key = ? AND created > ?) AS recent,
+       (SELECT id FROM palettes
+          WHERE author_key = ? AND tiers = ? AND hidden = 0 AND created > ?) AS dupe`
+  ).bind(key, now - 3600_000, key, body, now - 86_400_000).first();
+
+  if (pre && pre.recent >= LIMITS.perHour) {
     return bad(`That is ${LIMITS.perHour} palettes in an hour, which is enough for now. Try again later.`, 429);
   }
 
   // Republishing the identical palette is almost always a double-click or a retry,
   // so hand back what is already there instead of a duplicate row.
-  const body = JSON.stringify(design);
-  const dupe = await db.prepare(
-    'SELECT id FROM palettes WHERE author_key = ? AND tiers = ? AND hidden = 0 AND created > ?'
-  ).bind(key, body, now - 86_400_000).first();
-  if (dupe) return json({ id: dupe.id, duplicate: true });
+  if (pre && pre.dupe) return json({ id: pre.dupe, duplicate: true });
 
   const id = newId();
   // tier_count stays in the schema and is always 1 now - one design per submission.
@@ -369,44 +510,70 @@ async function createPalette(request, env, db) {
 
 async function likePalette(id, request, env, db) {
   const key = await callerKey(request, env);
-  const exists = await db.prepare('SELECT likes FROM palettes WHERE id = ? AND hidden = 0').bind(id).first();
-  if (!exists) return bad('No palette with that id.', 404);
-
   const now = Date.now();
+  const cutoff = now - 3600_000;
+
+  // Everything hearting has to know, in one round trip. Three independent point
+  // lookups, each on an index: does this palette exist and how many hearts has it,
+  // how many hearts has this caller spent inside the window, and has this caller
+  // already hearted this one. likes is NOT NULL in the schema, so a null there can
+  // only mean there was no visible row to read it from.
+  const pre = await db.prepare(
+    `SELECT
+       (SELECT likes FROM palettes WHERE id = ? AND hidden = 0) AS likes,
+       (SELECT COUNT(*) FROM like_events WHERE voter_key = ? AND created > ?) AS spent,
+       (SELECT 1 FROM palette_likes WHERE palette_id = ? AND voter_key = ?) AS had`
+  ).bind(id, key, cutoff, id, key).first();
+
+  if (!pre || pre.likes == null) return bad('No palette with that id.', 404);
+
   // Per-IP heart rate limit. The PK below already stops one caller counting twice
   // on one palette, but nothing stopped a toggle loop or a sweep across the whole
   // gallery, and hearts decide the default ordering - so they have to cost something.
-  const spent = await db.prepare(
-    'SELECT COUNT(*) AS c FROM like_events WHERE voter_key = ? AND created > ?'
-  ).bind(key, now - 3600_000).first();
-  if (spent && spent.c >= LIMITS.heartsPerHour) {
+  if (pre.spent >= LIMITS.heartsPerHour) {
     return bad(`That is ${LIMITS.heartsPerHour} hearts in an hour. Try again later.`, 429);
   }
-  await db.prepare('INSERT INTO like_events (voter_key, created) VALUES (?, ?)').bind(key, now).run();
+  const had = !!pre.had;
 
-  // This table exists only to answer "how many hearts in the last hour", so anything
-  // older is dead weight - and dead weight here is a stored identifier that no longer
-  // does any work. Pruning on every write holds the table to roughly one hour of
-  // activity, which is also what keeps this delete scanning next to nothing.
-  await db.prepare('DELETE FROM like_events WHERE created <= ?').bind(now - 3600_000).run();
+  // All four writes as one batch: one round trip, and one transaction. The second
+  // matters as much as the first - the toggle row and the denormalised count on
+  // palettes are a single change to the gallery, and a failure between them used to
+  // be able to leave a heart with no count or a count with no heart.
+  const results = await runAll(db, [
+    db.prepare('INSERT INTO like_events (voter_key, created) VALUES (?, ?)').bind(key, now),
 
-  // Toggle. The PK on (palette_id, voter_key) is what makes this idempotent per
-  // voter; the count on palettes is a denormalisation kept in step right here.
-  const had = await db.prepare(
-    'SELECT 1 AS x FROM palette_likes WHERE palette_id = ? AND voter_key = ?'
-  ).bind(id, key).first();
+    // like_events exists only to answer "how many hearts in the last hour", so
+    // anything older is dead weight - and dead weight here is a stored identifier
+    // that no longer does any work. Pruning on every write holds the table to roughly
+    // one hour of activity, and like_events_created is what keeps the delete itself
+    // touching only the expired rows instead of reading the table to find them.
+    db.prepare('DELETE FROM like_events WHERE created <= ?').bind(cutoff),
 
-  if (had) {
-    await db.prepare('DELETE FROM palette_likes WHERE palette_id = ? AND voter_key = ?').bind(id, key).run();
-    await db.prepare('UPDATE palettes SET likes = MAX(0, likes - 1) WHERE id = ?').bind(id).run();
-  } else {
-    await db.prepare('INSERT INTO palette_likes (palette_id, voter_key, created) VALUES (?, ?, ?)')
-      .bind(id, key, now).run();
-    await db.prepare('UPDATE palettes SET likes = likes + 1 WHERE id = ?').bind(id).run();
-  }
+    // Toggle. The PK on (palette_id, voter_key) is what makes this idempotent per voter.
+    had
+      ? db.prepare('DELETE FROM palette_likes WHERE palette_id = ? AND voter_key = ?').bind(id, key)
+      : db.prepare('INSERT INTO palette_likes (palette_id, voter_key, created) VALUES (?, ?, ?)')
+        .bind(id, key, now),
 
-  const after = await db.prepare('SELECT likes FROM palettes WHERE id = ?').bind(id).first();
-  return json({ id, likes: after ? after.likes : 0, liked: !had });
+    // RETURNING is what removes the old read-it-back query: the new count travels home
+    // with the update that produced it, so the caller still gets an authoritative
+    // number without a fifth statement to fetch it.
+    had
+      ? db.prepare('UPDATE palettes SET likes = MAX(0, likes - 1) WHERE id = ? RETURNING likes').bind(id)
+      : db.prepare('UPDATE palettes SET likes = likes + 1 WHERE id = ? RETURNING likes').bind(id),
+  ]);
+
+  // Prefer what the update returned. The fallback is the same arithmetic that update
+  // just performed, for any binding whose batch hands back no rows - a count that can
+  // only be stale if someone else hearted the same palette in the same instant, and
+  // the next list load corrects it.
+  const last = results && results[results.length - 1];
+  const row = last && last.results && last.results[0];
+  const likes = row && row.likes != null
+    ? row.likes
+    : (had ? Math.max(0, pre.likes - 1) : pre.likes + 1);
+
+  return json({ id, likes, liked: !had });
 }
 
 // Moderation. Guarded by env.ADMIN_TOKEN (`npx wrangler secret put ADMIN_TOKEN`);
@@ -429,10 +596,7 @@ export async function loadDesign(env, id) {
   const db = env && env.DB;
   if (!db || !/^[a-z0-9]{4,32}$/.test(String(id || ''))) return null;
   try {
-    const row = await db.prepare(
-      `SELECT id, name, author, note, tiers, tier_count, created, likes
-         FROM palettes WHERE id = ? AND hidden = 0`
-    ).bind(id).first();
+    const row = await selectOne(db, id);
     return row ? publicRow(row) : null;
   } catch (e) {
     return null;
@@ -447,7 +611,18 @@ export async function handleMyLikes(url, request, env) {
   if (!db) return json({ liked: [] });
   try {
     const key = await callerKey(request, env);
-    const rows = await db.prepare('SELECT palette_id FROM palette_likes WHERE voter_key = ?').bind(key).all();
+    // palette_likes is keyed (palette_id, voter_key), so a lookup by voter alone
+    // cannot use that key and read the whole table on every Box Lab page load -
+    // palette_likes_voter turns it into a covering read of this caller's rows only.
+    //
+    // The cap is a ceiling on the response, not on anyone's hearts: at 60 hearts an
+    // hour, reaching it is deliberate work, and the cost of exceeding it is that some
+    // of this caller's hearts draw unfilled until they un-heart something. Which ones
+    // is whatever the index reaches first - there is no ordering here, because adding
+    // one would cost a sort to decide something nobody past the cap will notice.
+    const rows = await db.prepare(
+      'SELECT palette_id FROM palette_likes WHERE voter_key = ? LIMIT ?'
+    ).bind(key, LIMITS.likedCap).all();
     return json({ liked: (rows.results || []).map(r => r.palette_id) });
   } catch (e) {
     return json({ liked: [] });

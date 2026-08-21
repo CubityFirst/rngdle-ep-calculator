@@ -7054,7 +7054,12 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
   // Published palettes, from D1 via /api/palettes. The whole section is optional:
   // a deployment with no database answers 503 with unconfigured:true, and the page
   // says so once and carries on - nothing else here depends on storage.
-  const G = { sort: 'hot', offset: 0, more: false, items: [], liked: new Set(), off: false };
+  // cursor is the server's word for "where the last page stopped" - see listPalettes
+  // in gallery.js. Paging by it rather than by a row offset is what stops each further
+  // page costing the database everything already shown. run is the generation of the
+  // list on screen, so a reply to a question nobody is asking any more is dropped
+  // instead of appended to whatever replaced it.
+  const G = { sort: 'hot', cursor: null, more: false, items: [], liked: new Set(), off: false, run: 0 };
 
   // Lucide's link and check glyphs, inline so they inherit currentColor and need no
   // network fetch. Same 24-unit grid and stroke settings the set is drawn on.
@@ -7124,11 +7129,16 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
 
   async function loadGallery(reset) {
     if (G.off) return;
-    if (reset) { G.offset = 0; G.items = []; }
+    if (reset) { G.cursor = null; G.items = []; }
+    const run = ++G.run;
     $('gal-msg').textContent = 'Loading\u2026';
     try {
-      const r = await fetch('/api/palettes?sort=' + G.sort + '&offset=' + G.offset);
+      const r = await fetch('/api/palettes?sort=' + G.sort +
+        (G.cursor ? '&cursor=' + encodeURIComponent(G.cursor) : ''));
       const j = await r.json();
+      // Switching sort or republishing while a page was in flight: that page belongs
+      // to a list that is gone, and appending it would mix two orderings together.
+      if (run !== G.run) return;
       if (j.unconfigured) {
         G.off = true;
         $('gal').innerHTML = '';
@@ -7139,10 +7149,10 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
       if (j.error) throw new Error(j.error);
       G.items = G.items.concat(j.palettes);
       G.more = j.more;
-      G.offset = G.items.length;
+      G.cursor = j.cursor;
       paintGallery();
     } catch (e) {
-      $('gal-msg').textContent = 'Could not load the gallery.';
+      if (run === G.run) $('gal-msg').textContent = 'Could not load the gallery.';
     }
   }
 
@@ -7226,7 +7236,11 @@ function boxesClient(TIERS, STYLES, ALIGNED, SCORE, SHARED) {
   syncDials();
   paint();
   score();
-  loadLikes().then(() => loadGallery(true));
+  // Two requests that do not need each other, so they go at once rather than one
+  // waiting out the other. The gallery draws as soon as it arrives; if the hearts
+  // land second, repaint so this caller's own votes show as already cast.
+  loadGallery(true);
+  loadLikes().then(() => { if (G.items.length) paintGallery(); });
 }
 
 // ---------------------------------------------------------------------------

@@ -32,19 +32,55 @@ function check(name, cond, extra) {
 function freshDB() {
   const db = new DatabaseSync(':memory:');
   db.exec(schema);
+  // Every statement the Worker actually executed, with the arguments it bound. The
+  // plan guard at the bottom of this file replays these through EXPLAIN QUERY PLAN,
+  // which is how a query that quietly stopped using its index gets caught.
+  const executed = [];
+  const seen = (sql, args) => { executed.push({ sql, args }); };
   // D1 statements are immutable and bind() returns a new one; node:sqlite takes its
   // arguments at call time. Carrying them on the wrapper is the whole adapter.
   const wrap = (sql, args = []) => ({
+    sql, args,                                     // what batch() below re-reads
     bind: (...next) => wrap(sql, next),
-    all: async () => ({ results: db.prepare(sql).all(...args) }),
-    first: async () => db.prepare(sql).get(...args) ?? null,
+    all: async () => { seen(sql, args); return { results: db.prepare(sql).all(...args) }; },
+    first: async () => { seen(sql, args); return db.prepare(sql).get(...args) ?? null; },
     run: async () => {
+      seen(sql, args);
       const r = db.prepare(sql).run(...args);
       return { success: true, meta: { changes: Number(r.changes) } };
     },
   });
-  return { prepare: sql => wrap(sql) };
+  return {
+    _raw: db,
+    _executed: executed,
+    prepare: sql => wrap(sql),
+    // D1 runs a batch in one round trip inside a transaction and hands back one
+    // D1Result per statement. node:sqlite has no batch, so the transaction is the
+    // part that has to be built here - stepped through all() rather than run(),
+    // because that is what carries a RETURNING clause's rows back.
+    batch: async statements => {
+      db.exec('BEGIN');
+      try {
+        const out = statements.map(s => {
+          seen(s.sql, s.args);
+          return { results: db.prepare(s.sql).all(...s.args) };
+        });
+        db.exec('COMMIT');
+        return out;
+      } catch (e) {
+        db.exec('ROLLBACK');
+        throw e;
+      }
+    },
+  };
 }
+
+// Direct database work, for setting a scene or inspecting one. Deliberately not
+// through the binding wrapper: the plan guard at the bottom replays everything the
+// wrapper recorded, and that record is only useful if it means "what the Worker ran"
+// rather than "what the Worker ran, plus whatever this file poked at".
+const raw = (db, sql, ...args) => db._raw.prepare(sql).all(...args);
+const raw1 = (db, sql, ...args) => db._raw.prepare(sql).get(...args);
 
 // A well-formed design, and a helper to bend one field at a time.
 const DESIGN = {
@@ -260,8 +296,7 @@ console.log('gallery');
     JSON.stringify(r.body.palettes.map(p => [p.name, p.likes])));
 
   const old = await publish(env, { lo: 40 }, { name: 'Ancient', ip: '10.0.0.30' });
-  await env.DB.prepare('UPDATE palettes SET created = ? WHERE id = ?')
-    .bind(Date.now() - 7 * 86400_000, old.body.id).run();
+  raw(env.DB, 'UPDATE palettes SET created = ? WHERE id = ?', Date.now() - 7 * 86400_000, old.body.id);
   const young = await publish(env, { lo: 41 }, { name: 'Fresh', ip: '10.0.0.31' });
 
   r = await api(env, '/api/palettes');
@@ -280,8 +315,7 @@ console.log('gallery');
   // The trade is meant to be legible: three hearts (9 days' worth) beats a week of
   // age, one heart (3 days') does not.
   const oneHeart = await publish(env, { lo: 42 }, { name: 'Week old, one heart', ip: '10.0.0.32' });
-  await env.DB.prepare('UPDATE palettes SET created = ? WHERE id = ?')
-    .bind(Date.now() - 7 * 86400_000, oneHeart.body.id).run();
+  raw(env.DB, 'UPDATE palettes SET created = ? WHERE id = ?', Date.now() - 7 * 86400_000, oneHeart.body.id);
   await api(env, '/api/palettes/' + oneHeart.body.id + '/like', { method: 'POST', ip: '10.0.2.1' });
   r = await api(env, '/api/palettes');
   rank = r.body.palettes.map(p => p.id);
@@ -308,23 +342,22 @@ console.log('gallery');
   // --- retention ----------------------------------------------------------
   // like_events is only ever read over the last hour, so a spent row is a stored
   // identifier doing no work. Every write prunes them.
-  const evCount = async () =>
-    (await env.DB.prepare('SELECT COUNT(*) AS c FROM like_events').first()).c;
+  const evCount = () => raw1(env.DB, 'SELECT COUNT(*) AS c FROM like_events').c;
 
-  await env.DB.prepare('INSERT INTO like_events (voter_key, created) VALUES (?, ?)')
-    .bind('ancient-caller', Date.now() - 5 * 3600_000).run();
-  await env.DB.prepare('INSERT INTO like_events (voter_key, created) VALUES (?, ?)')
-    .bind('recent-caller', Date.now() - 60_000).run();
-  const before = await evCount();
+  const addEvent = (who, when) =>
+    raw(env.DB, 'INSERT INTO like_events (voter_key, created) VALUES (?, ?)', who, when);
+  addEvent('ancient-caller', Date.now() - 5 * 3600_000);
+  addEvent('recent-caller', Date.now() - 60_000);
+  const before = evCount();
 
   // Any heart triggers the prune.
   await api(env, '/api/palettes/' + young.body.id + '/like', { method: 'POST', ip: '10.7.7.7' });
 
-  const stale = (await env.DB.prepare(
-    'SELECT COUNT(*) AS c FROM like_events WHERE created <= ?').bind(Date.now() - 3600_000).first()).c;
+  const stale = raw1(env.DB,
+    'SELECT COUNT(*) AS c FROM like_events WHERE created <= ?', Date.now() - 3600_000).c;
   check('spent heart events are pruned', stale === 0, `${stale} rows older than the window survived`);
-  check('recent heart events are kept', (await evCount()) < before + 2 && (await env.DB.prepare(
-    'SELECT COUNT(*) AS c FROM like_events WHERE voter_key = ?').bind('recent-caller').first()).c === 1,
+  check('recent heart events are kept', evCount() < before + 2 && raw1(env.DB,
+    'SELECT COUNT(*) AS c FROM like_events WHERE voter_key = ?', 'recent-caller').c === 1,
     'a row inside the window was deleted');
 
   // --- paging -------------------------------------------------------------
@@ -332,6 +365,65 @@ console.log('gallery');
   check('limit pages', r.body.palettes.length === 2 && r.body.more === true);
   r = await api(env, '/api/palettes?limit=2&offset=2');
   check('offset pages', r.body.palettes.length === 2 && r.body.offset === 2);
+
+  // Cursors are the cheap way through the same list - each page seeks to where the
+  // last one stopped instead of counting past every row before it - so the thing to
+  // pin down is that cheaper did not mean different. Walking a sort by cursor has to
+  // hand back every row OFFSET would have, once each, in the same order.
+  const walk = async (sort, param) => {
+    const ids = [];
+    let page = 0, cursor = null;
+    for (;;) {
+      const at = param === 'offset' ? `&offset=${ids.length}` : (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
+      const p = await api(env, `/api/palettes?sort=${sort}&limit=3${at}`);
+      ids.push(...p.body.palettes.map(x => x.id));
+      cursor = p.body.cursor;
+      if (!p.body.more) {
+        check(`${sort}/${param}: the last page carries no cursor`, p.body.cursor === null,
+          JSON.stringify(p.body.cursor));
+        return ids;
+      }
+      check(`${sort}/${param}: a page with more carries a cursor`, typeof cursor === 'string' && !!cursor);
+      if (++page > 40) return ids;   // a runaway walk is a failure, not a hang
+    }
+  };
+  for (const sort of ['hot', 'top', 'new']) {
+    const byOffset = await walk(sort, 'offset');
+    const byCursor = await walk(sort, 'cursor');
+    check(`sort=${sort}: cursor paging matches offset paging`, byCursor.join() === byOffset.join(),
+      `cursor ${byCursor.join()}\n        offset ${byOffset.join()}`);
+    check(`sort=${sort}: no palette repeats across cursor pages`,
+      new Set(byCursor).size === byCursor.length, byCursor.join());
+    check(`sort=${sort}: cursor paging reaches every palette`, byCursor.length > 3, `${byCursor.length} rows`);
+  }
+
+  // Rows that tie on the whole sort key are what a keyset cursor gets wrong if the key
+  // is not unique: a cursor cut from one of them excludes every other, and they are
+  // never handed out. Ties are easy to make here - `top` ranks on likes, and most of
+  // these have none - and rowid is what settles them.
+  {
+    const tied = await walk('top', 'cursor');
+    const all = (await api(env, '/api/palettes?sort=top&limit=24')).body.palettes.map(p => p.id);
+    check('a tied sort key still yields every row exactly once',
+      tied.join() === all.join(), `walked ${tied.length}, one page has ${all.length}`);
+  }
+
+  // A cursor and an offset in one request: the position wins, because a position is
+  // accurate and a page number is a guess about what has not moved.
+  const firstPage = (await api(env, '/api/palettes?limit=2')).body;
+  r = await api(env, '/api/palettes?limit=2&offset=4&cursor=' + encodeURIComponent(firstPage.cursor));
+  const secondPage = await api(env, '/api/palettes?limit=2&offset=2');
+  check('a cursor overrides an offset',
+    r.body.palettes.map(p => p.id).join() === secondPage.body.palettes.map(p => p.id).join(),
+    JSON.stringify([r.body.palettes.map(p => p.id), secondPage.body.palettes.map(p => p.id)]));
+
+  // A stale or mangled cursor is a bad position, not a bad request.
+  for (const junk of ['notacursor', '1_2', 'x_y_z', '1_2_3_4']) {
+    r = await api(env, '/api/palettes?limit=2&cursor=' + encodeURIComponent(junk));
+    check(`a junk cursor (${junk}) falls back to the first page`,
+      r.status === 200 && r.body.palettes.map(p => p.id).join() === firstPage.palettes.map(p => p.id).join(),
+      `${r.status} ${JSON.stringify(r.body.palettes && r.body.palettes.map(p => p.id))}`);
+  }
 
   // --- moderation ---------------------------------------------------------
   r = await api(env, '/api/palettes/' + id, { method: 'DELETE' });
@@ -371,6 +463,42 @@ console.log('gallery');
   check('PUT is refused', r.status === 405);
   const stray = await handleGallery(new URL('http://x/api/other'), new Request('http://x/api/other'), env);
   check('an unrelated path falls through', stray === null);
+
+  // --- query plans --------------------------------------------------------
+  // Every statement above, replayed through EXPLAIN QUERY PLAN. D1 bills the rows a
+  // query reads, so a query that quietly stopped using its index does not fail, break
+  // or even slow down noticeably at this size - it just costs more per call, for ever,
+  // and nothing says so. This is what says so.
+  //
+  // The coupling worth guarding is the `hot` sort: SQLite uses palettes_hot only when
+  // the ORDER BY spells its expression character for character, so editing HEART_DAYS
+  // in gallery.js without editing schema.sql to match silently falls back to reading
+  // every visible palette and sorting it. That shows up here as a temp B-tree.
+  const plans = new Map();
+  for (const { sql, args } of env.DB._executed) {
+    if (!plans.has(sql)) plans.set(sql, args);
+  }
+  check('the plan guard saw the real statements', plans.size >= 8, `${plans.size} distinct statements`);
+
+  for (const [sql, args] of plans) {
+    const label = sql.replace(/\s+/g, ' ').trim().slice(0, 64);
+    let plan;
+    try {
+      plan = env.DB._raw.prepare('EXPLAIN QUERY PLAN ' + sql).all(...args).map(r => r.detail);
+    } catch (e) {
+      check('plan readable: ' + label, false, e.message);
+      continue;
+    }
+    // SCAN CONSTANT ROW is the one-row shell a SELECT of scalar subqueries hangs off,
+    // not a table read. Every other SCAN is a whole table or a whole index.
+    const scans = plan.filter(d => /^SCAN /.test(d) && !/^SCAN CONSTANT ROW/.test(d));
+    check('no full scan: ' + label, scans.length === 0, scans.join(' | ') + '\n        ' + sql.trim());
+    const sorts = plan.filter(d => /TEMP B-TREE/.test(d));
+    check('no sort: ' + label, sorts.length === 0,
+      sorts.join(' | ') + '\n        ' + sql.trim()
+      + '\n        (if this is the hot sort, HOT_RANK in src/gallery.js and palettes_hot'
+      + ' in schema.sql have drifted apart)');
+  }
 }
 
 console.log(`${pass} passed, ${fail} failed`);
