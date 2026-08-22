@@ -15,7 +15,7 @@ npm run test:browser # real-browser smoke test of the /beta tools
 ```
 
 - **Web UI:** `GET /` (or `/?n=696969`)
-- **Badge index:** `GET /badges` - browse all 230 badges: obtainment rule, EP score,
+- **Badge index:** `GET /badges` - browse all 233 badges: obtainment rule, EP score,
   rarity tier, exact share of numbers that earn it, family/supersession relations,
   and example numbers (each linking into the calculator, plus a link to that badge's
   `/grid` highlight view). Searchable, filterable by rarity, sortable by EP /
@@ -72,7 +72,7 @@ precomputed on the server, so every one of them tracks the live badge rules; the
 runs once per browser and every tool after that is instant.
 
 Each tool is a dedicated Web Worker that sweeps and derives, plus a page that only
-draws - so neither the sweep nor a heavy derivation (a 230×230 co-occurrence pass is
+draws - so neither the sweep nor a heavy derivation (a 233×233 co-occurrence pass is
 ~100M operations) ever touches the main thread. `betaBoot` / `betaSweep` in `beta.js`
 are the two halves of that protocol.
 
@@ -87,7 +87,7 @@ are the two halves of that protocol.
 | `/beta/nearmiss` | **Near misses**: the 54 numbers one digit away from any given one, what each would have scored, and across the range the local peaks, the local valleys, and how much of it sits one digit from a mythic. |
 | `/beta/collection` | **Which badges a player is missing** - `/u` counts them, nothing said which. Ranks the gaps by expected wait and by the chance of closing each one in another run the length of the one so far. The only tool here that needs no sweep: a few hundred rolls score instantly through `/engine.js`, and every badge's rate is already in `probabilities.gen.js`. |
 | `/beta/luck` | **Roll odds**: the exact EP distribution, tier odds, closed-form best-of-N, and a luck reading for a real player's rolls (via `/api/profile`, scored locally). Name several players to rank them against each other. |
-| `/beta/collector` | **Coupon collector**: rolls needed to earn all 230 badges, simulated over the real earner sets, against a greedy cover of the same badge list. |
+| `/beta/collector` | **Coupon collector**: rolls needed to earn all 233 badges, simulated over the real earner sets, against a greedy cover of the same badge list. |
 | `/beta/anatomy` | **Plain properties against score**: digit sum, distinct digits, longest run, divisibility, palindromes - each measured as lift against the range average and ranked by how much spread it actually produces. |
 | `/beta/economy` | **Badge pricing**, written up as a finding: EP turns out to be exactly `100 / P(earn)` for every badge, so supersession is the only thing that varies. |
 | `/beta/species` | The range grouped by **exact badge set** - distinct kinds, their rank-size curve, and the numbers that score like nothing else. |
@@ -125,7 +125,7 @@ the regenerated files still need to be committed.
 
 ## How it works
 
-`src/index.js` contains all 230 badges as `[id, label, emoji, ep, rarity, test(c)]`.
+`src/index.js` contains all 233 badges as `[id, label, emoji, ep, rarity, test(c)]`.
 For an input `n`, every `test` runs against a precomputed context (digit array,
 counts, sum, product, substring helper, etc.); matches are summed into `totalEP`.
 
@@ -144,14 +144,14 @@ calling out (all confirmed against prod):
   (e.g. `42` → `"42"`, `0` → `"0"`).
 - **Family supersession:** the live game tags each badge with a `family`, and within a
   family only the **single highest-EP earned badge scores**; the rest are still displayed
-  but score **0**. The full family map (35 families / 138 badges) is mirrored verbatim from
-  prod's `BADGE_DEFINITIONS` as `FAMILIES` in `src/index.js`; the other 65 badges are
+  but score **0**. The full family map (39 families / 159 badges) is mirrored verbatim from
+  prod's `BADGE_DEFINITIONS` as `FAMILIES` in `src/index.js`; the other 74 badges are
   standalone and always score. This was extracted from the live JS, so it matches prod
   exactly (the per-number EP totals across the whole range now diverge from prod only on
   badge *membership* rules, not on supersession). Notable families:
   - **PAIRS** - the whole pair ladder collapses: `Framed/Two/Three Pair`, their contiguous
     variants, `Contiguous Pair`, and `Pair`. So `6161` earns Pair + Two Pair but only Two
-    Pair (447) scores. A lone pair (e.g. `5051`) still scores 120 because it's the only
+    Pair (377) scores. A lone pair (e.g. `5051`) still scores 120 because it's the only
     pair-family badge present (and `407777` keeps Contiguous Pair = 249 for the same reason).
   - **POWER** - all 13 perfect-power badges. The top three (13th/17th/19th) **tie** at EP
     33,333,367, and prod keeps the **first** (13th), so the 13th is what scores - not the

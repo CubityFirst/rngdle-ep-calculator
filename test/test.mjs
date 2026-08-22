@@ -53,8 +53,10 @@ must(666, 'DEVIL'); must(420, 'BOTANIST'); must(911, 'EMERGENCY');
 // "Consecutive Numbers" badges need a multi-digit part; single-digit runs are Neighbors.
 mustNot(3125, 'CONSEC_PAIR_ADJACENT'); must(3125, 'NEIGHBORS');
 // 3125 = 5^5: since the 2026-07-16 batch it also earns Ouroboros (nⁿ, in the POWER family,
-// so it supersedes 5th Power) and the standalone Power of Five, plus Mini Scramble ("312").
-if (compute(3125).totalEP !== 25419196) throw new Error('3125 EP regression: ' + compute(3125).totalEP);
+// so it supersedes 5th Power) and the standalone Power of Five, plus Mini Scramble ("312");
+// the 2026-08-22 batch added Quarter-Century (ends in "25"), worth another 10,000.
+if (compute(3125).totalEP !== 25429196) throw new Error('3125 EP regression: ' + compute(3125).totalEP);
+must(3125, 'QUARTER_CENTURY');
 must(3125, 'OUROBOROS'); must(3125, 'POWER_OF_FIVE'); must(3125, 'MINI_SCRAMBLE');
 if (epOf(3125, 'FIFTH_POWER') !== 0) throw new Error('3125: 5th Power should be superseded by Ouroboros');
 // EXACT = the whole number splits into two consecutive integers; ADJACENT ("Contains") is
@@ -70,9 +72,9 @@ must(0, 'SQUARE'); must(0, 'NINETEENTH_POWER'); must(0, 'SPY');
 if (epOf(0, 'SQUARE') !== 0) throw new Error('0: lower powers should be superseded');
 if (epOf(0, 'THIRTEENTH_POWER') !== 33333367) throw new Error('0: max-EP power tier should score');
 mustNot(2, 'SPY'); // single non-zero digits do NOT get Spy
-epEq(3125, 25419196);  // 5^5: Ouroboros (supersedes 5th Power) + Power of Five + Mini Scramble
+epEq(3125, 25429196);  // 5^5: Ouroboros (supersedes 5th Power) + Power of Five + Mini Scramble + Quarter-Century
 epEq(634700, 18194); // Pair scores 0 because Contiguous Pair (the "00") is present
-epEq(455000, 1190406); // reconciliation + Mesa (rise-then-fall, flats allowed) from the 2026-07-16 batch
+epEq(455000, 1194114); // as above + the 2026-08-22 Contiguous Two Pair rewrite: "5500" now wins PAIRS
 epEq(407777, 412805);   // tier supersession + Pocket Mirror ("7777") + Canyon from the 2026-07-16 batch
 
 // 407777: lower tiers superseded, but Contiguous Pair (base badge) still scores.
@@ -84,17 +86,25 @@ mustNot(407777, 'TRIPS'); must(407777, 'QUADS');
 if (epOf(407777, 'RHYME') !== 0) throw new Error('Rhyme superseded by Mini Echo');
 if (epOf(407777, 'CONTIGUOUS_PAIR') !== 249) throw new Error('Contiguous Pair should still score');
 
-// 455000 specifics: a triple is not a pair; overlapping repeat is not a rhyme.
-mustNot(455000, 'TWO_PAIR');            // 5x2 + 0x3 is a full house, not two pair
-mustNot(455000, 'CONTIGUOUS_TWO_PAIR'); // 55 + 000 = contiguous full house
-mustNot(455000, 'RHYME');               // "00" inside "000" overlaps
+// 455000 specifics: since 2026-08-22 a triple DOES carry a pair; overlapping repeat is
+// still not a rhyme.
+must(455000, 'TWO_PAIR');            // 5x2 + 0x3: two digits seen twice or more
+must(455000, 'CONTIGUOUS_TWO_PAIR'); // the "5500" window is aabb
+mustNot(455000, 'RHYME');            // "00" inside "000" overlaps
 must(455000, 'DEEP_VOID'); must(455000, 'BOAT'); // displayed...
 if (epOf(455000, 'DEEP_VOID') !== 0) throw new Error('Deep Void superseded by Deep Void (3)');
 if (epOf(455000, 'BOAT') !== 0) throw new Error('Full House superseded by Contiguous Full House');
 must(1122, 'TWO_PAIR'); must(1122, 'CONTIGUOUS_TWO_PAIR'); // genuine two pair still works
+// The 2026-08-22 pair rewrite, straight off prod's own match/reject vectors: a run of 3+
+// carries a pair, but a lone triple with no second repeated digit does not.
+must(11122, 'TWO_PAIR'); must(11122, 'CONTIGUOUS_TWO_PAIR');
+must(111222, 'TWO_PAIR'); must(111222, 'CONTIGUOUS_TWO_PAIR');
+mustNot(1112, 'TWO_PAIR'); mustNot(1112, 'CONTIGUOUS_TWO_PAIR');
+must(1221, 'TWO_PAIR'); mustNot(1221, 'CONTIGUOUS_TWO_PAIR'); // pairs must be adjacent, not nested
+must(441599, 'TWO_PAIR'); mustNot(441599, 'CONTIGUOUS_TWO_PAIR'); // ...and the two pairs adjacent to each other
 // The whole PAIRS family collapses to its highest-EP member: 6161 earns both PAIR and
 // TWO_PAIR, so TWO_PAIR (447) scores and PAIR (120) is superseded to 0 (confirmed vs prod).
-if (epOf(6161, 'TWO_PAIR') !== 447) throw new Error('6161 Two Pair should score 447');
+if (epOf(6161, 'TWO_PAIR') !== 377) throw new Error('6161 Two Pair should score 377');
 if (epOf(6161, 'PAIR') !== 0) throw new Error('6161 Pair should be superseded by Two Pair');
 // A lone pair (no other PAIRS-family badge) still scores in full.
 if (compute(5051).badges.find(b => b.id === 'PAIR').ep !== 120) throw new Error('5051 Pair should score 120');

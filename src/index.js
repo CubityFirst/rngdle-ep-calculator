@@ -483,7 +483,6 @@ const BADGES = [
   ['DIGIT_SEVEN', 'Seven', '7️⃣', 100000100, c => c.n === 7],
   ['DIGIT_EIGHT', 'Eight', '8️⃣', 100000100, c => c.n === 8],
   ['DIGIT_NINE', 'Nine', '9️⃣', 100000100, c => c.n === 9],
-  ['TREE_FIDDY_EXACT', 'Exact Tree Fiddy', '🦕', 100000100, c => c.n === 350],
   ['SIXTY_SEVEN_EXACT', 'Exact Six-Seven', '🫠', 100000100, c => c.n === 67],
   ['EIGHTY_SIX_EXACT', 'Exact Eighty-Six', '🍽️', 100000100, c => c.n === 86],
   ['ORIENTATION_EXACT', 'Exact Orientation', '🧭', 100000100, c => c.n === 101],
@@ -519,10 +518,12 @@ const BADGES = [
   ['POWER_OF_FIVE', 'Power of Five', '5️⃣', 11111122, c => { if (c.n <= 0) return false; let v = 1; while (v < c.n) v *= 5; return v === c.n; }],
   ['HELLO', 'Hello', '👋', 11111122, c => c.has('07734')],
   ['SEQUENCE_6', 'Sequence (6)', '🔢', 11111122, c => pHasSequence(c.s, 6, false)],
+  ['EON', 'Eon', '🗿', 10000010, c => c.s.endsWith('00000')],
   ['CONTIGUOUS_SIXES', 'Contiguous Sixes', '➖➖➖➖', 10000010, c => /(\d)\1{5}/.test(c.s)],
   ['DEEP_VOID_FIVE', 'Deep Void (5)', '⚫', 10000010, c => c.has('00000')],
   ['ONE_DIGIT', 'Single Digit', '☝️', 10000010, c => c.len === 1],
   ['QUINT_NINE', 'Quint Nine', '🥳', 10000010, c => c.s.endsWith('99999')],
+  ['SEMI_EON', 'Semi-Eon', '🦴', 10000010, c => c.s.endsWith('50000')],
   ['SIXTH_POWER', '6th Power', '🎲', 9090918, c => isPerfectPower(c.n, 6)],
   ['POWER_OF_THREE', 'Power of Three', '🔺', 7692315, c => { if (c.n <= 0) return false; let v = 1; while (v < c.n) v *= 3; return v === c.n; }], // prod: 1 (=3^0) counts
   ['FIFTH_POWER', '5th Power', '🖐️', 6250006, c => isPerfectPower(c.n, 5)],
@@ -548,8 +549,9 @@ const BADGES = [
   // sum === product. Excludes single digits (1..9 are trivially true) but prod DOES
   // award it to 0 (sum 0 = product 0), so 0 is allowed through. Confirmed via 0 vs 2.
   ['SPY', 'Spy Number', '🕵️', 1030929, c => c.n !== 1 && c.n !== 2 && c.sum === c.prod], // prod excludes only 1 and 2
+  ['EPOCH', 'Epoch', '🏛️', 1000001, c => c.s.endsWith('0000')],
   ['QUAD_NINE', 'Quad Nine', '🎊', 1000001, c => c.s.endsWith('9999')],
-  ['SEMI_EPOCH', 'Semi-Epoch', '🗿', 1000001, c => c.s.endsWith('5000')],
+  ['SEMI_EPOCH', 'Semi-Epoch', '⌛', 1000001, c => c.s.endsWith('5000')],
   ['CUBE', '3rd Power', '🧊', 990100, c => isPerfectPower(c.n, 3)],
   ['EVEN_SPACING', 'Even Spacing', '📏', 862070, c => arithmetic(c.d)],
 
@@ -616,7 +618,6 @@ const BADGES = [
   ['EMERGENCY', 'Emergency', '🚑', 25006, c => c.has('911')],
   ['PI_CONTAINS_3', 'Pi Slice (3)', '🥧', 25006, c => c.has('314')],
   ['E_CONTAINS_3', 'E Slice (3)', '📈', 25006, c => c.has('271')],
-  ['TREE_FIDDY', 'Tree Fiddy', '🦕', 25006, c => c.has('350')],
   ['CALENDAR', 'Calendar', '📅', 25006, c => c.has('365')],
   ['DIVISIBLE_BY_THREE', 'Divisible by Three', '🔺', 24414, c => c.d.every(x => x % 3 === 0)],
   ['SCRAMBLE', 'Scramble', '🔀', 22722, c => c.len >= 2 && c.distinct === c.len && (Math.max(...c.d) - Math.min(...c.d)) === c.len - 1],
@@ -632,17 +633,21 @@ const BADGES = [
   ['MIRROR_BOOKENDS', 'Mirror Bookends', '📖', 10010, c => c.len >= 4 && c.d[0] === c.d[c.len - 1] && c.d[1] === c.d[c.len - 2]],
   ['CENTURY', 'Century', '💯', 10000, c => c.s.endsWith('00')],
   ['DOUBLE_NINE', 'Double Nine', '🎈', 10000, c => c.s.endsWith('99')],
+  ['QUARTER_CENTURY', 'Quarter-Century', '🪙', 10000, c => c.s.endsWith('25')],
   ['SEMI_CENTURY', 'Semi-Century', '🗓️', 10000, c => c.s.endsWith('50')],
+  ['THREE_QUARTER_CENTURY', 'Three-Quarter Century', '🕰️', 10000, c => c.s.endsWith('75')],
 
   // --- Uncommon ---
   ['QUADS', 'Four of a Kind', '🍀', 8436, c => c.maxCount >= 4],
   ['EQUATION', 'Equation', '🟰', 7720, c => findEquation(c.s) !== null],
   ['LOW_BALL', 'Low Ball', '📉', 6400, c => /^[0-4]+$/.test(c.s)],
-  ['CONTIGUOUS_TWO_PAIR', 'Contiguous Two Pair', '👨‍👩‍👧‍👦', 6142, c => { const a = pContigPairStarts(c.s); for (let i = 0; i < a.length - 1; i++) if (a[i] + 2 === a[i + 1]) return true; return false; }],
   ['MOUNTAIN', 'Mountain', '🏔️', 5885, c => mountain(c.d)],
   ['DOUBLE_HOP', 'Double Hop', '🦘🦘', 5321, c => { if (c.len < 5 || c.distinct < 2) return false; for (let e = 0; e <= c.len - 5; e++) if (c.s[e + 2] === c.s[e] && c.s[e + 4] === c.s[e]) return true; return false; }],
   ['HIGH_ROLLER', 'High Roller', '🤑', 5120, c => /^[5-9]+$/.test(c.s)],
   ['VALLEY', 'Valley', '🏜️', 4199, c => valley(c.d)],
+  // 2026-08-22: a plain 4-wide aabb window (a !== b), so a run of 3+ carries a pair with
+  // it (11122 scores). The old rule scanned non-overlapping pair starts and skipped those.
+  ['CONTIGUOUS_TWO_PAIR', 'Contiguous Two Pair', '👨‍👩‍👧‍👦', 3957, c => { for (let i = 0; i + 3 < c.len; i++) if (c.s[i] === c.s[i + 1] && c.s[i + 2] === c.s[i + 3] && c.s[i] !== c.s[i + 2]) return true; return false; }],
   ['MINI_ECHO', 'Mini Echo', '🔂', 3704, c => /(\d\d)\1/.test(c.s)],
   ['ALTERNATOR', 'Alternator', '⚡', 2845, c => alternator(c.d)],
   ['FLUSH', 'Flush', '🎨', 2845, c => allSameParity(c.d)],
@@ -679,7 +684,7 @@ const BADGES = [
   ['PRIME', 'Prime Number', '💎', 1274, c => isPrime(c.n)],
   ['TRINITY', 'Trinity', '⚜️', 1265, c => c.distinct === 3],
   ['DOZEN', 'Dozen', '🍩', 1200, c => c.n > 0 && c.n % 12 === 0],
-  ['CANYON', 'Canyon', '🪨', 1184, c => { let rose = false, fell = false; for (let i = 1; i < c.len; i++) { const a = c.d[i], b = c.d[i - 1]; if (a < b) { if (rose) return false; fell = true; } else if (a > b) rose = true; } return rose && fell; }],
+  ['CANYON', 'Canyon', '🌄', 1184, c => { let rose = false, fell = false; for (let i = 1; i < c.len; i++) { const a = c.d[i], b = c.d[i - 1]; if (a < b) { if (rose) return false; fell = true; } else if (a > b) rose = true; } return rose && fell; }],
   ['FIVE_DIGITS', 'Five Digits', '🖐️', 1111, c => c.len === 5],
   ['ELEVEN', 'Eleven', '🕚', 1100, c => c.n > 0 && c.n % 11 === 0],
   ['HARSHAD', 'Harshad Number', '🤝', 1048, c => c.sum > 0 && c.n % c.sum === 0],
@@ -695,7 +700,9 @@ const BADGES = [
   ['HETEROGENEOUS', 'Heterogeneous', '🥗', 593, c => c.distinct === c.len],
   ['MINI_SCRAMBLE', 'Mini Scramble', '🧩', 579, c => { for (let L = 3; L <= c.len; L++) for (let i = 0; i + L <= c.len; i++) if (isScrambledSeq(c.s.slice(i, i + L), 3)) return true; return false; }],
   ['GAP_ONE', 'Gap One', '↕️', 529, c => c.len >= 2 && Math.abs(c.d[0] - c.d[c.len - 1]) === 1],
-  ['TWO_PAIR', 'Two Pair', '👯‍♀️', 447, c => c.countExact(2) >= 2],
+  // 2026-08-22: any two digits seen twice OR MORE, so a triple now carries a pair (1112 is
+  // still out - one digit - but 11122 is in). Was countExact(2) >= 2.
+  ['TWO_PAIR', 'Two Pair', '👯‍♀️', 377, c => c.withCount(2) >= 2],
   ['DUNES', 'Dunes', '🐫', 364, c => { let coll = c.s[0] ?? ''; for (let i = 1; i < c.len; i++) if (c.s[i] !== c.s[i - 1]) coll += c.s[i]; if (coll.length < 4) return false; for (let i = 2; i < coll.length; i++) { const p = +coll[i - 2], q = +coll[i - 1], r = +coll[i], a = q - p, b = r - q; if (a > 0 && b > 0 || a < 0 && b < 0) return false; } return true; }],
   ['HOPSCOTCH', 'Hopscotch', '🦘', 312, c => {
     if (c.len < 3 || c.distinct < 2) return false;
@@ -767,7 +774,6 @@ const DESCRIPTIONS = {
   DIGIT_SEVEN: 'The number seven.',
   DIGIT_EIGHT: 'The number eight.',
   DIGIT_NINE: 'The number nine.',
-  TREE_FIDDY_EXACT: 'Exactly "350".',
   SIXTY_SEVEN_EXACT: 'Exactly "67".',
   EIGHTY_SIX_EXACT: 'Exactly "86".',
   ORIENTATION_EXACT: 'Exactly "101".',
@@ -817,6 +823,9 @@ const DESCRIPTIONS = {
   SPY: 'The sum of its digits equals the product of its digits.',
   QUAD_NINE: 'Ends in 9999.',
   SEMI_EPOCH: 'Ends in "5000".',
+  SEMI_EON: 'Ends in "50000".',
+  EPOCH: 'Ends in four zeros.',
+  EON: 'Ends in five zeros.',
   CUBE: 'A perfect cube (n³).',
   EVEN_SPACING: 'All digits are evenly spaced in an arithmetic sequence.',
   CONSEC_TRIPLE_EXACT: 'The entire number splits into three consecutive integers in order.',
@@ -869,7 +878,6 @@ const DESCRIPTIONS = {
   EMERGENCY: 'Contains "911".',
   PI_CONTAINS_3: 'Contains "314".',
   E_CONTAINS_3: 'Contains "271".',
-  TREE_FIDDY: 'Contains "350" (the Loch Ness Monster\'s request).',
   CALENDAR: 'Contains "365" (days in a year).',
   DIVISIBLE_BY_THREE: 'Every digit is divisible by 3.',
   SCRAMBLE: 'All digits form a consecutive sequence when sorted.',
@@ -883,6 +891,8 @@ const DESCRIPTIONS = {
   CENTURY: 'Ends in double zeros.',
   DOUBLE_NINE: 'Ends in 99.',
   SEMI_CENTURY: 'Ends in "50".',
+  QUARTER_CENTURY: 'Ends in "25".',
+  THREE_QUARTER_CENTURY: 'Ends in "75".',
   QUADS: 'Contains four identical digits.',
   LOW_BALL: 'Contains only digits from 0 to 4.',
   CONTIGUOUS_TWO_PAIR: 'Contains two adjacent contiguous pairs.',
@@ -996,8 +1006,8 @@ function fmtProb(p) {
 // Supersession families: prod tags each badge with a `family` and, within a family, only
 // the single HIGHEST-EP earned badge scores - the rest are still displayed as earned but
 // score 0, because the higher tier already implies them. This list is the full family map
-// extracted from the live game's BADGE_DEFINITIONS (40 families / 161 badges); the remaining
-// 69 badges are standalone and always score. Member order is irrelevant - the scorer keeps
+// extracted from the live game's BADGE_DEFINITIONS (39 families / 159 badges); the remaining
+// 74 badges are standalone and always score. Member order is irrelevant - the scorer keeps
 // the max-EP member - but each family is listed highest-EP first for readability.
 const FAMILIES = [
   ['THIRTEENTH_POWER', 'SEVENTEENTH_POWER', 'NINETEENTH_POWER', 'TENTH_POWER', 'ELEVENTH_POWER', 'NINTH_POWER', 'EIGHTH_POWER', 'SEVENTH_POWER', 'SIXTH_POWER', 'FIFTH_POWER', 'FOURTH_POWER', 'CUBE', 'SQUARE', 'OUROBOROS'], // POWER
@@ -1034,7 +1044,6 @@ const FAMILIES = [
   ['ORIENTATION_EXACT', 'ORIENTATION'], // ORIENTATION
   ['MOUNTAIN', 'VALLEY', 'MESA', 'CANYON'], // PEAK
   ['MINI_ECHO', 'RHYME'], // REPEAT
-  ['TREE_FIDDY_EXACT', 'TREE_FIDDY'], // TREE_FIDDY
   ['ERROR_EXACT', 'ERROR'], // ERROR (2026-07-16)
   ['HILLS', 'DUNES'], // HILLS (2026-07-16)
   ['PALINDROME', 'POCKET_MIRROR'], // PALINDROME (2026-07-16)
@@ -1050,7 +1059,7 @@ const FAMILY_NAMES = [
   'Void Depth', 'Bookends', 'Calendar', 'Emergency', 'Of a Kind', 'Straight',
   'Big Brother', 'Boat', 'Devil', 'Duality', 'Eighty-Six', 'Equilibrium', 'Hell',
   'Hopscotch', 'Leet', 'Meaning', 'Monotonic', 'Orientation', 'Peak', 'Repeat',
-  'Tree Fiddy', 'Error', 'Hills', 'Palindrome', 'Tau', 'Ultimeme',
+  'Error', 'Hills', 'Palindrome', 'Tau', 'Ultimeme',
 ];
 
 // Badges added to this tool after the initial full-parity port, keyed to the date we
@@ -1067,9 +1076,11 @@ const BADGE_ADDED = {
   FULL_DAY: '2026-07-16', FOOTBALL_17776: '2026-07-16', ERROR_EXACT: '2026-07-16',
   INFERNAL: '2026-07-16', ULTIMEME: '2026-07-16', ULTIMEME_EXACT: '2026-07-16',
   MINI_SCRAMBLE: '2026-07-16',
+  EON: '2026-08-22', SEMI_EON: '2026-08-22', EPOCH: '2026-08-22',
+  QUARTER_CENTURY: '2026-08-22', THREE_QUARTER_CENTURY: '2026-08-22',
 };
 // Badges added on this date get the "Newly added" treatment on /badges.
-const LATEST_BADGE_BATCH = '2026-07-16';
+const LATEST_BADGE_BATCH = '2026-08-22';
 
 function compute(n) {
   const s = String(n);
@@ -1111,7 +1122,7 @@ function compute(n) {
 // ---------------------------------------------------------------------------
 // Browser engine (for the "Analyze all scores" feature)
 //
-// Computing all 1,000,000 numbers x 230 badge tests is far beyond a single
+// Computing all 1,000,000 numbers x 233 badge tests is far beyond a single
 // Worker request's CPU budget, so the analysis runs client-side in a Web Worker.
 // Rather than duplicate the 200+ badge rules, we GENERATE a self-contained ES
 // module from the live definitions via Function.prototype.toString(). Any edit to
@@ -2074,12 +2085,12 @@ const RARITY_COLORS = {
 // SCORE_PERCENTILES table (each cutoff = smallest EP whose percentile >= the
 // threshold). Because the total-EP distribution shifts whenever the badge set
 // changes, these MUST be re-derived alongside src/percentiles.gen.js - these
-// values are from the 2026-07-16 bundle (230 badges). Palette colours are the
+// values are from the 2026-08-22 bundle (233 badges). Palette colours are the
 // rngdle.com RARITY_PALETTE highlight accents.
 const CARD_TIERS = [
-  [2098, 'trash'], [5761, 'common'], [9644, 'uncommon'],
-  [23077, 'rare'], [35744, 'epic'], [164953, 'anomaly'],
-]; // >= 164953 -> mythic
+  [2087, 'trash'], [5804, 'common'], [10079, 'uncommon'],
+  [22469, 'rare'], [35530, 'epic'], [165326, 'anomaly'],
+]; // >= 165326 -> mythic
 function cardTier(ep) { for (const [t, name] of CARD_TIERS) if (ep < t) return name; return 'mythic'; }
 // Tier names low -> high; the top tier has no cutoff row, hence the extra entry.
 const CARD_TIER_NAMES = [...CARD_TIERS.map(t => t[1]), 'mythic'];
@@ -3545,7 +3556,7 @@ function renderGrid(ext) {
     <button id="supbtn" disabled title="Darken numbers where a higher badge in the same family supersedes the selected badge (it still shows as earned but scores 0 there)"><span class="dot"></span>Hide superseded badges</button>
     <div id="supmode" title="Grey keeps superseded numbers faintly visible; black hides them entirely"><button id="supgrey" class="on" disabled>grey</button><button id="supblack" disabled>black</button></div>
   </div>
-  <input id="search" type="search" placeholder="Filter 230 badges…" autocomplete="off">
+  <input id="search" type="search" placeholder="Filter 233 badges…" autocomplete="off">
   <div id="list"></div>
   <div class="hint-text">Pick a badge to highlight which numbers earn it. Click any cell to open it.</div>
 </div>
@@ -4725,12 +4736,12 @@ const __CHAINS_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + chainsWorke
 // /badges - browsable index of every badge: obtainment method, EP, rarity tier,
 // share of numbers that earn it, family/supersession relations, and example
 // numbers (clickable into the calculator) + a link to its /grid highlight view.
-// All 230 cards are server-rendered; a small inline script does search / rarity
+// All 233 cards are server-rendered; a small inline script does search / rarity
 // filtering / sorting on the DOM.
 // ---------------------------------------------------------------------------
 
 // The badge index is fully static per deploy (every input is a generated file or
-// the badge table), but it's also the biggest page (~260KB / 230 cards), so render
+// the badge table), but it's also the biggest page (~260KB / 233 cards), so render
 // it once per isolate instead of per request.
 let badgeIndexHTML = null;
 
@@ -4813,7 +4824,7 @@ function renderBadgeIndex() {
   .bd { border:1px solid var(--border); border-left:3px solid var(--tc); border-radius:var(--r-card);
     background:var(--surface); padding:.75rem .9rem .8rem; display:flex; flex-direction:column; gap:.4rem;
     scroll-margin-top:4rem;
-    /* Only lay out / paint the cards in view: with 230 server-rendered cards this is
+    /* Only lay out / paint the cards in view: with 233 server-rendered cards this is
        most of the page's first-paint cost (and the flash on navigating here). The
        intrinsic size is a rough card height so the scrollbar stays stable. */
     content-visibility:auto; contain-intrinsic-size:auto 180px; }

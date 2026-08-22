@@ -38,13 +38,13 @@ export const BETA_TOOLS = [
     slug: 'spectrum', see: ['contact', 'pairs'], title: 'Badge Spectrum', kind: '2D',
     blurb: 'Every badge as a density stripe across the full range. Digit-length rules ' +
       'step at each power of ten, modular rules band, exact badges are one lit pixel.',
-    note: '230 stripes, orderable by how evenly each rule is spread.',
+    note: '233 stripes, orderable by how evenly each rule is spread.',
   },
   {
     slug: 'contact', see: ['spectrum', 'pairs'], title: 'Contact Sheet', kind: '2D',
     blurb: 'Every badge map on one page. Rules with the same geometry are obvious ' +
       'side by side, and the odd one out in a family jumps straight out.',
-    note: '230 thumbnails of the /grid frame, ordered by family.',
+    note: '233 thumbnails of the /grid frame, ordered by family.',
   },
   {
     slug: 'pairs', see: ['contact', 'species'], title: 'Badge Affinity', kind: 'Matrix',
@@ -72,7 +72,7 @@ export const BETA_TOOLS = [
   },
   {
     slug: 'collection', see: ['collector', 'luck'], title: 'Your Collection', kind: 'Player',
-    blurb: 'Which of the 230 badges you actually have, which you do not, and how long ' +
+    blurb: 'Which of the 233 badges you actually have, which you do not, and how long ' +
       'the ones you are missing would realistically take to turn up.',
     note: 'The one tool here that needs no sweep - it loads instantly.',
   },
@@ -90,14 +90,14 @@ export const BETA_TOOLS = [
   },
   {
     slug: 'collector', see: ['luck', 'economy'], title: 'The Collector', kind: 'Odds',
-    blurb: 'How many rolls to earn all 230 badges - simulated over the real earner ' +
+    blurb: 'How many rolls to earn all 233 badges - simulated over the real earner ' +
       'sets - against how few numbers would do it if you could pick them.',
     note: 'Exact collection curve, plus a greedy cover of the whole badge list.',
   },
   {
     slug: 'economy', see: ['collector', 'pairs'], title: 'Badge Economy', kind: 'Report',
     blurb: 'Every badge turns out to be priced at exactly 100 / its own odds, so all ' +
-      '230 are worth the same per roll. Only supersession breaks the tie.',
+      '233 are worth the same per roll. Only supersession breaks the tie.',
     note: 'The price law, and what families cost in EP that is earned but never paid.',
   },
   {
@@ -363,7 +363,7 @@ const THUMBS = {
 // the live rules on every visit, so if a rebalance moves one, the page will say so
 // rather than these going quietly stale.
 const FINDINGS = [
-  ['Every badge is priced at exactly 100 / its own odds', 'so all 230 are worth the same 100 EP per ' +
+  ['Every badge is priced at exactly 100 / its own odds', 'so all 233 are worth the same 100 EP per ' +
     'roll in expectation. A mythic is no better value than a common, it just arrives less often.', 'economy'],
   ['46% of numbers score like nothing else in the range', 'no other number earns the same set of ' +
     'badges. The rules are far more discriminating than they look.', 'species'],
@@ -574,7 +574,7 @@ function pairsClient(WORKER_SRC, META, FAMS, PAL) {
   }
 
   // Average-linkage agglomerative clustering on Jaccard distance, emitting leaves in
-  // merge order. 230 items, so the naive O(n^3) is a few tens of milliseconds - not
+  // merge order. 233 items, so the naive O(n^3) is a few tens of milliseconds - not
   // worth a smarter algorithm, and the result is the point: rules that fire on the
   // same numbers end up adjacent no matter which family the game filed them under.
   function cluster() {
@@ -624,7 +624,7 @@ function pairsClient(WORKER_SRC, META, FAMS, PAL) {
   const BAND = 10;                              // family colour strips along both edges
   let CELL = 3, PAD = 0, SCALE = 1;             // SCALE: drawn px per CSS px (narrow screens)
 
-  // 40 families + standalone: a repeating but locally-distinct hue set, only ever read
+  // 39 families + standalone: a repeating but locally-distinct hue set, only ever read
   // as "same block / different block", so exact hues do not matter.
   const famColour = f => f < 0 ? '#2a2d36' : `hsl(${(f * 47) % 360} 45% ${f % 2 ? 42 : 56}%)`;
 
@@ -997,7 +997,7 @@ function renderPairs(ctx) {
 
   <div class="cols">
     <section class="card mxcard">
-      <canvas id="mx" width="700" height="700" aria-label="230 by 230 badge co-occurrence matrix"></canvas>
+      <canvas id="mx" width="700" height="700" aria-label="233 by 233 badge co-occurrence matrix"></canvas>
       <div class="leg"><span id="leglo"></span><canvas id="legcv"></canvas><span id="leghi"></span>
         <span id="legmid"></span>
         <span class="legnote"><span><i style="background:#0d0e13"></i>never together</span>
@@ -2151,7 +2151,7 @@ function renderEconomy(ctx) {
     <section class="card chartcard">
       <h2>How exact is that?</h2>
       <div id="resid"></div>
-      <p class="chart-note">The same 230 badges, but now each one's <b>EP x P(earn)</b> on a linear axis
+      <p class="chart-note">The same 233 badges, but now each one's <b>EP x P(earn)</b> on a linear axis
         spanning a fraction of a percent, split into lanes by rarity. Every badge in the game lands on
         100.00, and what little spread there is comes from EP being rounded to a whole number.
         <b>So no badge is worth more than any other per roll</b> - a mythic is exactly as valuable as
@@ -2192,7 +2192,7 @@ function renderEconomy(ctx) {
 
     <section class="card"><h2>Which families cost the most</h2>
       <p class="small">Supersession only bites inside a family, so the entire shortfall comes out of these
-        40 groups - the other 69 badges are standalone and always keep their 100 EP. Share of all EP
+        39 groups - the other 74 badges are standalone and always keep their 100 EP. Share of all EP
         earned-but-never-paid, by family.</p>
       <div id="families"></div></section>
   </div>
@@ -2200,7 +2200,7 @@ function renderEconomy(ctx) {
   <div id="tip"></div>
   <footer>
     The <b>price law</b> is not assumed - the line is a least-squares fit of log EP against log earn-rate
-    over all 230 badges, and it recovers slope -1 and constant 100 on its own. <b>Earn</b> and
+    over all 233 badges, and it recovers slope -1 and constant 100 on its own. <b>Earn</b> and
     <b>score</b> counts both come from the live sweep: a badge is earned when its rule matches, and
     scores only when it wins its family, so a rebalance would show up here immediately. Ties inside a
     family go to whichever badge is listed first, which is what rngdle's own scorer does - so a tied
@@ -2225,7 +2225,7 @@ const __W = ${JSON.stringify(workerSrc(economyWorker))};
 // that block earn it. Laid out together the rules sort themselves into visible kinds:
 // digit-length rules step at 10, 100, 1,000...; "contains" rules give even wash;
 // last-digit and modular rules give fine vertical banding; and the exact-value badges
-// are a single lit pixel in 230,000.
+// are a single lit pixel in 233,000.
 //
 // Per-badge stripes are cheap (one pass, no pair loop), so the sweep dominates and the
 // whole thing lands about as fast as the cache can hand the sweep over.
@@ -2560,7 +2560,7 @@ function renderSpectrum(ctx) {
     <h1>Badge Spectrum <span class="beta-tag">beta</span></h1>
     <a class="tool-back" href="/beta">&larr; Beta lab</a>
   </div>
-  <p class="tag">All 230 badges at once: one row each, one column per thousand numbers, brightness for
+  <p class="tag">All 233 badges at once: one row each, one column per thousand numbers, brightness for
     how many of them earn it.</p>
 
   <div id="page">
@@ -2583,7 +2583,7 @@ function renderSpectrum(ctx) {
 
     <div class="cols">
       <section class="card speccard">
-        <canvas id="spec" aria-label="230 badge density stripes across the number range"></canvas>
+        <canvas id="spec" aria-label="233 badge density stripes across the number range"></canvas>
         <div class="xax"><span>0</span><span>250,000</span><span>500,000</span><span>750,000</span><span>1,000,000</span></div>
       </section>
       <div id="detail"></div>
@@ -3429,7 +3429,7 @@ const __W = ${JSON.stringify(workerSrc(luckWorker))};
 //
 // Two different questions, and the gap between the answers is the whole point:
 //
-//   Rolling at random, how many rolls until you have seen all 230 at least once?
+//   Rolling at random, how many rolls until you have seen all 233 at least once?
 //   If you could CHOOSE your numbers, how few would you need?
 //
 // The first is a weighted coupon-collector problem. The expected count after n rolls
@@ -5245,7 +5245,7 @@ const __W = ${JSON.stringify(workerSrc(anatomyWorker))};
 }
 
 // ---------------------------------------------------------------------------
-// /beta/contact - all 230 badge maps on one sheet.
+// /beta/contact - all 233 badge maps on one sheet.
 //
 // /grid can show where any ONE badge fires on the 1000x1000 map. That is the right
 // tool for reading a single rule and the wrong one for comparing rules, because you
@@ -5520,7 +5520,7 @@ function renderContact(ctx) {
     <a href="/grid">/grid</a>.
   </footer>
 </div>
-${overlayHTML('Then reducing all 230 badge maps to thumbnails.')}`;
+${overlayHTML('Then reducing all 233 badge maps to thumbnails.')}`;
 
   const script = `${BETA_BOOT_JS}
 const __W = ${JSON.stringify(workerSrc(contactWorker))};
@@ -5728,7 +5728,7 @@ function renderCollection(ctx) {
     <h1>Your Collection <span class="beta-tag">beta</span></h1>
     <a class="tool-back" href="/beta">&larr; Beta lab</a>
   </div>
-  <p class="tag">Which of the 230 badges you have, which you do not, and how long the ones you are
+  <p class="tag">Which of the 233 badges you have, which you do not, and how long the ones you are
     missing would realistically take.</p>
 
   <section class="card">

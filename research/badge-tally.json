@@ -1,7 +1,7 @@
 {
  "range": "0..1000000",
  "numbers": 1000001,
- "badges": 230,
+ "badges": 233,
  "note": "earn = numbers earning the badge; score = numbers where it scores >0 EP after family supersession. Regenerate with `npm run gen`.",
  "tally": {
   "NICE_EXACT": {
@@ -101,10 +101,6 @@
    "score": 1
   },
   "DIGIT_NINE": {
-   "earn": 1,
-   "score": 1
-  },
-  "TREE_FIDDY_EXACT": {
    "earn": 1,
    "score": 1
   },
@@ -240,6 +236,10 @@
    "earn": 9,
    "score": 9
   },
+  "EON": {
+   "earn": 10,
+   "score": 10
+  },
   "CONTIGUOUS_SIXES": {
    "earn": 10,
    "score": 10
@@ -253,6 +253,10 @@
    "score": 0
   },
   "QUINT_NINE": {
+   "earn": 10,
+   "score": 10
+  },
+  "SEMI_EON": {
    "earn": 10,
    "score": 10
   },
@@ -347,6 +351,10 @@
   "SPY": {
    "earn": 97,
    "score": 97
+  },
+  "EPOCH": {
+   "earn": 100,
+   "score": 100
   },
   "QUAD_NINE": {
    "earn": 100,
@@ -580,10 +588,6 @@
    "earn": 3999,
    "score": 3698
   },
-  "TREE_FIDDY": {
-   "earn": 3999,
-   "score": 3998
-  },
   "CALENDAR": {
    "earn": 3999,
    "score": 3995
@@ -644,7 +648,15 @@
    "earn": 10000,
    "score": 9000
   },
+  "QUARTER_CENTURY": {
+   "earn": 10000,
+   "score": 10000
+  },
   "SEMI_CENTURY": {
+   "earn": 10000,
+   "score": 10000
+  },
+  "THREE_QUARTER_CENTURY": {
    "earn": 10000,
    "score": 10000
   },
@@ -659,10 +671,6 @@
   "LOW_BALL": {
    "earn": 15626,
    "score": 15626
-  },
-  "CONTIGUOUS_TWO_PAIR": {
-   "earn": 16281,
-   "score": 10449
   },
   "MOUNTAIN": {
    "earn": 16992,
@@ -679,6 +687,10 @@
   "VALLEY": {
    "earn": 23817,
    "score": 23817
+  },
+  "CONTIGUOUS_TWO_PAIR": {
+   "earn": 25272,
+   "score": 18063
   },
   "MINI_ECHO": {
    "earn": 27001,
@@ -829,8 +841,8 @@
    "score": 188888
   },
   "TWO_PAIR": {
-   "earn": 223803,
-   "score": 199017
+   "earn": 265518,
+   "score": 231741
   },
   "DUNES": {
    "earn": 274590,
@@ -890,7 +902,7 @@
   },
   "CONTIGUOUS_PAIR": {
    "earn": 402130,
-   "score": 278767
+   "score": 245071
   },
   "LUCKY_7": {
    "earn": 468559,
@@ -918,7 +930,7 @@
   },
   "PAIR": {
    "earn": 831430,
-   "score": 326835
+   "score": 320193
   },
   "SIX_DIGITS": {
    "earn": 900000,
