@@ -1,4 +1,4 @@
-import { compute, BADGES } from '../src/index.js';
+import { compute, BADGES, BADGE_HISTORY, BADGE_PORT_DATE, badgeAdded } from '../src/index.js';
 
 console.log(`Loaded ${BADGES.length} badge definitions\n`);
 
@@ -136,5 +136,34 @@ must(1248, 'GEOMETRIC'); must(312, 'EQUATION'); // 1,2,4,8 (ratio 2); 3*1... 3=1
 must(155551, 'FRAMED_QUAD'); must(555555, 'FIVE_OF_A_KIND');
 must(12321, 'POCKET_MIRROR'); must(9800, 'SLOPES');
 mustNot(111111, 'STEPS'); mustNot(111111, 'SLOPES'); // homogeneous is neither
+
+// --- badge history: every badge knows when it arrived, retired ones stay recorded ---
+// BADGE_HISTORY is the only record that a retired badge ever existed, so the frozen
+// [id, label, emoji, ep, description] tuple has to stay complete after the badge is
+// gone from BADGES - nothing else in the codebase can rebuild it.
+{
+  const seen = new Set();
+  let prevDate = BADGE_PORT_DATE;
+  for (const batch of BADGE_HISTORY) {
+    if (!(batch.date > prevDate)) throw new Error(`BADGE_HISTORY is out of order at ${batch.date}`);
+    prevDate = batch.date;
+    for (const id of batch.added) {
+      if (seen.has(id)) throw new Error(`${id} is listed as added twice`);
+      seen.add(id);
+      if (!BADGES.some(b => b[0] === id)) throw new Error(`${id} was added on ${batch.date} but is not in BADGES`);
+    }
+    for (const [id, label, emoji, ep, desc] of batch.retired) {
+      if (BADGES.some(b => b[0] === id)) throw new Error(`${id} is listed as retired but is still in BADGES`);
+      if (!label || !emoji || !(ep > 0) || !desc) throw new Error(`retired ${id} lost part of its frozen label/emoji/EP/description`);
+    }
+  }
+  // Every live badge dates from the port or from a batch - nothing is undated.
+  for (const [id] of BADGES) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(badgeAdded(id))) throw new Error(`${id} has no arrival date`);
+  }
+  const retired = BADGE_HISTORY.flatMap(b => b.retired);
+  console.log(`\nBadge history: ${BADGE_HISTORY.length} batches since ${BADGE_PORT_DATE}, `
+    + `${seen.size} badges added, ${retired.length} retired (${retired.map(r => r[1]).join(', ') || 'none'})`);
+}
 
 console.log('\nAll assertions passed.');

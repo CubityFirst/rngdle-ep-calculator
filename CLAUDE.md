@@ -23,6 +23,13 @@ CONTRIBUTING.md. Pre-2026-07-21 history uses an older style; don't rewrite it.
 - Badge rules are at full parity with rngdle.com; don't "simplify" a `test` or the
   prod-ported `p*` helpers without re-checking parity (see README "Rules").
 - `FAMILY_NAMES` in `src/index.js` is index-aligned with `FAMILIES` - keep them in sync.
+- Every badge-set change needs one `BADGE_HISTORY` entry in `src/index.js` (date, note,
+  `added` ids, `retired`). Before deleting a badge from `BADGES`, copy its
+  `[id, label, emoji, ep, description]` into that entry's `retired` list - once it is out
+  of `BADGES` and `DESCRIPTIONS`, `BADGE_HISTORY` is the only record it ever existed, and
+  /badges renders it from there. `BADGE_ADDED` / `LATEST_BADGE_BATCH` derive from the
+  list, so nothing else needs bumping. `node research/badge-history.mjs` re-derives the
+  whole timeline from git and exits non-zero if the committed list has drifted.
 - `src/beta.js` (the `/beta` lab) must not import from `src/index.js` - index.js imports
   it, so an edge back would be a cycle. Everything it needs arrives through `betaCtx()`.
   New tools need a `BETA_TOOLS` entry *and* a `RENDERERS` entry or the route 404s.

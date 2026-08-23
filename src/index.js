@@ -1062,25 +1062,82 @@ const FAMILY_NAMES = [
   'Error', 'Hills', 'Palindrome', 'Tau', 'Ultimeme',
 ];
 
-// Badges added to this tool after the initial full-parity port, keyed to the date we
-// added them here. Powers the "Newly added" section + per-card markers on /badges.
-// When a fresh batch lands (see CLAUDE.md), append entries with the new date and bump
-// LATEST_BADGE_BATCH so only the most recent batch gets the highlight.
-const BADGE_ADDED = {
-  STEPS: '2026-07-16', SLOPES: '2026-07-16', MESA: '2026-07-16', CANYON: '2026-07-16',
-  DUNES: '2026-07-16', POCKET_MIRROR: '2026-07-16', ARITHMETIC: '2026-07-16',
-  GEOMETRIC: '2026-07-16', EQUATION: '2026-07-16', FIVE_OF_A_KIND: '2026-07-16',
-  FRAMED_QUAD: '2026-07-16', OUROBOROS: '2026-07-16', POWER_OF_FIVE: '2026-07-16',
-  POWER_OF_SEVEN: '2026-07-16', TAU: '2026-07-16', TAU_SLICE_4: '2026-07-16',
-  TAU_SLICE_5: '2026-07-16', GOLDEN_RATIO: '2026-07-16', ALWAYS: '2026-07-16',
-  FULL_DAY: '2026-07-16', FOOTBALL_17776: '2026-07-16', ERROR_EXACT: '2026-07-16',
-  INFERNAL: '2026-07-16', ULTIMEME: '2026-07-16', ULTIMEME_EXACT: '2026-07-16',
-  MINI_SCRAMBLE: '2026-07-16',
-  EON: '2026-08-22', SEMI_EON: '2026-08-22', EPOCH: '2026-08-22',
-  QUARTER_CENTURY: '2026-08-22', THREE_QUARTER_CENTURY: '2026-08-22',
-};
+// ---------------------------------------------------------------------------
+// Badge history: every change to the badge set since the initial full-parity port,
+// oldest first. `added` lists ids that joined BADGES that day; `retired` keeps a
+// frozen copy of each badge that left it - [id, label, emoji, ep, description] as it
+// stood on its last day - because once a badge is out of BADGES nothing else in the
+// codebase remembers it existed. Dates are when the change landed *here*, which for
+// the two ported batches is the day prod's bundle changed.
+//
+// This is the single source for "when did this badge arrive": BADGE_ADDED, the
+// per-card "Added" line, the "Newly added" banner and the history panel on /badges
+// all derive from it. When a fresh batch lands (see CLAUDE.md), append one entry -
+// nothing else needs bumping.
+//
+// The pre-2026-08-22 entries were recovered from git history after the fact
+// (research/badge-history.mjs walks every revision of this file and diffs the id
+// sets), so they are the real dates, not a reconstruction.
+// ---------------------------------------------------------------------------
+
+// The original port. Every badge without a BADGE_HISTORY entry dates from here.
+const BADGE_PORT_DATE = '2026-06-09';
+const BADGE_HISTORY = [
+  {
+    date: '2026-07-13',
+    note: 'One Million - the badge at the very top of the range - had been missed by ' +
+      'the original port; the first full-range scan turned it up (203 → 204).',
+    added: ['ONE_MILLION'],
+    retired: [],
+  },
+  {
+    date: '2026-07-16',
+    note: "26 badges from prod's 2026-07-16 bundle (204 → 230), with five new families " +
+      '(Hills, Palindrome, Tau, Ultimeme, Error) and five prod-ported helpers. No ' +
+      'existing badge changed EP.',
+    added: [
+      'STEPS', 'SLOPES', 'MESA', 'CANYON', 'DUNES', 'POCKET_MIRROR', 'ARITHMETIC',
+      'GEOMETRIC', 'EQUATION', 'FIVE_OF_A_KIND', 'FRAMED_QUAD', 'OUROBOROS',
+      'POWER_OF_FIVE', 'POWER_OF_SEVEN', 'TAU', 'TAU_SLICE_4', 'TAU_SLICE_5',
+      'GOLDEN_RATIO', 'ALWAYS', 'FULL_DAY', 'FOOTBALL_17776', 'ERROR_EXACT',
+      'INFERNAL', 'ULTIMEME', 'ULTIMEME_EXACT', 'MINI_SCRAMBLE',
+    ],
+    retired: [],
+  },
+  {
+    date: '2026-08-22',
+    note: "prod's 2026-08-22 bundle (230 → 233): five standalone \"ends in\" badges " +
+      'arrived, the whole Tree Fiddy family was retired, Two Pair now counts a digit ' +
+      'seen twice or more (EP 447 → 377) and Contiguous Two Pair became a plain 4-wide ' +
+      'aabb window (EP 6,142 → 3,957). Semi-Epoch swapped its moai for an hourglass ' +
+      '(Eon took the moai) and Canyon its rock for a sunrise.',
+    added: ['EON', 'SEMI_EON', 'EPOCH', 'QUARTER_CENTURY', 'THREE_QUARTER_CENTURY'],
+    retired: [
+      ['TREE_FIDDY_EXACT', 'Exact Tree Fiddy', '🦕', 100000100, 'Exactly "350".'],
+      ['TREE_FIDDY', 'Tree Fiddy', '🦕', 25006, 'Contains "350" (the Loch Ness Monster\'s request).'],
+    ],
+  },
+];
+
+// id -> the date it arrived. Badges from the original port are absent; badgeAdded()
+// falls back to BADGE_PORT_DATE, so every live badge has a date.
+const BADGE_ADDED = Object.fromEntries(
+  BADGE_HISTORY.flatMap(b => b.added.map(id => [id, b.date])));
+const badgeAdded = id => BADGE_ADDED[id] || BADGE_PORT_DATE;
+// How big the original port was, walked back through every batch since. (Not the same
+// as the number of "Original" cards today - two of those 203 have since been retired.)
+const BADGE_PORT_COUNT = BADGE_HISTORY.reduce(
+  (n, b) => n - b.added.length + b.retired.length, BADGES.length);
 // Badges added on this date get the "Newly added" treatment on /badges.
-const LATEST_BADGE_BATCH = '2026-08-22';
+const LATEST_BADGE_BATCH = BADGE_HISTORY[BADGE_HISTORY.length - 1].date;
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+/** '2026-08-22' -> '22 August 2026'. */
+function fmtBatchDate(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${d} ${MONTH_NAMES[m - 1]} ${y}`;
+}
 
 function compute(n) {
   const s = String(n);
@@ -4759,7 +4816,9 @@ function renderBadgeIndex() {
     const pal = TIER_PALETTE[tier];
     const desc = DESCRIPTIONS[id] || 'No description.';
     const prob = PROBABILITIES[id];
-    const isNew = BADGE_ADDED[id] === LATEST_BADGE_BATCH;
+    const added = badgeAdded(id);
+    const addedLabel = fmtBatchDate(added);
+    const isNew = added === LATEST_BADGE_BATCH;
     if (isNew) newBadges.push([id, label, emoji]);
     const ex = (EXAMPLES[id] || []).map(n => `<a href="/?n=${n}">${n.toLocaleString()}</a>`).join(' · ');
 
@@ -4780,11 +4839,11 @@ function renderBadgeIndex() {
       famHTML = `<div class="bd-fam"><b>${esc(FAMILY_NAMES[fi])} family</b> · ${parts.join('; ')}</div>`;
     }
 
-    const search = `${label} ${id} ${desc} ${tier}${isNew ? ' new newly added' : ''}`.toLowerCase();
-    return `<article class="bd${isNew ? ' is-new' : ''}" id="${id}" data-search="${esc(search)}" data-ep="${ep}" data-prob="${prob ?? -1}" data-tier="${tier}" data-new="${isNew ? '1' : '0'}" style="--tc:${pal.accent}">
+    const search = `${label} ${id} ${desc} ${tier} added ${added} ${addedLabel}${isNew ? ' new newly added' : ''}`.toLowerCase();
+    return `<article class="bd${isNew ? ' is-new' : ''}" id="${id}" data-search="${esc(search)}" data-ep="${ep}" data-prob="${prob ?? -1}" data-tier="${tier}" data-new="${isNew ? '1' : '0'}" data-added="${added}" style="--tc:${pal.accent}">
   <header><span class="bd-emoji">${emoji}</span><h2>${esc(label)}</h2>${isNew ? '<span class="bd-new">New</span>' : ''}<span class="pill">${pal.label}</span></header>
   <p class="bd-desc">${esc(desc)}</p>
-  <div class="bd-stats"><span class="bd-ep">+${ep.toLocaleString()} EP</span><span class="bd-prob" title="Exact share of all inputs 0-1,000,000 that earn this badge">${fmtProb(prob)} of numbers</span></div>
+  <div class="bd-stats"><span class="bd-ep">+${ep.toLocaleString()} EP</span><span class="bd-prob" title="Exact share of all inputs 0-1,000,000 that earn this badge">${fmtProb(prob)} of numbers</span><a class="bd-when" href="#history" title="${added === BADGE_PORT_DATE ? 'Here since the original full-parity port' : 'Added to this tool on ' + addedLabel}">${added === BADGE_PORT_DATE ? 'Original' : 'Added ' + addedLabel}</a></div>
   ${famHTML}
   <div class="bd-ex">e.g. ${ex}<a class="bd-map" href="/grid#${encodeURIComponent(label)}" title="Highlight every number that earns this badge on the 1,000,000-number grid">map &rarr;</a></div>
 </article>`;
@@ -4798,17 +4857,47 @@ function renderBadgeIndex() {
   ].join('');
 
   // "Newly added" banner: the most recent batch, linking to each new badge's card.
-  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'];
-  const [by, bm, bd] = LATEST_BADGE_BATCH.split('-').map(Number);
-  const batchDate = `${bd} ${MONTHS[bm - 1]} ${by}`;
+  const batchDate = fmtBatchDate(LATEST_BADGE_BATCH);
   const newBox = newBadges.length ? `<section class="newbox">
     <div class="newbox-head"><span class="newbox-tag">✨ Newly added</span>
       <span class="newbox-date">${newBadges.length} new badge${newBadges.length === 1 ? '' : 's'} · ${batchDate}</span>
+      <a class="newbox-link" href="#history">Full history &darr;</a>
       <button type="button" id="only-new" class="newbox-btn">Show only new</button></div>
     <div class="newbox-list">${newBadges.map(([id, label, emoji]) =>
       `<a class="newbox-chip" href="#${id}">${emoji} ${esc(label)}</a>`).join('')}</div>
   </section>` : '';
+
+  // Badge history: every batch, newest first, so a badge that has since been retired
+  // (and the date each surviving one arrived) is still on the page somewhere.
+  const chipsFor = (ids) => ids.map(id => {
+    const b = byId.get(id);
+    return b ? `<a class="hist-chip" href="#${id}">${b[2]} ${esc(b[1])}</a>` : '';
+  }).join('');
+  const historyRows = BADGE_HISTORY.slice().reverse().map(batch => {
+    const parts = [];
+    if (batch.added.length) parts.push(`<div class="hist-line"><span class="hist-tag is-add">+${batch.added.length} added</span>
+      <div class="hist-chips">${chipsFor(batch.added)}</div></div>`);
+    if (batch.retired.length) parts.push(`<div class="hist-line"><span class="hist-tag is-gone">&minus;${batch.retired.length} retired</span>
+      <div class="hist-chips">${batch.retired.map(([, label, emoji, rep, rdesc]) =>
+        `<span class="hist-chip gone" title="${esc(rdesc)} Was worth ${rep.toLocaleString()} EP.">${emoji} ${esc(label)}</span>`).join('')}</div></div>`);
+    return `<li${batch.date === LATEST_BADGE_BATCH ? ' class="is-latest"' : ''}>
+      <div class="hist-date">${fmtBatchDate(batch.date)}</div>
+      <p class="hist-note">${esc(batch.note)}</p>
+      ${parts.join('')}
+    </li>`;
+  }).join('');
+  const historyBox = `<section class="hist" id="history">
+    <h2>Badge history</h2>
+    <p class="hist-intro">When each badge arrived here, newest batch first. A retired badge no longer
+      scores anything and has no card above - it is kept here so the record of it survives.</p>
+    <ol class="hist-list">
+    ${historyRows}
+    <li class="hist-base"><div class="hist-date">${fmtBatchDate(BADGE_PORT_DATE)}</div>
+      <p class="hist-note">The original full-parity port of rngdle.com: ${BADGE_PORT_COUNT} badges,
+      ${BADGES.length - Object.keys(BADGE_ADDED).length} of them still live. Every card marked
+      <b>Original</b> dates from here.</p></li>
+    </ol>
+  </section>`;
 
   const css = `
   /* --- toolbar --- */
@@ -4852,10 +4941,37 @@ function renderBadgeIndex() {
   .newbox-chip { font-size:.8rem; text-decoration:none; padding:.28rem .6rem; border-radius:var(--r-ctl);
     color:var(--text); background:var(--surface-2); border:1px solid var(--border-2); white-space:nowrap; }
   .newbox-chip:hover { border-color:var(--ok); }
+  .newbox-link { font-size:.8rem; color:var(--muted); text-decoration:none; border-bottom:1px dotted var(--faint); }
+  .newbox-link:hover { color:var(--text); }
+
+  /* --- badge history --- */
+  .hist { margin:2rem 0 1.2rem; scroll-margin-top:6rem; } /* clears the sticky toolbar */
+  .hist h2 { font-size:1.05rem; margin:0 0 .3rem; }
+  .hist-intro { margin:0 0 .9rem; font-size:.82rem; color:var(--muted); max-width:760px; }
+  .hist-list { list-style:none; margin:0; padding:0 0 0 1.1rem; border-left:1px solid var(--border); }
+  .hist-list > li { position:relative; padding:0 0 1.1rem .4rem; }
+  .hist-list > li::before { content:''; position:absolute; left:-1.52rem; top:.35rem; width:.5rem; height:.5rem;
+    border-radius:50%; background:var(--border-2); border:1px solid var(--bg); }
+  .hist-list > li.is-latest::before { background:var(--ok); }
+  .hist-date { font-size:.85rem; font-weight:700; letter-spacing:-.01em; }
+  .hist-note { margin:.2rem 0 .5rem; font-size:.82rem; color:var(--dim); max-width:760px; }
+  .hist-line { display:flex; flex-wrap:wrap; align-items:baseline; gap:.4rem .55rem; margin-bottom:.35rem; }
+  .hist-tag { flex:0 0 auto; font-size:.7rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    font-variant-numeric:tabular-nums; color:var(--muted); }
+  .hist-tag.is-add { color:#7ee6ab; }
+  .hist-chips { display:flex; flex-wrap:wrap; gap:.35rem; }
+  .hist-chip { font-size:.78rem; text-decoration:none; padding:.22rem .55rem; border-radius:var(--r-ctl);
+    color:var(--text); background:var(--surface-2); border:1px solid var(--border-2); white-space:nowrap; }
+  .hist-chip:hover { border-color:var(--ok); }
+  .hist-chip.gone { color:var(--faint); background:transparent; border-style:dashed;
+    text-decoration:line-through; text-decoration-color:var(--faint); cursor:help; }
+  .hist-base { color:var(--muted); }
   .bd-desc { margin:0; font-size:.86rem; color:var(--dim); }
   .bd-stats { display:flex; align-items:baseline; gap:.8rem; font-size:.82rem; }
   .bd-ep { font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; }
   .bd-prob { color:var(--muted); }
+  .bd-when { margin-left:auto; font-size:.75rem; color:var(--faint); text-decoration:none; white-space:nowrap; }
+  .bd-when:hover { color:var(--muted); text-decoration:underline; }
   .bd-fam { font-size:.76rem; color:var(--muted); line-height:1.6; }
   .bd-fam b { color:var(--dim); font-weight:600; }
   .bd-fam a { color:var(--muted); text-decoration:none; border-bottom:1px dotted var(--faint); }
@@ -4878,6 +4994,7 @@ function renderBadgeIndex() {
       <option value="ep-asc">Sort: Lowest EP</option>
       <option value="prob-asc">Sort: Rarest first</option>
       <option value="prob-desc">Sort: Most common first</option>
+      <option value="added-desc">Sort: Newest first</option>
       <option value="name">Sort: A&ndash;Z</option>
     </select>
     <div id="count"></div>
@@ -4885,12 +5002,15 @@ function renderBadgeIndex() {
   <div id="cards">
 ${cards}
   </div>
+  ${historyBox}
   <footer>
     <b>Rarity</b> is derived from a badge's EP score exactly like rngdle.com:
     Common &lt; 1,000 &le; Uncommon &lt; 10,000 &le; Rare &lt; 100,000 &le; Epic &lt; 1,000,000 &le; Anomaly &lt; 10,000,000 &le; Mythic.
     <b>Families:</b> when a number earns several badges from one family, only the highest-EP one scores -
     the rest are displayed but add 0 EP. <b>&ldquo;% of numbers&rdquo;</b> is the exact share of all
-    1,000,001 inputs (0&ndash;1,000,000) that earn the badge.
+    1,000,001 inputs (0&ndash;1,000,000) that earn the badge. <b>&ldquo;Added&rdquo;</b> is the day the
+    badge arrived here; the <a href="#history">badge history</a> lists every batch, including the
+    badges that have since been retired.
   </footer>
 </div>`;
 
@@ -4911,6 +5031,9 @@ ${cards}
       case 'ep-asc': return a.dataset.ep - b.dataset.ep;
       case 'prob-asc': return a.dataset.prob - b.dataset.prob;
       case 'prob-desc': return b.dataset.prob - a.dataset.prob;
+      // Newest batch first, then by EP within a batch (the batches are small, and
+      // arrival order inside one is meaningless).
+      case 'added-desc': return b.dataset.added.localeCompare(a.dataset.added) || b.dataset.ep - a.dataset.ep;
       case 'name': return a.querySelector('h2').textContent.localeCompare(b.querySelector('h2').textContent);
       default: return b.dataset.ep - a.dataset.ep;
     }
@@ -4941,13 +5064,28 @@ ${cards}
       apply();
     });
   });
+  // Cards are content-visibility:auto, so the page keeps re-measuring them for a
+  // moment after a jump and the target drifts out from under the landing position
+  // (~40px, enough to hide a heading behind the sticky toolbar). Re-scroll until it
+  // stops moving, then leave it alone.
+  function settle(el, block) {
+    var last = null, tries = 0;
+    (function step() {
+      var top = Math.round(el.getBoundingClientRect().top);
+      if (top === last) return;
+      last = top;
+      el.scrollIntoView({ block: block });
+      if (tries++ < 6) setTimeout(step, 60);
+    })();
+  }
   // Cross-family links (#BADGE_ID): if the target card is filtered out, clear the
   // filters so the jump actually lands somewhere visible.
   function reveal() {
     var id = location.hash.slice(1);
     if (!id) return;
     var el = document.getElementById(id);
-    if (!el || !el.classList.contains('bd')) return;
+    if (!el) return;
+    if (!el.classList.contains('bd')) { settle(el, 'start'); return; } // #history
     if (el.style.display === 'none') {
       q.value = ''; tier = '';
       onlyNew = false;
@@ -4955,7 +5093,7 @@ ${cards}
       chips.forEach(function (c) { c.classList.toggle('on', !c.dataset.tier); });
       apply();
     }
-    el.scrollIntoView({ block: 'center' });
+    settle(el, 'center');
   }
   window.addEventListener('hashchange', reveal);
   apply();
@@ -5514,7 +5652,8 @@ function renderCombined(names, sum, failed, dropped) {
   });
 }
 
-export { compute, BADGES, FAMILIES, engineModuleSource, CARD_TIERS, cardTier };
+export { compute, BADGES, FAMILIES, engineModuleSource, CARD_TIERS, cardTier,
+  BADGE_HISTORY, BADGE_PORT_DATE, badgeAdded };
 
 // Everything src/beta.js renders from, passed in rather than imported, so beta.js has no
 // import edge back into this file (which would be a cycle - index.js imports beta.js).

@@ -18,6 +18,9 @@ Thumbs.db
 research/*
 !research/gen-snapshot.mjs
 !research/badge-tally.json
+# The badge timeline is recovered from this repo's own history, and CLAUDE.md points at
+# it as the check on BADGE_HISTORY, so it has to travel with the code.
+!research/badge-history.mjs
 
 # Exported conversation transcripts
 /20??-??-??-*.txt

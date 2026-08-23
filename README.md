@@ -19,7 +19,9 @@ npm run test:browser # real-browser smoke test of the /beta tools
   rarity tier, exact share of numbers that earn it, family/supersession relations,
   and example numbers (each linking into the calculator, plus a link to that badge's
   `/grid` highlight view). Searchable, filterable by rarity, sortable by EP /
-  rarity / name.
+  rarity / name / arrival date. Every card carries the date the badge arrived here, and
+  the history panel at the bottom lists each batch since the original port - including
+  the badges that have since been retired, which have no card left anywhere else.
 - **Beta lab:** `GET /beta` - an index of experimental data-vis and insight tools, each at
   `/beta/<tool>`. See below.
 - **JSON API:** `GET /api?n=696969` →
