@@ -1,0 +1,16 @@
+# Example compose file for running the calculator via `npm run serve` (plain node:http)
+# instead of `wrangler dev`/Cloudflare Workers. See Dockerfile for what this path can't
+# do (the D1-backed palette gallery reports itself unconfigured).
+#
+#   docker compose up --build
+#   -> http://localhost:8787
+
+services:
+  rngdle-ep-calculator:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8787"
+    restart: unless-stopped

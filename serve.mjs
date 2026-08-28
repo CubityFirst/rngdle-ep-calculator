@@ -1,9 +1,10 @@
 // Stable local dev server for the Worker - wraps the same fetch handler in node:http.
 // Unlike `wrangler dev`, this has no interactive hotkey loop, so it survives as a
-// detached background process. Binds to 127.0.0.1 (localhost only).
+// detached background process. Binds to 127.0.0.1 (localhost only) by default.
 //
 //   node serve.mjs            # http://127.0.0.1:8787
 //   PORT=3000 node serve.mjs
+//   HOST=0.0.0.0 node serve.mjs   # e.g. from inside a container - see Dockerfile
 //
 // Bindings: this passes an empty env, so there is no D1 here and the palette gallery
 // (/api/palettes, src/gallery.js) answers 503 "not configured" - every other route is
@@ -17,6 +18,7 @@ import http from 'node:http';
 import worker from './src/index.js';
 
 const port = Number(process.env.PORT) || 8787;
+const host = process.env.HOST || '127.0.0.1';
 
 http.createServer(async (req, res) => {
   const url = `http://${req.headers.host || '127.0.0.1'}${req.url}`;
@@ -39,8 +41,8 @@ http.createServer(async (req, res) => {
     res.statusCode = 500;
     res.end(`Internal error: ${e.message}`);
   }
-}).listen(port, '127.0.0.1', () => {
-  console.log(`RNGdle EP calculator running on http://127.0.0.1:${port}`);
+}).listen(port, host, () => {
+  console.log(`RNGdle EP calculator running on http://${host}:${port}`);
 });
 
 function collect(req) {
