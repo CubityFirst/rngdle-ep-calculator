@@ -1006,8 +1006,8 @@ function fmtProb(p) {
 // Supersession families: prod tags each badge with a `family` and, within a family, only
 // the single HIGHEST-EP earned badge scores - the rest are still displayed as earned but
 // score 0, because the higher tier already implies them. This list is the full family map
-// extracted from the live game's BADGE_DEFINITIONS (39 families / 159 badges); the remaining
-// 74 badges are standalone and always score. Member order is irrelevant - the scorer keeps
+// extracted from the live game's BADGE_DEFINITIONS (39 families / 168 badges); the remaining
+// 65 badges are standalone and always score. Member order is irrelevant - the scorer keeps
 // the max-EP member - but each family is listed highest-EP first for readability.
 const FAMILIES = [
   ['THIRTEENTH_POWER', 'SEVENTEENTH_POWER', 'NINETEENTH_POWER', 'TENTH_POWER', 'ELEVENTH_POWER', 'NINTH_POWER', 'EIGHTH_POWER', 'SEVENTH_POWER', 'SIXTH_POWER', 'FIFTH_POWER', 'FOURTH_POWER', 'CUBE', 'SQUARE', 'OUROBOROS'], // POWER
@@ -1024,7 +1024,13 @@ const FAMILIES = [
   ['QUINT_NINE', 'QUAD_NINE', 'TRIPLE_NINE', 'DOUBLE_NINE'], // NINE_ENDING
   ['PI', 'PI_CONTAINS_5', 'PI_CONTAINS_4', 'PI_CONTAINS_3'], // PI
   ['SIXTY_SEVEN_EXACT', 'BRAINROT', 'SIXTY_SEVEN_DOUBLE', 'SIXTY_SEVEN'], // SIXTY_SEVEN
-  ['DEEP_VOID_FIVE', 'DEEP_VOID_FOUR', 'DEEP_VOID_THREE', 'DEEP_VOID'], // VOID_DEPTH
+  // VOID_DEPTH: since 2026-09-05 the "ends in zeros" ladder (Clean → Eon) and the
+  // "ends in 5-then-zeros" ladder (Semi-Century → Semi-Eon) share this family with the
+  // Deep Voids, so 100000 pays Eon alone - not Eon + Millennium + Century + Clean + the
+  // Deep Voids on top. Eon, Semi-Eon and Deep Void (5) tie at 10,000,010; BADGES order
+  // (Eon first) breaks the tie exactly as prod's definition order does.
+  ['EON', 'SEMI_EON', 'DEEP_VOID_FIVE', 'EPOCH', 'SEMI_EPOCH', 'DEEP_VOID_FOUR', 'MILLENNIUM',
+    'SEMI_MILLENNIUM', 'DEEP_VOID_THREE', 'CENTURY', 'SEMI_CENTURY', 'DEEP_VOID', 'CLEAN'], // VOID_DEPTH
   ['PAIRED_BOOKENDS', 'BOOKENDS', 'MIRROR_BOOKENDS'], // BOOKENDS
   ['CALENDAR_EXACT', 'GROUNDHOG_DAY', 'CALENDAR', 'ALWAYS'], // CALENDAR
   ['EMERGENCY_EXACT', 'MAYDAY', 'EMERGENCY'], // EMERGENCY
@@ -1116,6 +1122,16 @@ const BADGE_HISTORY = [
       ['TREE_FIDDY_EXACT', 'Exact Tree Fiddy', '🦕', 100000100, 'Exactly "350".'],
       ['TREE_FIDDY', 'Tree Fiddy', '🦕', 25006, 'Contains "350" (the Loch Ness Monster\'s request).'],
     ],
+  },
+  {
+    date: '2026-09-05',
+    note: "prod's 2026-09-05 bundle: no badge came or went, but the Void Depth family grew " +
+      'from the four Deep Voids to thirteen - Clean, Century, Millennium, Epoch and Eon plus ' +
+      'their Semi- halves now collapse to one payout, so 100000 pays Eon alone instead of ' +
+      'Eon + Millennium + Century + Clean + the Deep Voids. No EP changed; the card ' +
+      'percentiles moved with the new totals.',
+    added: [],
+    retired: [],
   },
 ];
 
@@ -2142,12 +2158,12 @@ const RARITY_COLORS = {
 // SCORE_PERCENTILES table (each cutoff = smallest EP whose percentile >= the
 // threshold). Because the total-EP distribution shifts whenever the badge set
 // changes, these MUST be re-derived alongside src/percentiles.gen.js - these
-// values are from the 2026-08-22 bundle (233 badges). Palette colours are the
+// values are from the 2026-09-05 bundle (233 badges). Palette colours are the
 // rngdle.com RARITY_PALETTE highlight accents.
 const CARD_TIERS = [
-  [2087, 'trash'], [5804, 'common'], [10079, 'uncommon'],
-  [22469, 'rare'], [35530, 'epic'], [165326, 'anomaly'],
-]; // >= 165326 -> mythic
+  [2087, 'trash'], [5802, 'common'], [10074, 'uncommon'],
+  [22293, 'rare'], [35469, 'epic'], [162292, 'anomaly'],
+]; // >= 162292 -> mythic
 function cardTier(ep) { for (const [t, name] of CARD_TIERS) if (ep < t) return name; return 'mythic'; }
 // Tier names low -> high; the top tier has no cutoff row, hence the extra entry.
 const CARD_TIER_NAMES = [...CARD_TIERS.map(t => t[1]), 'mythic'];

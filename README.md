@@ -138,7 +138,7 @@ own bundled scoring engine (scraped from rngdle.com) and now match it **exactly*
 number in `0..1,000,000` produces the identical total EP **and the identical set of
 scoring badges** (see `research/full-parity.mjs`, which checks all 1,000,001 numbers
 against prod's own scorer replayed from the current production bundle by
-`research/prod7-scorer.mjs`). The consecutive / sequence / contiguous-pair badges call helpers
+`research/prod9-scorer.mjs`). The consecutive / sequence / contiguous-pair badges call helpers
 transcribed verbatim from prod (the `p*` functions in `src/index.js`). Notable rules worth
 calling out (all confirmed against prod):
 
@@ -146,8 +146,8 @@ calling out (all confirmed against prod):
   (e.g. `42` → `"42"`, `0` → `"0"`).
 - **Family supersession:** the live game tags each badge with a `family`, and within a
   family only the **single highest-EP earned badge scores**; the rest are still displayed
-  but score **0**. The full family map (39 families / 159 badges) is mirrored verbatim from
-  prod's `BADGE_DEFINITIONS` as `FAMILIES` in `src/index.js`; the other 74 badges are
+  but score **0**. The full family map (39 families / 168 badges) is mirrored verbatim from
+  prod's `BADGE_DEFINITIONS` as `FAMILIES` in `src/index.js`; the other 65 badges are
   standalone and always score. This was extracted from the live JS, so it matches prod
   exactly (the per-number EP totals across the whole range now diverge from prod only on
   badge *membership* rules, not on supersession). Notable families:
@@ -158,17 +158,22 @@ calling out (all confirmed against prod):
   - **POWER** - all 13 perfect-power badges. The top three (13th/17th/19th) **tie** at EP
     33,333,367, and prod keeps the **first** (13th), so the 13th is what scores - not the
     highest exponent. Confirmed by `0` = 139,927,162.
-  - **PI / E** - `exact → Slice (5) → (4) → (3)`. **VOID_DEPTH** - `Deep Void (5)…(3) → Deep
-    Void`. **JACKPOT** - `exact/Six/Five/Four → Jackpot`. **CONTIGUOUS_RUN** -
+  - **PI / E** - `exact → Slice (5) → (4) → (3)`. **VOID_DEPTH** - since prod's 2026-09-05
+    bundle this is the whole zero ladder: `Deep Void (5)…(3) → Deep Void`, the "ends in
+    zeros" run `Eon → Epoch → Millennium → Century → Clean` and the "ends in 5 then zeros"
+    run `Semi-Eon → Semi-Epoch → Semi-Millennium → Semi-Century`. So `100000` pays Eon alone
+    (Eon, Semi-Eon and Deep Void (5) tie at 10,000,010 and prod keeps the first defined,
+    Eon) and `455000` pays Semi-Epoch ("5000") alone - Millennium, Century, Clean and the
+    Deep Voids it also earns all score 0. Semi-Clean (ends in 5) is not in it.
+    **JACKPOT** - `exact/Six/Five/Four → Jackpot`. **CONTIGUOUS_RUN** -
     `Sixes → Fives → Quads → Trips` (Contiguous Pair lives in PAIRS, not here).
     **OF_A_KIND** - `Framed Triple/Quads → Trips`. **REPEAT** - `Mini Echo → Rhyme`.
     **SINGLE_DIGIT** - the exact digit (Two/Three/…) supersedes `Single Digit` (`2`).
     Plus thematic exact/base pairs: `NICE`, `DEVIL`, `LEET`, `HELL`, `BOOB`, `BOTANIST`,
     `EMERGENCY`, `SIXTY_SEVEN`, `STRAIGHT`, `BOOKENDS`, `CALENDAR`, and more - see `FAMILIES`.
 
-  Note: "ends in zeros" is NOT a family - `Millennium` (ends 000) and `Century` (ends 00)
-  both score in full, confirmed by `455000`. Standalone badges (e.g. Lucky Seven) always
-  score even when a stronger badge implies them - only members of a shared family collapse.
+  Standalone badges (e.g. Lucky Seven) always score even when a stronger badge implies
+  them - only members of a shared family collapse.
 - **Pair / Two Pair / Three Pair** = a digit appearing **exactly twice**; a triple/quad is
   not a pair, so `455000` (5×2, 0×3) is a Full House, not Two Pair. **Contiguous Two/Three
   Pair** = two/three digits that each occur exactly twice *and adjacently* (`dd`), with the

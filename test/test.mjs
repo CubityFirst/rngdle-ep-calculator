@@ -73,8 +73,11 @@ if (epOf(0, 'SQUARE') !== 0) throw new Error('0: lower powers should be supersed
 if (epOf(0, 'THIRTEENTH_POWER') !== 33333367) throw new Error('0: max-EP power tier should score');
 mustNot(2, 'SPY'); // single non-zero digits do NOT get Spy
 epEq(3125, 25429196);  // 5^5: Ouroboros (supersedes 5th Power) + Power of Five + Mini Scramble + Quarter-Century
-epEq(634700, 18194); // Pair scores 0 because Contiguous Pair (the "00") is present
-epEq(455000, 1194114); // as above + the 2026-08-22 Contiguous Two Pair rewrite: "5500" now wins PAIRS
+epEq(634700, 14410); // Pair scores 0 because Contiguous Pair (the "00") is present; since
+                     // 2026-09-05 Century also outranks Clean and Deep Void (one VOID_DEPTH family)
+epEq(455000, 1046091); // as above + the 2026-08-22 Contiguous Two Pair rewrite ("5500" wins PAIRS)
+                       // + the 2026-09-05 Void Depth merge: Semi-Epoch ("5000") is the only
+                       // zero badge that pays
 epEq(407777, 412805);   // tier supersession + Pocket Mirror ("7777") + Canyon from the 2026-07-16 batch
 
 // 407777: lower tiers superseded, but Contiguous Pair (base badge) still scores.
@@ -92,7 +95,25 @@ must(455000, 'TWO_PAIR');            // 5x2 + 0x3: two digits seen twice or more
 must(455000, 'CONTIGUOUS_TWO_PAIR'); // the "5500" window is aabb
 mustNot(455000, 'RHYME');            // "00" inside "000" overlaps
 must(455000, 'DEEP_VOID'); must(455000, 'BOAT'); // displayed...
-if (epOf(455000, 'DEEP_VOID') !== 0) throw new Error('Deep Void superseded by Deep Void (3)');
+if (epOf(455000, 'DEEP_VOID') !== 0) throw new Error('Deep Void superseded within Void Depth');
+// The 2026-09-05 Void Depth merge: every "ends in zeros" / "ends in 5 then zeros" badge now
+// sits in the same family as the Deep Voids, so one of the thirteen pays and the rest show 0.
+if (epOf(455000, 'SEMI_EPOCH') !== 1000001) throw new Error('455000: Semi-Epoch should be the Void Depth scorer');
+for (const id of ['MILLENNIUM', 'CENTURY', 'CLEAN', 'DEEP_VOID_THREE']) {
+  if (epOf(455000, id) !== 0) throw new Error(`455000: ${id} should be superseded by Semi-Epoch`);
+}
+epEq(100000, 18692850); // prod: Eon alone pays for the zeros
+must(100000, 'EON'); must(100000, 'DEEP_VOID_FIVE'); must(100000, 'CLEAN');
+// Eon, Semi-Eon and Deep Void (5) all cost 10,000,010; prod keeps the first defined (Eon).
+if (epOf(100000, 'EON') !== 10000010) throw new Error('100000: Eon should win the Void Depth tie');
+for (const id of ['DEEP_VOID_FIVE', 'EPOCH', 'MILLENNIUM', 'CENTURY', 'CLEAN', 'DEEP_VOID_FOUR', 'DEEP_VOID_THREE', 'DEEP_VOID']) {
+  if (epOf(100000, id) !== 0) throw new Error(`100000: ${id} should be superseded by Eon`);
+}
+epEq(250000, 10158333); must(250000, 'SEMI_EON');
+if (epOf(250000, 'SEMI_EON') !== 10000010) throw new Error('250000: Semi-Eon should score');
+if (epOf(250000, 'DEEP_VOID_FOUR') !== 0) throw new Error('250000: Deep Void (4) superseded by Semi-Eon');
+// Semi-Clean (ends in 5) stayed standalone: 125 keeps it at full price next to nothing.
+if (epOf(125, 'SEMI_CLEAN') !== 1000) throw new Error('125: Semi-Clean is standalone');
 if (epOf(455000, 'BOAT') !== 0) throw new Error('Full House superseded by Contiguous Full House');
 must(1122, 'TWO_PAIR'); must(1122, 'CONTIGUOUS_TWO_PAIR'); // genuine two pair still works
 // The 2026-08-22 pair rewrite, straight off prod's own match/reject vectors: a run of 3+

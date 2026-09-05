@@ -373,8 +373,8 @@ const FINDINGS = [
     'them. Thirty-two badges are earned by exactly one number in the whole range.', 'collector'],
   ['The card tiers are cut at round percentiles, not round scores', 'top 1%, next 4%, next 5%, ' +
     'next 15% - which is why the EP thresholds themselves look so arbitrary.', 'luck'],
-  ['Supersession quietly destroys 6.3% of all EP', 'a third of it inside the Power family alone, ' +
-    'and two badges are outranked on every single number that earns them.', 'economy'],
+  ['Supersession quietly destroys 7.5% of all EP', 'a quarter of it inside the Power family and ' +
+    'a sixth in Void Depth, and three badges are outranked on every single number that earns them.', 'economy'],
   ['A rare number is not one that collected more badges', 'it is one that collected a single rare ' +
     'badge. That badge is 16% of a trash score and 81% of a mythic one.', 'economy'],
 ];
@@ -1895,7 +1895,7 @@ function economyClient(WORKER_SRC, META, FAMS, PAL, TIERS) {
     const clean = ROWS.filter(r => r.score === r.earn).length;
 
     // Per family: EP its members earn on paper against EP they are actually paid. A
-    // standalone badge can never lose, so the whole 6.3% comes out of these 40 rows.
+    // standalone badge can never lose, so the whole 7.5% comes out of these 39 rows.
     const fams = new Map();
     for (const r of ROWS) {
       const f = META[r.i][4];
@@ -2192,7 +2192,7 @@ function renderEconomy(ctx) {
 
     <section class="card"><h2>Which families cost the most</h2>
       <p class="small">Supersession only bites inside a family, so the entire shortfall comes out of these
-        39 groups - the other 74 badges are standalone and always keep their 100 EP. Share of all EP
+        39 groups - the other 65 badges are standalone and always keep their 100 EP. Share of all EP
         earned-but-never-paid, by family.</p>
       <div id="families"></div></section>
   </div>

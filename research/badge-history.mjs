@@ -86,6 +86,9 @@ for (const batch of batches) {
   }
 }
 for (const entry of BADGE_HISTORY) {
+  // A rule-only batch (a family widened, an EP moved) records nothing git can see in
+  // the id set, so only entries that claim an id change are held to the timeline.
+  if (!entry.added.length && !entry.retired.length) continue;
   if (!batches.some(b => b.date === entry.date)) {
     problems.push(`${entry.date}: BADGE_HISTORY entry with no matching change in git (uncommitted batch?)`);
   }

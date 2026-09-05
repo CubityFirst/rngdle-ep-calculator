@@ -246,7 +246,7 @@
   },
   "DEEP_VOID_FIVE": {
    "earn": 10,
-   "score": 10
+   "score": 0
   },
   "ONE_DIGIT": {
    "earn": 10,
@@ -354,7 +354,7 @@
   },
   "EPOCH": {
    "earn": 100,
-   "score": 100
+   "score": 80
   },
   "QUAD_NINE": {
    "earn": 100,
@@ -382,7 +382,7 @@
   },
   "DEEP_VOID_FOUR": {
    "earn": 181,
-   "score": 171
+   "score": 81
   },
   "STROBOGRAMMATIC": {
    "earn": 199,
@@ -490,7 +490,7 @@
   },
   "MILLENNIUM": {
    "earn": 1000,
-   "score": 1000
+   "score": 800
   },
   "PRONIC": {
    "earn": 1000,
@@ -534,7 +534,7 @@
   },
   "DEEP_VOID_THREE": {
    "earn": 2701,
-   "score": 2520
+   "score": 1620
   },
   "TURTLE": {
    "earn": 2774,
@@ -642,7 +642,7 @@
   },
   "CENTURY": {
    "earn": 10000,
-   "score": 10000
+   "score": 8000
   },
   "DOUBLE_NINE": {
    "earn": 10000,
@@ -654,7 +654,7 @@
   },
   "SEMI_CENTURY": {
    "earn": 10000,
-   "score": 10000
+   "score": 9991
   },
   "THREE_QUARTER_CENTURY": {
    "earn": 10000,
@@ -710,7 +710,7 @@
   },
   "DEEP_VOID": {
    "earn": 35920,
-   "score": 33219
+   "score": 24048
   },
   "FEATHER": {
    "earn": 37501,
@@ -802,7 +802,7 @@
   },
   "CLEAN": {
    "earn": 100001,
-   "score": 100001
+   "score": 78561
   },
   "SEMI_CLEAN": {
    "earn": 100000,
