@@ -1,4 +1,4 @@
-// Browser smoke test for the /beta lab.
+// Browser smoke test for the legacy tools: /chains and the /beta lab.
 //
 //   node test/browser.mjs            # serves src/ (fast, what `npm run serve` does)
 //   node test/browser.mjs --bundle   # serves the esbuild output, i.e. what deploy runs
@@ -74,62 +74,11 @@ function findChromium() {
 }
 
 // --- the pages and what to poke on them ------------------------------------
-const PAGES = ['/', '/beta', '/beta/atlas', '/beta/projections', '/beta/spectrum', '/beta/contact',
-  '/beta/pairs', '/beta/oracle', '/beta/nearmiss', '/beta/collection', '/beta/luck',
+const PAGES = ['/chains', '/beta/atlas', '/beta/projections', '/beta/spectrum', '/beta/contact',
+  '/beta/pairs', '/beta/oracle', '/beta/collection',
   '/beta/collector', '/beta/anatomy', '/beta/economy', '/beta/species', '/beta/boxes'];
 
 const INTERACTIONS = {
-  // The calculator is not part of the lab, but it shares the badge renderer and the
-  // /api/card live-update path, so the superseded pills are worth holding in place.
-  '/': [
-    ['superseded pills', async p => {
-      const m = await p.evaluate(() => {
-        const sup = [...document.querySelectorAll('.bn-b.bn-sup')];
-        return { total: document.querySelectorAll('.bn-b').length, sup: sup.length,
-          struck: sup.filter(e => e.querySelector('em s')).length,
-          sub: document.querySelector('.bn-sub')?.textContent || '' };
-      });
-      if (!m.sup) throw new Error('999999 should have superseded badges');
-      if (m.struck !== m.sup) throw new Error('a superseded pill is missing its struck EP');
-      // The count line has always included superseded badges; now the pills must match it.
-      const said = Number((m.sub.match(/^(\d+) badge/) || [])[1]);
-      if (said !== m.total) throw new Error(`count line says ${said}, ${m.total} pills rendered`);
-      return `${m.total} pills, ${m.sup} superseded`;
-    }],
-    // The formula caption sits directly above the badge grid, so any change in its
-    // height shifts every pill as you sweep the mouse across them. It must reserve a
-    // constant single line - empty, short note, or a Harshad breakdown too wide to fit.
-    ['note line holds its height', async p => {
-      const m = await p.evaluate(() => {
-        const el = document.getElementById('bn-note');
-        const grid = document.querySelector('.bn-badges');
-        const h = new Set(), top = new Set(), wide = [];
-        const sample = () => { h.add(el.getBoundingClientRect().height.toFixed(2));
-          top.add(grid.getBoundingClientRect().top.toFixed(2));
-          if (el.scrollWidth > el.clientWidth + 1) wide.push(el.textContent); };
-        sample();
-        const noted = [...document.querySelectorAll('[data-note]')];
-        for (const b of noted) {
-          b.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
-          sample();
-          b.dispatchEvent(new MouseEvent('mouseleave', { bubbles: false }));
-        }
-        return { h: [...h], top: [...top], wide, n: noted.length };
-      });
-      if (!m.n) throw new Error('no formula notes on 999999 - the fixture stopped covering this');
-      if (m.h.length !== 1) throw new Error(`note line height varies: ${m.h.join(', ')}`);
-      if (m.top.length !== 1) throw new Error(`badge grid moves: top ${m.top.join(', ')}`);
-      if (m.wide.length) throw new Error(`note overflows its line: "${m.wide[0]}"`);
-      return `${m.n} notes, all ${m.h[0]}px`;
-    }],
-    ['live re-render', async p => {
-      await p.fill('#bn-input', '');
-      await p.type('#bn-input', '111111');
-      await p.waitForTimeout(900);
-      return p.evaluate(() => `${document.querySelectorAll('.bn-b.bn-sup').length} superseded, ` +
-        `${document.querySelector('.bn-ep')?.textContent}`);
-    }],
-  ],
   // The Box Lab draws no data of its own - it restyles one number - so what is worth
   // holding here is that every control still changes what is on screen, that prod's
   // seven tiers stay read-only, and that the gallery stays quiet on a dev server with
@@ -411,21 +360,6 @@ const INTERACTIONS = {
     ['guaranteed', p => p.$eval('#sure h2', e => e.textContent.trim())],
     ['reset', p => p.click('#reset').then(() => p.waitForTimeout(600)).then(() => p.textContent('#pattern'))],
   ],
-  // The player lookup is deliberately not exercised: it calls rngdle's public API, and
-  // a test suite has no business hammering someone else's server. The pasted-rolls path
-  // runs the same scoring code.
-  '/beta/luck': [
-    ['rolls slider', async p => {
-      await p.$eval('#rolls', e => { e.value = '500'; e.dispatchEvent(new Event('input', { bubbles: true })); });
-      return p.textContent('#rollsv');
-    }],
-    ['analyse rolls', async p => {
-      await p.fill('#paste', '696969, 123456, 42, 999999, 100000');
-      await p.click('#paste-go');
-      await p.waitForTimeout(250);
-      return p.$eval('#verdict .vhead b', e => e.textContent);
-    }],
-  ],
   '/beta/collector': [
     ['rolls slider', async p => {
       await p.$eval('#nrolls', e => { e.value = '100'; e.dispatchEvent(new Event('input', { bubbles: true })); });
@@ -453,41 +387,8 @@ const INTERACTIONS = {
       return p.$eval('#sheet .tl', e => e.textContent.trim());
     }],
   ],
-  '/beta/nearmiss': [
-    ['random', p => p.click('#rand').then(() => p.textContent('#title .tn'))],
-    ['click neighbour', p => p.click('#board .cell:not(.self)').then(() => p.waitForTimeout(400))
-      .then(() => p.textContent('#title .tn'))],
-    ['type a number', p => p.fill('#n', '80085').then(() => p.click('#go button'))
-      .then(() => p.textContent('#title .tn'))],
-    // A star only when some swap gains, a caret only when some swap loses - so the two
-    // interesting cases are a local peak (1 beats all 54) and a local valley (103623
-    // loses to all 54). 17726 has both.
-    ['best/worst marks', async p => {
-      const look = async (n) => {
-        await p.fill('#n', String(n));
-        await p.click('#go button');
-        await p.waitForTimeout(350);
-        return p.evaluate(() => ({
-          best: [...document.querySelectorAll('#board .cell.best')].map(e => e.dataset.n),
-          worst: [...document.querySelectorAll('#board .cell.worst')].map(e => e.dataset.n),
-          stars: document.querySelectorAll('#board .cell.best .mk').length,
-          gains: document.querySelectorAll('#cur .stat')[2].querySelector('.v').textContent.trim(),
-        }));
-      };
-      const out = [];
-      for (const n of [1, 103623, 17726]) {
-        const m = await look(n);
-        if (m.stars !== m.best.length) throw new Error(`${n}: best cells missing their star`);
-        if (m.best.some(x => m.worst.includes(x))) throw new Error(`${n}: a cell is both best and worst`);
-        if ((m.gains === 'nothing') !== (m.best.length === 0)) {
-          throw new Error(`${n}: star and the "one digit gains" stat disagree (${m.gains}, ${m.best.length} starred)`);
-        }
-        out.push(`${n}: ${m.best.length}b/${m.worst.length}w`);
-      }
-      return out.join('  ');
-    }],
-  ],
-  // The username path is left alone here as well - it calls rngdle's API. Pasted rolls
+  // The username path is deliberately not exercised: it calls rngdle's public API, and
+  // a test suite has no business hammering someone else's server. Pasted rolls
   // exercise the same engine scoring and the same rendering.
   '/beta/collection': [
     ['score rolls', async p => {
@@ -582,7 +483,7 @@ for (const size of [{ name: 'desktop', width: 1440, height: 950 }, { name: 'phon
     const errs = [];
     page.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 200)); });
     page.on('pageerror', e => errs.push('pageerror: ' + String(e).slice(0, 200)));
-    await page.goto(base + (path === '/' ? '/?n=999999' : path), { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.goto(base + path, { waitUntil: 'domcontentloaded', timeout: 60000 });
     const ready = await waitReady(page);
     const m = await page.evaluate(() => ({
       scrollW: document.documentElement.scrollWidth,
@@ -611,7 +512,7 @@ for (const [path, steps] of Object.entries(INTERACTIONS)) {
   page.on('pageerror', e => errs.push('pageerror: ' + String(e).slice(0, 160)));
   // The calculator renders nothing without a number; 999999 has plenty of superseded
   // badges, which is what its checks are about.
-  await page.goto(base + (path === '/' ? '/?n=999999' : path), { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(base + path, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await waitReady(page);
   console.log(`\n${path}`);
   for (const [label, fn] of steps) {

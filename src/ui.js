@@ -1,4 +1,6 @@
-// Shared design system for every HTML page this Worker serves.
+// Shared design system for every HTML page this Worker still serves: /chains and the
+// /beta tools. (The front end proper is rngdle.tools, in rngdle's own furniture; these
+// legacy pages keep this look.)
 //
 // Before this existed each page carried its own hand-copied `:root` block, its own
 // content width, its own button/input/pill styling and its own ad-hoc row of links -
@@ -180,16 +182,18 @@ const svg = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 // Groups of [key, href, label, icon]. `key` is what siteNav(active) matches to mark the
 // current page. A null group title renders the links bare; a titled group gets a
 // sub-heading (text when the rail is open, a plain divider when collapsed).
+// Everything but /chains and "Other tools" is the new front end (rngdle.tools) - these
+// pages are served from its origin, so the links are relative and land on its tabs.
 export const NAV_GROUPS = [
   [null, [
-    ['calc', '/', 'Calculator', 'calc'],
+    ['calc', '/', 'Sandbox', 'calc'],
     ['badges', '/badges', 'Badges', 'badges'],
     ['profiles', '/u', 'Profiles', 'profiles'],
   ]],
   ['Data vis', [
     ['grid', '/grid', 'Grid', 'grid'],
-    ['chains', '/chains', 'Chains', 'chains'],
-    ['beta', '/beta', 'Beta lab', 'beta'],
+    ['chains', '/chains', 'The EP Graph', 'chains'],
+    ['beta', '/other', 'Other tools', 'beta'],
   ]],
 ];
 export const NAV_LINKS = NAV_GROUPS.flatMap(([, links]) => links);

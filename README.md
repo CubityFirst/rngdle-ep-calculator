@@ -1,8 +1,32 @@
-# RNGdle EP Calculator (Cloudflare Worker)
+# RNGdle badge engine + legacy tools (Cloudflare Worker)
 
-Enter any number from **0 to 999,999** and get the **total EP** plus the list of
-**badges** it earns. EP per badge is the `Score (Decimal)` value from
-`RNGdle badges - Sheet1.csv`; the total is the sum over every matching badge.
+The badge rules behind [rngdle.tools](https://rngdle.tools), and the tools that were
+never ported there. This repo used to be the front end too - the calculator, `/badges`,
+`/grid`, `/u` - and all of that has moved: rngdle.tools is the front end now, drawn in
+rngdle's own furniture, and this Worker is what it embeds for the rest.
+
+What is still served from here, and where it is reached:
+
+| Route | What it is |
+| --- | --- |
+| `/engine.js` | The browser engine - an ES module (`computeLean`, `BADGE_META`, `sweepShared`, `CARD_TIERS` / `cardTier`) *generated from the live badge table* via `Function.prototype.toString()`. There is no second copy of the rules: edit a `test` once and it flows into the server scorer and every client tool. |
+| `/api?n=696969` | `{ number, totalEP, count, badges: [{ id, label, emoji, ep, rarity }] }` |
+| `/api/profile?u=<name>` | A player's rolls (from rngdle's public API) scored locally: tier counts, distinct badges, best roll, streak. Several names pool them. Read by `/beta/collection`. |
+| `/chains` | The n → EP(n) graph, computed in-browser. |
+| `/beta/<tool>` | The legacy lab - see below. |
+| `/api/palettes…` | The Box Lab's shared gallery (D1, `src/gallery.js`). |
+
+Every other path this Worker used to answer - `/`, `/?n=`, `/badges`, `/grid`, `/u/<name>`,
+the old `/beta` index - is a 301 to the same place on rngdle.tools (`FRONT_END` in
+`src/index.js`; `/?n=696969` becomes `/n/696969`, `/beta` becomes `/other`).
+
+**How rngdle.tools uses this.** Its `tools/sync-legacy.js` copies `src/*.js` and
+`schema.sql` into its `legacy/` directory byte for byte, and its Worker mounts that
+module for `/beta/`, `/chains`, `/engine.js` and the APIs, passing its own origin in as
+`env.FRONT_END` so the redirects above stay on-site. Its **Other** tab is drawn from
+`legacyCatalogue()` (`src/beta.js`): the titles, blurbs and marks the old `/beta` index
+used. So after a change here - a badge rule, a tool - re-run that sync over there and
+commit the copy; nothing is retyped on either side.
 
 ## Run / deploy
 
@@ -11,67 +35,18 @@ npm install          # installs wrangler
 npm run dev          # local dev server (http://localhost:8787)
 npm run deploy       # publish to your Cloudflare account (wrangler login first)
 npm test             # run the badge-logic test harness
-npm run test:browser # real-browser smoke test of the /beta tools
+npm run test:browser # real-browser smoke test of /chains and the /beta tools
 ```
 
-- **Web UI:** `GET /` (or `/?n=696969`)
-- **Badge index:** `GET /badges` - browse all 233 badges: obtainment rule, EP score,
-  rarity tier, exact share of numbers that earn it, family/supersession relations,
-  and example numbers (each linking into the calculator, plus a link to that badge's
-  `/grid` highlight view). Searchable, filterable by rarity, sortable by EP /
-  rarity / name / arrival date. Every card carries the date the badge arrived here, and
-  the history panel at the bottom lists each batch since the original port - including
-  the badges that have since been retired, which have no card left anywhere else.
-- **Beta lab:** `GET /beta` - an index of experimental data-vis and insight tools, each at
-  `/beta/<tool>`. See below.
-- **JSON API:** `GET /api?n=696969` →
-  `{ number, totalEP, count, badges: [{ id, label, emoji, ep, rarity }] }`
-- **Browser engine:** `GET /engine.js` - an ES module (`computeLean`, `BADGE_META`,
-  `CARD_TIERS` / `cardTier`) *generated from the live badge table* via
-  `Function.prototype.toString()`, used by the analysis Web Worker. There is no second
-  copy of the rules or of the rarity cutoffs: edit a `test` once and it flows into both
-  the server calculator and the client analysis.
+The deploy target is `rng.cubityfir.st`. It still serves the legacy tools itself, and
+sends everything else to rngdle.tools, so old links keep working.
 
-## Analyze all scores
+## Legacy lab (`/beta/<tool>`, `/chains`)
 
-The **📊 Analyze all scores** button sweeps the whole 0–999,999 range in a client-side
-Web Worker (the work is far past a single Worker request's CPU budget) and plots the
-**EP distribution** as a log/log histogram. The sweep fans out over one shard worker per
-core - `engine.js` loaded under the name `rngdle-shard` serves range requests - so it
-finishes in a few seconds; where nested workers are unavailable it falls back to a
-single-threaded sweep with an identical result.
-
-- **Filter by number length** (1–6 digits). This drives *what gets computed*: lengths 1–5
-  are only 100k numbers total, so they are always computed **exactly**. Only the 6-digit
-  bucket (900k) is optionally **sampled** (by a hash of `n`, so divisibility-based badges
-  like Even/Odd/Prime stay representative); sampled 6-digit counts are **weighted by the
-  stride** so the histogram still reflects the true full range.
-- **Filter by badge(s)** - restrict to numbers that earn *all* selected badges (instant
-  re-filter; no recompute).
-- **Break down by rarity** - every matching number is bucketed into its card tier
-  (trash / common / uncommon / rare / epic / anomaly / mythic, the percentile-derived
-  `CARD_TIERS` cutoffs the number card uses) and reported as a **rarity breakdown**:
-  count, share, mean EP and a share bar per tier. The histogram bars are **stacked by
-  tier** too, so the EP distribution reads as a rarity composition - a quarter-decade
-  bucket can straddle a cutoff (the uncommon band is narrower than one bucket), so
-  buckets are tallied per tier rather than given a single colour.
-- **Filter by rarity tier** - the tier chips (and the breakdown rows) include/exclude a
-  tier; shift-clicking a row isolates it. Tier is a pure post-compute filter on the
-  already-swept EP values, so it never recomputes. Breakdown counts deliberately
-  **ignore the tier filter itself** (facet counts), so the breakdown still works as a
-  picker once a tier is isolated.
-- **Resolution** - Full (every number) or a sample; only affects the 6-digit bucket.
-- **Exports:** *Matching numbers (.csv)* dumps the current filter as
-  `number,totalEP,rarity`;
-  *Examples per badge (.txt)* lists example numbers for every badge. Use **Full** resolution
-  for complete examples (6-digit-only badges are missed by sampling).
-
-## Beta lab (`/beta`)
-
-Experimental tools, all in `src/beta.js`, all reading the **same** cached full-range
-sweep as `/`, `/grid` and `/chains` (`sweepShared` in `engine.js`). Nothing here is
-precomputed on the server, so every one of them tracks the live badge rules; the sweep
-runs once per browser and every tool after that is instant.
+The tools that have no tab on rngdle.tools yet, all in `src/beta.js` (and `/chains` in
+`src/index.js`), all reading the **same** cached full-range sweep (`sweepShared` in
+`engine.js`). Nothing here is precomputed on the server, so every one of them tracks the
+live badge rules; the sweep runs once per browser and every tool after that is instant.
 
 Each tool is a dedicated Web Worker that sweeps and derives, plus a page that only
 draws - so neither the sweep nor a heavy derivation (a 233×233 co-occurrence pass is
@@ -82,22 +57,27 @@ are the two halves of that protocol.
 | --- | --- |
 | `/beta/atlas` | The 1000×1000 map as WebGL2 **terrain** - EP or badge count as height, card tier as colour. One mesh with no vertex attributes: the vertex shader derives position from `gl_VertexID` and fetches everything from one `RGBA32F` texture. Picking renders a second pass through a projection that blows the pixel under the cursor up to fill a 1×1 framebuffer. Any badge can be lit up over the terrain, which the worker cuts from the sweep bitmask on demand. |
 | `/beta/projections` | The same million numbers under five **layouts** - value order, nested decimal, Hilbert, Z-order, by score - as a WebGL2 point cloud that interpolates between them. Every layout is computed in the vertex shader from `gl_VertexID`, so switching is a uniform change. Sorted by score, each tier's *area* is its exact share of the range. Any badge can be lit up here too, which is where "every digit divisible by 3" turns out to be a Cantor set. |
+| `/chains` | **The EP graph**: every number is a node with one edge, to its own score. Out-degree 1 makes it a functional graph - basins draining into loops or, rarely, escaping the range - drawn whole, traceable from any number, with the attractors, the deepest chain and a depth profile. |
 | `/beta/spectrum` | Every badge as a **density stripe** across the range - one row per badge, one column per thousand numbers. Digit-length rules step at each power of ten, modular rules band, exact badges are a single lit pixel. Orderable by an entropy measure of how evenly a rule is spread. |
 | `/beta/contact` | Every badge's map as a **100x100 thumbnail**, all on one page. Rules with the same geometry line up side by side and the odd one out in a family is obvious; sparse badges have their marks grown to 3x3 so a three-earner rule is not an empty tile. |
 | `/beta/pairs` | **Badge affinity**: how often each of the ~26k badge pairs lands on the same number, read as lift, `P(B|A)`, Jaccard or a raw count. Orderable by family or by average-linkage cluster. |
 | `/beta/oracle` | **Digit oracle**: lock any digits of a six-digit number and all 60 digit-position choices are re-scored against only the numbers that still match - along with the badges every survivor earns, i.e. what is already guaranteed. |
-| `/beta/nearmiss` | **Near misses**: the 54 numbers one digit away from any given one, what each would have scored, and across the range the local peaks, the local valleys, and how much of it sits one digit from a mythic. |
 | `/beta/collection` | **Which badges a player is missing** - `/u` counts them, nothing said which. Ranks the gaps by expected wait and by the chance of closing each one in another run the length of the one so far. The only tool here that needs no sweep: a few hundred rolls score instantly through `/engine.js`, and every badge's rate is already in `probabilities.gen.js`. |
-| `/beta/luck` | **Roll odds**: the exact EP distribution, tier odds, closed-form best-of-N, and a luck reading for a real player's rolls (via `/api/profile`, scored locally). Name several players to rank them against each other. |
+| `/beta/boxes` | **Box Lab**: every coloured box rngdle.com knows how to draw, with your number in all of them, then the same boxes in words and colours of your own. Palettes can be published to a shared gallery (`src/gallery.js`, D1). |
 | `/beta/collector` | **Coupon collector**: rolls needed to earn all 233 badges, simulated over the real earner sets, against a greedy cover of the same badge list. |
 | `/beta/anatomy` | **Plain properties against score**: digit sum, distinct digits, longest run, divisibility, palindromes - each measured as lift against the range average and ranked by how much spread it actually produces. |
 | `/beta/economy` | **Badge pricing**, written up as a finding: EP turns out to be exactly `100 / P(earn)` for every badge, so supersession is the only thing that varies. |
 | `/beta/species` | The range grouped by **exact badge set** - distinct kinds, their rank-size curve, and the numbers that score like nothing else. |
 
+Ported to rngdle.tools, and gone from here: the calculator and its *Analyze all scores*
+panel (now **Sandbox** and **Analysis**), `/badges` (**Badges**, compact layout), `/grid`
+(**Grid**), `/u` (**Profiles**), `/beta/nearmiss` (**Neighbours**) and `/beta/luck`
+(**Luck**). The old `/beta` index is its **Other** tab.
+
 Three things worth knowing about the code:
 
-- Tool pages are marked `noindex` and the routes are not linked from the main tools;
-  the only entry point is the rail's **Beta lab** item.
+- Tool pages are marked `noindex`. Their only entry point is rngdle.tools' **Other**
+  tab; the rail down their left edge links to that site's tabs.
 - The shared loading overlay is `.beta-ov`, deliberately prefixed: it is a full-screen
   fixed layer, so a tool reusing a bare class name would paint over the whole page.
 - `betaShell` prepends a no-op `__name` shim to every page script, because the clients
@@ -111,10 +91,10 @@ Three things worth knowing about the code:
 once and writes three committed artifacts. The scan is split over worker threads
 (~5 s on 16 cores; `GEN_WORKERS=1` forces a serial run):
 
-- `src/examples.gen.js` - the first 3 numbers that earn each badge (the `/badges`
-  page's clickable examples).
+- `src/examples.gen.js` - the first 3 numbers that earn each badge (read by the /beta
+  tools, e.g. the Collector's greedy cover).
 - `src/probabilities.gen.js` - each badge's exact share of all inputs (the
-  "X% of numbers earn this" figure in tooltips and on `/badges`).
+  "X% of numbers earn this" figure the /beta tools quote).
 - `research/badge-tally.json` - a **limited, diffable snapshot** of the whole range:
   per badge, how many numbers *earn* it and how many it *scores* on (>0 EP after
   family supersession). No per-number data - a rule/EP change shows up as a small,

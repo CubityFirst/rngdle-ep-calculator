@@ -7,7 +7,7 @@ npm install          # installs wrangler
 npm run dev          # wrangler dev server (http://localhost:8787)
 npm run serve        # plain-Node dev server (same worker, no wrangler hotkey loop)
 npm test             # badge-logic test harness
-npm run test:browser # real-browser smoke test of the /beta tools
+npm run test:browser # real-browser smoke test of /chains and the /beta tools
 npm run test:deploy  # the same, against the esbuild bundle - run before deploying
 npm run test:supersession  # /beta's family rule vs research/badge-tally.json (~2 min)
 npm run test:gallery # the /beta/boxes gallery's routes, against schema.sql
@@ -15,7 +15,14 @@ npm run test:gallery-ui    # the same gallery in a browser, against a real D1
 npm run deploy       # publish to Cloudflare (runs the generator via predeploy)
 ```
 
-`test:browser` loads every `/beta` page at desktop and phone widths, waits for its
+This Worker is the engine and the legacy tools; the front end is
+[rngdle.tools](../rngdle.tools), which copies `src/` in under `legacy/` and mounts it.
+`/`, `/badges`, `/grid` and `/u` here are redirects to it, so on a local `npm run dev`
+the only pages are `/chains` and `/beta/<tool>`. After landing a change here, go to the
+rngdle.tools checkout and run `node tools/sync-legacy.js && node tools/check.js`, then
+commit its `legacy/` - that copy is what deploys.
+
+`test:browser` loads every legacy page at desktop and phone widths, waits for its
 sweep, and then drives its controls, failing on any console error, any horizontal
 overflow, or any control that does nothing. It skips itself (exit 0) when
 playwright-core is not installed.
@@ -55,8 +62,8 @@ If a badge `test`, EP value, `FAMILIES` entry, or the badge list changed, run
 `npm run gen` (full 1,000,001-number scan, ~5 s on 16 cores) and commit the regenerated files
 **in the same commit** as the change:
 
-- `src/examples.gen.js` - per-badge example numbers, used by `/badges`
-- `src/probabilities.gen.js` - "% of numbers earn this", used in tooltips + `/badges`
+- `src/examples.gen.js` - per-badge example numbers, read by the /beta tools
+- `src/probabilities.gen.js` - "% of numbers earn this", read by the /beta tools
 - `research/badge-tally.json` - diffable per-badge earn/score tally of the whole range
 
 Never hand-edit `*.gen.js` files.
@@ -70,6 +77,8 @@ Never hand-edit `*.gen.js` files.
   self-contained (no closing over module-level helpers that aren't shipped).
 - `FAMILY_NAMES` in `src/index.js` is index-aligned with `FAMILIES` - keep them in
   sync.
+- No new HTML pages here. New UI belongs in rngdle.tools; a tool that gets ported there
+  comes out of `BETA_TOOLS` / `RENDERERS` so the Other tab stops listing it.
 
 ## Commit messages
 
@@ -81,16 +90,18 @@ type(scope): summary in imperative mood
 
 Types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `chore`.
 
-Scopes are optional but preferred; the ones in use: `card` (the click-to-type
-number card on `/`), `badges` (`/badges` index), `grid`, `analysis`, `profiles`
-(`/u`), `beta` (the `/beta` lab in `src/beta.js`), `engine`, `gen`
-(generator/snapshots), `research`.
+Scopes are optional but preferred; the ones in use: `badges` (the badge table, EP
+values, families, history), `beta` (the `/beta` lab in `src/beta.js`), `chains`,
+`engine` (`/engine.js`, the sweep), `api` (`/api`, `/api/profile`), `gallery` (the Box
+Lab's D1 gallery in `src/gallery.js`), `gen` (generator/snapshots), `research`.
+Older history also uses `card`, `grid`, `analysis` and `profiles` for the pages that
+have since moved to rngdle.tools.
 
 Examples:
 
 ```
-feat(card): even-spacing hover spreads all digits evenly apart
-fix(card): align invisible input's text metrics with drawn digits
+feat(badges): track prod's 2026-09-05 bundle - Void Depth swallows the zero ladders
+fix(beta): keep the atlas picking pass off the main thread
 chore(gen): regenerate snapshots after EP rebalance
 docs: add contributing guide
 ```

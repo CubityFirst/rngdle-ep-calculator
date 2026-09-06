@@ -29,10 +29,16 @@ export const BETA_TOOLS = [
     note: 'WebGL2 - orbit, zoom, click to land on a number.',
   },
   {
-    slug: 'projections', see: ['atlas', 'species'], title: 'Projections', kind: '2D',
+    slug: 'projections', see: ['atlas', 'chains'], title: 'Projections', kind: '2D',
     blurb: 'The same million numbers laid out five different ways, morphing between ' +
       'them - because the layout decides which structure you can see at all.',
     note: 'WebGL2 point cloud; every layout computed in the vertex shader.',
+  },
+  {
+    slug: 'chains', href: '/chains', see: ['projections', 'species'], title: 'The EP Graph', kind: 'Graph',
+    blurb: 'Each number points at its own score. Follow that edge and the range becomes ' +
+      'one graph: basins draining into loops, and the rare chains that escape it.',
+    note: 'Drawn whole, traceable from any number, with the attractors and the deepest runs.',
   },
   {
     slug: 'spectrum', see: ['contact', 'pairs'], title: 'Badge Spectrum', kind: '2D',
@@ -59,37 +65,25 @@ export const BETA_TOOLS = [
     note: 'Ten properties, every one measured as lift against the range average.',
   },
   {
-    slug: 'oracle', see: ['nearmiss', 'anatomy'], title: 'Digit Oracle', kind: 'Interactive',
+    slug: 'oracle', see: ['anatomy', 'atlas'], title: 'Digit Oracle', kind: 'Interactive',
     blurb: 'Half a number is already worth something. Lock any digits and every ' +
       'remaining choice is re-scored against the numbers that still match.',
     note: 'Mean EP behind all 60 digit-position choices, conditional on what you know.',
   },
   {
-    slug: 'nearmiss', see: ['oracle', 'atlas'], title: 'Near Misses', kind: 'Interactive',
-    blurb: 'Every number has exactly 54 neighbours one digit away. See what each of ' +
-      'them would have scored, and which ordinary numbers sit next to a fortune.',
-    note: 'Peaks, valleys, and how much of the range is one digit from a mythic.',
-  },
-  {
-    slug: 'collection', see: ['collector', 'luck'], title: 'Your Collection', kind: 'Player',
+    slug: 'collection', see: ['collector', 'boxes'], title: 'Your Collection', kind: 'Player',
     blurb: 'Which of the 233 badges you actually have, which you do not, and how long ' +
       'the ones you are missing would realistically take to turn up.',
     note: 'The one tool here that needs no sweep - it loads instantly.',
   },
   {
-    slug: 'boxes', see: ['collection', 'luck'], title: 'Box Lab', kind: 'Design',
+    slug: 'boxes', see: ['collection', 'oracle'], title: 'Box Lab', kind: 'Design',
     blurb: 'Every coloured box rngdle.com knows how to draw, with your number in all of ' +
       'them at once - then the same boxes in words and colours of your own.',
     note: 'Tier colours, keyframes and card recipes read out of the live stylesheet.',
   },
   {
-    slug: 'luck', see: ['collector', 'species'], title: 'Luck Lab', kind: 'Odds',
-    blurb: 'What a roll is worth before you make it. Exact tier odds, what your best ' +
-      'should look like after N rolls, and how lucky a real player actually got.',
-    note: 'Closed-form best-of-N off the exact score distribution - nothing simulated.',
-  },
-  {
-    slug: 'collector', see: ['luck', 'economy'], title: 'The Collector', kind: 'Odds',
+    slug: 'collector', see: ['economy', 'collection'], title: 'The Collector', kind: 'Odds',
     blurb: 'How many rolls to earn all 233 badges - simulated over the real earner ' +
       'sets - against how few numbers would do it if you could pick them.',
     note: 'Exact collection curve, plus a greedy cover of the whole badge list.',
@@ -101,7 +95,7 @@ export const BETA_TOOLS = [
     note: 'The price law, and what families cost in EP that is earned but never paid.',
   },
   {
-    slug: 'species', see: ['pairs', 'nearmiss'], title: 'Species', kind: 'Report',
+    slug: 'species', see: ['pairs', 'chains'], title: 'Species', kind: 'Report',
     blurb: 'Two numbers with the same badges are the same thing to the scorer. ' +
       'Grouped that way, the range stops being a line and becomes a population.',
     note: 'Distinct badge sets, their rank-size curve, and the true one-of-a-kinds.',
@@ -109,6 +103,8 @@ export const BETA_TOOLS = [
 ];
 
 const TOOL_BY_SLUG = new Map(BETA_TOOLS.map(t => [t.slug, t]));
+// Tools live at /beta/<slug> unless the record says otherwise (/chains is index.js's).
+const toolHref = t => t.href || `/beta/${t.slug}`;
 
 // ---------------------------------------------------------------------------
 // Shared shell
@@ -168,8 +164,8 @@ function betaShell(o) {
   const more = tool && tool.see && !o.full ? `\n<div class="wrap"><nav class="tool-more">
   <span>See also</span>
   ${tool.see.map(s => TOOL_BY_SLUG.get(s)).filter(Boolean).map(t =>
-    `<a href="/beta/${t.slug}">${t.title}<em>${t.kind}</em></a>`).join('\n  ')}
-  <a href="/beta">All ${BETA_TOOLS.length} tools<em>Beta lab</em></a>
+    `<a href="${toolHref(t)}">${t.title}<em>${t.kind}</em></a>`).join('\n  ')}
+  <a href="/other">All ${BETA_TOOLS.length} tools<em>Other</em></a>
 </nav></div>` : '';
 
   return pageShell({
@@ -283,12 +279,16 @@ function workerSrc(fn) {
 }
 
 // ---------------------------------------------------------------------------
-// /beta - the index
+// The catalogue: what the old /beta index drew, now exported for the new front end
 // ---------------------------------------------------------------------------
 
-// A small abstract mark per tool, so the index reads as a gallery rather than a list.
+// A small abstract mark per tool, so the gallery reads as a gallery rather than a list.
 // Drawn on the card's own accent, 64x40, no text.
 const THUMBS = {
+  chains: `<circle cx="10" cy="20" r="3.5"/><circle cx="28" cy="12" r="3.5"/><circle cx="46" cy="22" r="3.5"/>
+    <path d="M13.2 18.5 24.8 13.5"/><path d="M31.4 13.6 42.6 20.4"/>
+    <path d="M49 19.5c6-6 12-4 12 1s-6 7-12 1" opacity=".6"/>
+    <circle cx="20" cy="33" r="2.5" opacity=".4"/><path d="M22.3 31.8 43.8 24" opacity=".4"/>`,
   // A row of tier boxes, each with a number in it, and a couple of sparkles above -
   // the two things the tool is about. Same 64x40 viewBox and currentColor stroke as
   // the rest, with opacity standing in for the tiers being differently styled.
@@ -379,71 +379,26 @@ const FINDINGS = [
     'badge. That badge is 16% of a trash score and 81% of a mythic one.', 'economy'],
 ];
 
-export function renderBetaIndex() {
-  const cards = BETA_TOOLS.map(t => `
-    <a class="tool" href="/beta/${t.slug}">
-      <div class="tool-thumb" aria-hidden="true"><svg viewBox="0 0 64 40" fill="none" stroke="currentColor"
-        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${THUMBS[t.slug] || ''}</svg></div>
-      <div class="tool-body">
-        <h2>${t.title}<span class="tool-kind">${t.kind}</span></h2>
-        <p>${t.blurb}</p>
-        <div class="tool-note">${t.note}</div>
-      </div>
-    </a>`).join('');
+// Where the two tools that WERE ported went, so a finding that names one still links.
+const PORTED = { nearmiss: ['/neighbours', 'Neighbours'], luck: ['/luck', 'Luck'] };
 
-  const css = `
-  #cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(330px,100%),1fr));
-    gap:.8rem; margin-top:1.3rem; }
-  .tool { display:flex; flex-direction:column; text-decoration:none; color:inherit; overflow:hidden;
-    border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface);
-    transition:border-color .12s, transform .12s, background .12s; }
-  .tool:hover { border-color:var(--accent); transform:translateY(-2px); background:var(--surface-2); }
-  .tool-thumb { display:flex; align-items:center; justify-content:center; height:96px;
-    color:var(--accent); background:
-      radial-gradient(120% 140% at 50% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 72%),
-      var(--surface-2);
-    border-bottom:1px solid var(--border); }
-  .tool-thumb svg { width:128px; height:80px; }
-  .tool-body { padding:.8rem .95rem 1rem; display:flex; flex-direction:column; gap:.4rem; flex:1; }
-  .tool-body h2 { display:flex; align-items:center; gap:.5rem; font-size:1rem; font-weight:600; margin:0; }
-  .tool-kind { font-size:.6rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
-    color:var(--muted); border:1px solid var(--border-2); border-radius:var(--r-pill); padding:.12rem .45rem; }
-  .tool-body p { margin:0; font-size:.86rem; color:var(--dim); line-height:1.55; }
-  .tool-note { margin-top:auto; padding-top:.35rem; font-size:.76rem; color:var(--faint); }
-
-  .finds { margin-top:2rem; }
-  .finds h2 { font-size:.78rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
-    color:var(--muted); margin:0 0 .4rem; }
-  .finds ol { list-style:none; margin:0; padding:0; display:grid;
-    grid-template-columns:repeat(auto-fill, minmax(min(330px,100%),1fr)); gap:.6rem; }
-  .finds li { display:flex; flex-direction:column; gap:.25rem; padding:.75rem .9rem;
-    border:1px solid var(--border); border-left:3px solid var(--hl); border-radius:var(--r-card);
-    background:var(--surface); }
-  .finds li b { font-size:.88rem; font-weight:600; line-height:1.4; }
-  .finds li span { font-size:.8rem; color:var(--muted); line-height:1.55; }
-  .finds li a { margin-top:auto; padding-top:.35rem; font-size:.76rem; text-decoration:none; }
-  .finds li a:hover { text-decoration:underline; }`;
-
-  const body = `<div class="wrap">
-  <h1>Beta lab <span class="beta-tag">experimental</span></h1>
-  <p class="tag">Data-vis and insight tools built on the full 1,000,001-number sweep.</p>
-
-  <div id="cards">${cards}</div>
-
-  <section class="finds">
-    <h2>Some insights</h2>
-    <ol>${FINDINGS.map(([head, body, slug]) => `<li>
-      <b>${head}</b><span>${body}</span>
-      <a href="/beta/${slug}">${BETA_TOOLS.find(t => t.slug === slug).title} &rarr;</a>
-    </li>`).join('')}</ol>
-  </section>
-
-  <footer>
-    <b>Beta</b> - these are experiments. Layout, names and routes may change.
-  </footer>
-</div>`;
-
-  return betaShell({ title: 'RNGdle - Beta lab', width: '1100px', slug: '', css, body });
+/**
+ * What rngdle.tools' "Other" tab lists: every tool this Worker still renders, with the
+ * titles, blurbs, marks and findings the old /beta index drew, so that gallery is
+ * built from this data rather than retyped. Served as JSON at /api/other over there.
+ */
+export function legacyCatalogue() {
+  const link = slug => TOOL_BY_SLUG.has(slug)
+    ? { href: toolHref(TOOL_BY_SLUG.get(slug)), title: TOOL_BY_SLUG.get(slug).title }
+    : PORTED[slug] ? { href: PORTED[slug][0], title: PORTED[slug][1] } : null;
+  return {
+    tools: BETA_TOOLS.map(t => ({
+      slug: t.slug, href: toolHref(t), title: t.title, kind: t.kind, blurb: t.blurb, note: t.note,
+      see: t.see.filter(s => TOOL_BY_SLUG.has(s)).map(s => ({ slug: s, ...link(s) })),
+      thumb: THUMBS[t.slug] || '',
+    })),
+    findings: FINDINGS.map(([head, body, slug]) => ({ head, body, ...link(slug) })),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -756,8 +711,8 @@ function pairsClient(WORKER_SRC, META, FAMS, PAL) {
           <div class="stat"><span class="k">Travels with</span><span class="v">${fmtN(together.length)}</span>
             <span class="sub">of ${B - 1} other badges</span></div>
         </div>
-        <div class="sh-links"><a href="/grid#${encodeURIComponent(m[0])}">map on /grid</a>
-          <a href="/badges#${META[sel][5]}">rule</a></div>
+        <div class="sh-links"><a href="/grid/${m[5].toLowerCase()}">map on /grid</a>
+          <a href="/badges/${META[sel][5].toLowerCase()}">rule</a></div>
       </div>
 
       <div class="card"><h2>Strongest affinity <em>by lift</em></h2>
@@ -973,7 +928,7 @@ function renderPairs(ctx) {
   const body = `<div class="wrap">
   <div class="tool-head">
     <h1>Badge Affinity <span class="beta-tag">beta</span></h1>
-    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+    <a class="tool-back" href="/other">&larr; Other tools</a>
   </div>
   <p class="tag">Which badges travel together, counted over every one of the 1,000,001 legal rolls.</p>
 
@@ -1438,7 +1393,7 @@ void main() {
       <div class="rd-row"><span>EP</span><b>${fmt(Math.round(EP[n]))}</b></div>
       <div class="rd-row"><span>Badges</span><b>${CNT[n]}</b></div>
       <div class="rd-row"><span>Cell</span><b>${n % SIDE}, ${Math.floor(n / SIDE)}</b></div>
-      <a class="rd-open" href="/?n=${n}">Open on the calculator &rarr;</a>`;
+      <a class="rd-open" href="/n/${n}">Open in the sandbox &rarr;</a>`;
   }
 
   function flyTo(n) {
@@ -1644,7 +1599,7 @@ function renderAtlas(ctx) {
     <h1>EP Atlas <span class="beta-tag">beta</span></h1>
     <div class="sub">All 1,000,000 numbers as terrain - across is n mod 1000, back is n / 1000,
       up is EP.</div>
-    <a class="back" href="/beta">&larr; Beta lab</a>
+    <a class="back" href="/other">&larr; Other tools</a>
   </div>
   <label class="ctl"><span>Colour</span>
     <select id="mode">
@@ -1840,7 +1795,7 @@ function economyClient(WORKER_SRC, META, FAMS, PAL, TIERS) {
   }
 
   // --- tables ------------------------------------------------------------
-  const row = (r, right, sub) => `<a class="erow" href="/badges#${META[r.i][5]}">
+  const row = (r, right, sub) => `<a class="erow" href="/badges/${META[r.i][5].toLowerCase()}">
     <span class="ee">${META[r.i][1]}</span>
     <span class="el">${META[r.i][0]}${sub ? `<em>${sub}</em>` : ''}</span>
     <span class="ev">${right}</span></a>`;
@@ -2013,7 +1968,7 @@ function economyClient(WORKER_SRC, META, FAMS, PAL, TIERS) {
   // The caption promises this; SVG circles are not links, so it has to be wired.
   $('chart').addEventListener('click', e => {
     const c = e.target.closest('[data-i]');
-    if (c) location.href = '/badges#' + META[Number(c.dataset.i)][5];
+    if (c) location.href = '/badges/' + META[Number(c.dataset.i)][5].toLowerCase();
   });
 
   // --- boot --------------------------------------------------------------
@@ -2130,7 +2085,7 @@ function renderEconomy(ctx) {
   const body = `<div class="wrap">
   <div class="tool-head">
     <h1>Badge Economy <span class="beta-tag">beta</span></h1>
-    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+    <a class="tool-back" href="/other">&larr; Other tools</a>
   </div>
   <p class="tag">Every badge is priced at exactly 100 / its own odds - so what makes one worth more
     than another?</p>
@@ -2431,10 +2386,10 @@ function spectrumClient(WORKER_SRC, META, FAMS, PAL) {
           <div class="stat"><span class="k">Longest gap</span><span class="v">${fmt(GAP[i])}</span>
             <span class="sub">with none in a row</span></div>
         </div>
-        <div class="drange">First <a href="/?n=${FIRST[i]}">${fmt(FIRST[i])}</a> ·
-          last <a href="/?n=${LAST[i]}">${fmt(LAST[i])}</a> ·
-          <a href="/grid#${encodeURIComponent(m[0])}">map on /grid</a> ·
-          <a href="/badges#${m[5]}">rule</a></div>
+        <div class="drange">First <a href="/n/${FIRST[i]}">${fmt(FIRST[i])}</a> ·
+          last <a href="/n/${LAST[i]}">${fmt(LAST[i])}</a> ·
+          <a href="/grid/${m[5].toLowerCase()}">map on /grid</a> ·
+          <a href="/badges/${m[5].toLowerCase()}">rule</a></div>
       </div>
       <div class="card"><h2>By digit length</h2>
         <p class="muted small">Share of all numbers of each length that earn it - which is where the
@@ -2558,7 +2513,7 @@ function renderSpectrum(ctx) {
   const body = `<div class="wrap">
   <div class="tool-head">
     <h1>Badge Spectrum <span class="beta-tag">beta</span></h1>
-    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+    <a class="tool-back" href="/other">&larr; Other tools</a>
   </div>
   <p class="tag">All 233 badges at once: one row each, one column per thousand numbers, brightness for
     how many of them earn it.</p>
@@ -2785,11 +2740,11 @@ function oracleClient(WORKER_SRC, TIERS, META, PAL) {
       <div class="stat stat-lg"><span class="k">Top 1% chance</span><span class="v">${(100 * Q.pTop).toFixed(2)}%</span>
         <span class="sub">EP over ${fmt(P99)}</span></div>
       <div class="stat stat-lg"><span class="k">Best case</span><span class="v">${compact(Q.bestEP)}</span>
-        <span class="sub">EP · <a href="/?n=${Q.best}">${Q.best.toLocaleString()}</a> · ${bt.label}</span></div>`;
+        <span class="sub">EP · <a href="/n/${Q.best}">${Q.best.toLocaleString()}</a> · ${bt.label}</span></div>`;
 
     $('tops').innerHTML = Q.tops.map(([n, e]) => {
       const t = tierOf(e);
-      return `<a class="toprow" href="/?n=${n}"><span class="tn">${n.toLocaleString()}</span>
+      return `<a class="toprow" href="/n/${n}"><span class="tn">${n.toLocaleString()}</span>
         <span class="pill" style="--tc:${t.accent}">${t.label}</span>
         <span class="te">${fmt(e)} EP</span></a>`;
     }).join('');
@@ -2800,7 +2755,7 @@ function oracleClient(WORKER_SRC, TIERS, META, PAL) {
          <p class="muted small">Earned by every number that still matches - these are yours whatever
          the remaining digits turn out to be.</p>
          <div class="pills">${sure.slice().sort((a, b) => META[b][2] - META[a][2]).map(i =>
-           `<a class="bpill" href="/badges#${META[i][5]}" style="--tc:${PAL[META[i][3]]}"
+           `<a class="bpill" href="/badges/${META[i][5].toLowerCase()}" style="--tc:${PAL[META[i][3]]}"
              title="${META[i][0]} · ${fmt(META[i][2])} EP">${META[i][1]} ${META[i][0]}</a>`).join('')}</div>`
       : `<h2>Already guaranteed</h2>
          <p class="muted small">Nothing yet - no badge is earned by every number that still matches.
@@ -2940,7 +2895,7 @@ function renderOracle(ctx) {
   const body = `<div class="wrap">
   <div class="tool-head">
     <h1>Digit Oracle <span class="beta-tag">beta</span></h1>
-    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+    <a class="tool-back" href="/other">&larr; Other tools</a>
   </div>
   <p class="tag">Lock a digit and every remaining choice is re-scored against the numbers that still
     match. Six-digit numbers only.</p>
@@ -2990,438 +2945,6 @@ const __W = ${JSON.stringify(workerSrc(oracleWorker))};
 (${oracleClient.toString()})(__W, ${JSON.stringify(tiers)}, ${JSON.stringify(meta)}, ${JSON.stringify(pal)});`;
 
   return betaShell({ title: 'RNGdle - Digit Oracle', width: '1080px', slug: 'oracle', css, body, script });
-}
-
-// ---------------------------------------------------------------------------
-// /beta/luck - the odds of a roll, and whether yours were any good.
-//
-// Every other tool here is about the numbers. This one is about the player: the sweep
-// is the exact distribution of EP over the whole roll space, so every question of the
-// "how likely was that?" kind has a closed-form answer rather than a simulated one.
-//
-// The one that matters is best-of-N. If F is the EP distribution then the best of N
-// independent rolls is below x with probability F(x)^N, which gives both the typical
-// best for a given number of rolls AND, read the other way, exactly how lucky a real
-// player's best roll was among everyone else who rolled the same number of times.
-// ---------------------------------------------------------------------------
-
-function luckWorker() {
-  self.onmessage = async ev => {
-    if (ev.data.cmd !== 'init') return;
-    try {
-      const swept = await betaSweep(ev.data.origin, 0.85);
-      const N = swept.ep.length;
-      self.postMessage({ type: 'progress', pct: 0.9, msg: 'Sorting every score…' });
-      // The empirical CDF, as a sorted copy. 8MB, transferred zero-copy, and it lets
-      // the page answer any percentile question exactly instead of interpolating.
-      const sorted = Float64Array.from(swept.ep).sort();
-      const ep = Float64Array.from(swept.ep);
-      self.postMessage({ type: 'ready', sorted: sorted.buffer, ep: ep.buffer, N },
-        [sorted.buffer, ep.buffer]);
-    } catch (e) {
-      self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
-    }
-  };
-}
-
-function luckClient(WORKER_SRC, TIERS) {
-  const $ = id => document.getElementById(id);
-  const fmt = n => Math.round(n).toLocaleString();
-  const compact = n => n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(2) + 'M'
-    : n >= 1e4 ? (n / 1e3).toFixed(1) + 'k' : fmt(n);
-  const oneIn = p => p <= 0 ? '-' : p >= 1 ? '1 in 1' : '1 in ' + fmt(1 / p);
-
-  let S = null, EP = null, N = 0;
-
-  // Share of all rolls scoring at or below x, and its inverse.
-  function cdf(x) {
-    let lo = 0, hi = N;
-    while (lo < hi) { const m = (lo + hi) >> 1; if (S[m] <= x) lo = m + 1; else hi = m; }
-    return lo / N;
-  }
-  function quantile(p) { return S[Math.min(N - 1, Math.max(0, Math.round(p * N) - 1))]; }
-  function tierOf(ep) { let t = TIERS[0]; for (const x of TIERS) if (ep >= x.lo) t = x; return t; }
-
-  // --- distribution chart -------------------------------------------------
-  function distribution() {
-    const W = 760, H = 260, M = { l: 44, r: 14, t: 14, b: 40 }, BINS = 150;
-    const lgMax = Math.log10(1 + S[N - 1]);
-    const bins = new Float64Array(BINS);
-    for (let i = 0; i < N; i++) bins[Math.min(BINS - 1, (Math.log10(1 + S[i]) / lgMax * BINS) | 0)]++;
-    const mx = Math.max(...bins);
-    const bx = i => M.l + (i / BINS) * (W - M.l - M.r);
-    const bw = (W - M.l - M.r) / BINS;
-
-    const g = [];
-    // Tier bands behind the bars: the histogram is the shape, the bands are the stakes.
-    for (let t = 0; t < TIERS.length; t++) {
-      const x0 = bx(Math.log10(1 + TIERS[t].lo) / lgMax * BINS);
-      const x1 = t + 1 < TIERS.length ? bx(Math.log10(1 + TIERS[t + 1].lo) / lgMax * BINS) : W - M.r;
-      if (x1 - x0 < 0.5) continue;
-      g.push(`<rect class="band" x="${x0.toFixed(1)}" y="${M.t}" width="${(x1 - x0).toFixed(1)}"
-        height="${H - M.t - M.b}" fill="${TIERS[t].accent}"/>`);
-      if (x1 - x0 > 52) g.push(`<text class="tl" x="${((x0 + x1) / 2).toFixed(1)}" y="${M.t + 12}"
-        text-anchor="middle" fill="${TIERS[t].accent}">${TIERS[t].label}</text>`);
-    }
-    for (let i = 0; i < BINS; i++) {
-      if (!bins[i]) continue;
-      const h = (bins[i] / mx) * (H - M.t - M.b);
-      g.push(`<rect class="bar" x="${bx(i).toFixed(1)}" y="${(H - M.b - h).toFixed(1)}"
-        width="${Math.max(0.6, bw - 0.4).toFixed(2)}" height="${h.toFixed(1)}"/>`);
-    }
-    for (let e = 2; e <= Math.floor(lgMax); e++) {
-      const x = bx(e / lgMax * BINS);
-      g.push(`<text class="ax" x="${x.toFixed(1)}" y="${H - M.b + 15}" text-anchor="middle">${
-        compact(Math.pow(10, e))}</text>`);
-    }
-    $('dist').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img"
-      aria-label="Distribution of EP over all 1,000,001 rolls">${g.join('')}
-      <text class="axl" x="${M.l + (W - M.l - M.r) / 2}" y="${H - 4}" text-anchor="middle">EP of a single roll (log scale)</text>
-    </svg>`;
-  }
-
-  // --- odds table ---------------------------------------------------------
-  function odds() {
-    $('odds').innerHTML = TIERS.slice().reverse().map(t => {
-      const p = 1 - cdf(t.lo - 0.5);              // P(roll lands in this tier or above)
-      const exact = cdf((TIERS[TIERS.indexOf(t) + 1] || { lo: Infinity }).lo - 0.5) - cdf(t.lo - 0.5);
-      return `<div class="orow">
-        <span class="pill" style="--tc:${t.accent}">${t.label}</span>
-        <span class="ol">${t.lo ? fmt(t.lo) + '+ EP' : 'any score'}</span>
-        <span class="obar"><i style="width:${Math.max(0.5, 100 * Math.pow(exact, 0.35)).toFixed(1)}%;background:${t.accent}"></i></span>
-        <span class="oval">${(100 * exact).toFixed(exact < 0.001 ? 4 : 2)}%</span>
-        <span class="oe">${oneIn(p)} or better</span>
-      </div>`;
-    }).join('');
-  }
-
-  // --- best-of-N ----------------------------------------------------------
-  // P(best of n <= x) = F(x)^n, so the median best is the F = 0.5^(1/n) quantile and
-  // the 10-90 band falls straight out the same way.
-  const bestAt = (n, q) => quantile(Math.pow(q, 1 / n));
-
-  function bestOfN() {
-    const n = Number($('rolls').value);
-    $('rollsv').textContent = fmt(n);
-    const med = bestAt(n, 0.5), lo = bestAt(n, 0.1), hi = bestAt(n, 0.9);
-    const pMyth = 1 - Math.pow(cdf(TIERS[TIERS.length - 1].lo - 0.5), n);
-    const t = tierOf(med);
-    $('bon').innerHTML = `
-      <div class="stat stat-lg"><span class="k">Typical best</span><span class="v">${compact(med)}</span>
-        <span class="sub">EP · <span class="pill" style="--tc:${t.accent}">${t.label}</span></span></div>
-      <div class="stat stat-lg"><span class="k">Unlucky / lucky</span><span class="v">${compact(lo)} - ${compact(hi)}</span>
-        <span class="sub">the middle 80% of players</span></div>
-      <div class="stat stat-lg"><span class="k">At least one ${TIERS[TIERS.length - 1].label.toLowerCase()}</span>
-        <span class="v">${(100 * pMyth).toFixed(pMyth < 0.001 ? 3 : 1)}%</span>
-        <span class="sub">${oneIn(pMyth)} players</span></div>`;
-
-    // The whole curve, so the slider has context rather than three numbers in a vacuum.
-    const W = 760, H = 170, M = { l: 52, r: 12, t: 12, b: 28 };
-    const maxN = 10000, lgN = Math.log10(maxN);
-    const lgMax = Math.log10(1 + S[N - 1]);
-    const cx = k => M.l + (Math.log10(k) / lgN) * (W - M.l - M.r);
-    const cy = v => H - M.b - (Math.log10(1 + v) / lgMax) * (H - M.t - M.b);
-    const pts = [], band = [];
-    for (let k = 1; k <= maxN; k = k < 10 ? k + 1 : Math.round(k * 1.18)) {
-      pts.push(`${cx(k).toFixed(1)},${cy(bestAt(k, 0.5)).toFixed(1)}`);
-      band.push([cx(k), cy(bestAt(k, 0.9)), cy(bestAt(k, 0.1))]);
-    }
-    const top = band.map(b => `${b[0].toFixed(1)},${b[1].toFixed(1)}`).join(' ');
-    const bot = band.slice().reverse().map(b => `${b[0].toFixed(1)},${b[2].toFixed(1)}`).join(' ');
-    $('curve').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Typical best score against number of rolls">
-      <polygon class="cband" points="${top} ${bot}"/>
-      <polyline class="cline" points="${pts.join(' ')}"/>
-      <line class="cmark" x1="${cx(n).toFixed(1)}" y1="${M.t}" x2="${cx(n).toFixed(1)}" y2="${H - M.b}"/>
-      ${[1, 10, 100, 1000, 10000].map(k =>
-        `<text class="ax" x="${cx(k).toFixed(1)}" y="${H - 8}" text-anchor="middle">${k >= 1000 ? (k / 1000) + 'k' : k}</text>`).join('')}
-      <text class="axl" x="4" y="${M.t + 8}">best EP</text>
-    </svg>`;
-  }
-
-  // --- your rolls ---------------------------------------------------------
-  // Two independent readings of the same set: how good the single best roll was among
-  // players with that many rolls, and whether the whole set drifted high or low
-  // (percentiles are uniform, so their mean has a known spread).
-  function score(nums) {
-    const valid = nums.filter(n => Number.isInteger(n) && n >= 0 && n < N);
-    if (!valid.length) return null;
-    const rows = valid.map(n => ({ n, ep: EP[n], p: cdf(EP[n]) })).sort((a, b) => b.ep - a.ep);
-    const k = rows.length;
-    const best = rows[0];
-    const beatShare = Math.pow(best.p, k);
-    const meanP = rows.reduce((s, r) => s + r.p, 0) / k;
-    return { rows, k, best, beatShare, meanP,
-      z: (meanP - 0.5) / Math.sqrt(1 / 12 / k), par: bestAt(k, 0.5) };
-  }
-  const verdictOf = b => b >= 0.999 ? 'extraordinary' : b >= 0.99 ? 'very lucky'
-    : b >= 0.75 ? 'lucky' : b >= 0.25 ? 'about par' : b >= 0.01 ? 'unlucky' : 'brutal';
-
-  function analyse(nums, label) {
-    const st = score(nums);
-    if (!st) {
-      $('verdict').innerHTML = '<p class="err">No usable numbers - give me integers from 0 to 1,000,000.</p>';
-      return;
-    }
-    const { rows, k, best, beatShare, meanP, z, par } = st;
-    const verdict = verdictOf(beatShare);
-
-    $('verdict').innerHTML = `
-      <div class="vhead"><b>${label}</b><span>${fmt(k)} roll${k === 1 ? '' : 's'}</span></div>
-      <div class="vstats">
-        <div class="stat stat-lg"><span class="k">Best roll</span><span class="v">${compact(best.ep)}</span>
-          <span class="sub">EP · <a href="/?n=${best.n}">${best.n.toLocaleString()}</a>
-            · ${(100 * best.p).toFixed(3)}th percentile</span></div>
-        <div class="stat stat-lg"><span class="k">Luckier than</span><span class="v">${(100 * beatShare).toFixed(1)}%</span>
-          <span class="sub">of players with ${fmt(k)} rolls - <b>${verdict}</b></span></div>
-        <div class="stat stat-lg"><span class="k">Par for ${fmt(k)} rolls</span><span class="v">${compact(par)}</span>
-          <span class="sub">EP · what a median player's best would be</span></div>
-        <div class="stat stat-lg"><span class="k">Overall drift</span><span class="v">${z >= 0 ? '+' : ''}${z.toFixed(2)}σ</span>
-          <span class="sub">mean percentile ${(100 * meanP).toFixed(1)} vs 50 expected</span></div>
-      </div>
-      <div class="strip" title="every roll by percentile, left = worst">${
-        rows.slice().sort((a, b) => a.p - b.p).map(r =>
-          `<i style="left:${(100 * r.p).toFixed(3)}%;background:${tierOf(r.ep).accent}"
-            title="${r.n.toLocaleString()} · ${fmt(r.ep)} EP · ${(100 * r.p).toFixed(2)}th"></i>`).join('')}</div>
-      <div class="stripax"><span>worst possible</span><span>median</span><span>best possible</span></div>
-      <div class="vlist">${rows.slice(0, 8).map(r => {
-        const t = tierOf(r.ep);
-        return `<a class="vrow" href="/?n=${r.n}"><span class="vn">${r.n.toLocaleString()}</span>
-          <span class="pill" style="--tc:${t.accent}">${t.label}</span>
-          <span class="vp">${(100 * r.p).toFixed(2)}th</span>
-          <span class="ve">${fmt(r.ep)} EP</span></a>`;
-      }).join('')}</div>`;
-  }
-
-  $('paste-go').addEventListener('click', () => {
-    const nums = ($('paste').value.match(/\d+/g) || []).map(Number);
-    analyse(nums, 'Pasted rolls');
-  });
-  async function loadPlayer(u) {
-    const r = await fetch('/api/profile?u=' + encodeURIComponent(u));
-    const d = await r.json();
-    if (!r.ok || !d.scored) throw new Error(d.error || `could not load ${u}`);
-    return { username: d.username || u, nums: d.scored.map(x => x.number) };
-  }
-
-  // Several names rank the players against each other rather than pooling their rolls:
-  // pooling is what /u already does, and "who got luckier" only means anything per
-  // player anyway.
-  async function compare(names) {
-    const loaded = await Promise.all(names.map(u =>
-      loadPlayer(u).then(p => ({ ...p, st: score(p.nums) })).catch(e => ({ username: u, error: e.message }))));
-    const ok = loaded.filter(p => p.st).sort((a, b) => b.st.beatShare - a.st.beatShare);
-    const bad = loaded.filter(p => !p.st);
-    if (!ok.length) {
-      $('verdict').innerHTML = `<p class="err">${bad.map(p => p.error).join('; ')}</p>`;
-      return;
-    }
-    $('verdict').innerHTML = `
-      <div class="vhead"><b>${ok.length} players</b><span>ranked by how lucky their best roll was</span></div>
-      <div class="ctable">
-        <div class="crow chead"><span>Player</span><span>Rolls</span><span>Best</span>
-          <span>Luckier than</span><span>Drift</span></div>
-        ${ok.map(p => `<button type="button" class="crow" data-u="${p.username}">
-          <span class="cu">${p.username}</span>
-          <span>${fmt(p.st.k)}</span>
-          <span>${compact(p.st.best.ep)}</span>
-          <span class="cl">${(100 * p.st.beatShare).toFixed(1)}%<em>${verdictOf(p.st.beatShare)}</em></span>
-          <span>${p.st.z >= 0 ? '+' : ''}${p.st.z.toFixed(2)}σ</span>
-        </button>`).join('')}
-      </div>
-      <p class="muted small">Click a row for that player's full reading.</p>
-      ${bad.length ? `<p class="muted small">Could not load: ${bad.map(p => p.username).join(', ')}.</p>` : ''}`;
-    for (const b of $('verdict').querySelectorAll('[data-u]')) {
-      b.addEventListener('click', () => {
-        const p = ok.find(x => x.username === b.dataset.u);
-        analyse(p.nums, p.username);
-      });
-    }
-  }
-
-  $('user-form').addEventListener('submit', async e => {
-    e.preventDefault();
-    const names = [...new Set(($('user').value.match(/[A-Za-z0-9_.-]+/g) || []))].slice(0, 6);
-    if (!names.length) return;
-    $('verdict').innerHTML = '<div class="loading"><span class="spinner"></span>Loading rolls…</div>';
-    try {
-      if (names.length > 1) { await compare(names); return; }
-      const p = await loadPlayer(names[0]);
-      analyse(p.nums, p.username);
-    } catch (err) {
-      $('verdict').innerHTML = `<p class="err">${err.message}</p>`;
-    }
-  });
-  $('rolls').addEventListener('input', bestOfN);
-
-  betaBoot(WORKER_SRC).then(({ data }) => {
-    S = new Float64Array(data.sorted); EP = new Float64Array(data.ep); N = data.N;
-    $('page').classList.add('on');
-    $('head').innerHTML = `
-      <div class="stat stat-lg"><span class="k">Median roll</span><span class="v">${fmt(quantile(0.5))}</span>
-        <span class="sub">EP · half of all numbers score less</span></div>
-      <div class="stat stat-lg"><span class="k">Mean roll</span><span class="v">${
-        fmt(S.reduce((a, b) => a + b, 0) / N)}</span><span class="sub">EP · dragged up by the tail</span></div>
-      <div class="stat stat-lg"><span class="k">Top 1% starts at</span><span class="v">${fmt(quantile(0.99))}</span>
-        <span class="sub">EP</span></div>
-      <div class="stat stat-lg"><span class="k">Best possible</span><span class="v">${compact(S[N - 1])}</span>
-        <span class="sub">EP · one number in the range</span></div>`;
-    distribution(); odds(); bestOfN();
-    // ?u=name deep-links straight into an analysis, so a profile page can point here.
-    const u = new URLSearchParams(location.search).get('u');
-    if (u) { $('user').value = u; $('user-form').dispatchEvent(new Event('submit')); }
-  });
-}
-
-function renderLuck(ctx) {
-  const { CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE } = ctx;
-  const tiers = CARD_TIER_NAMES.map((key, i) => ({
-    label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
-    lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
-  }));
-
-  const css = `
-  #page { display:none; }
-  #page.on { display:block; }
-  #head { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(180px,100%),1fr)); gap:.6rem; margin-bottom:1.2rem; }
-  .card { margin-bottom:.9rem; }
-  .card > p.small { margin:-.35rem 0 .8rem; font-size:.8rem; color:var(--muted); line-height:1.6; }
-  svg { width:100%; height:auto; display:block; }
-  .ax { fill:var(--faint); font-size:10px; font-family:var(--mono); }
-  .axl { fill:var(--muted); font-size:11px; }
-  .band { opacity:.13; }
-  .tl { font-size:8.5px; font-weight:700; letter-spacing:.09em; opacity:.85; }
-  .bar { fill:var(--dim); }
-
-  .orow { display:grid; grid-template-columns:5.6rem 6.5rem 1fr 4.4rem 9rem; align-items:center; gap:.6rem;
-    padding:.32rem .2rem; font-size:.82rem; }
-  .orow .ol { color:var(--muted); font-family:var(--mono); font-size:.76rem; }
-  .orow .obar { height:8px; border-radius:var(--r-pill); background:var(--surface-2); overflow:hidden; }
-  .orow .obar i { display:block; height:100%; }
-  .orow .oval { text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums; }
-  .orow .oe { text-align:right; color:var(--faint); font-family:var(--mono); font-size:.75rem; }
-  @media (max-width:720px) { .orow { grid-template-columns:5.6rem 1fr 4.4rem; } .orow .ol, .orow .oe { display:none; } }
-
-  #curve { margin-top:.9rem; }
-  #bon { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(130px,100%),1fr)); gap:.5rem; }
-  #bon .stat { min-width:0; overflow-wrap:anywhere; }
-  .slider { display:flex; align-items:center; gap:.7rem; margin-bottom:.8rem; }
-  .slider input { flex:1; }
-  .slider b { font-family:var(--mono); min-width:4rem; text-align:right; }
-  .cband { fill:color-mix(in srgb, var(--accent) 18%, transparent); }
-  .cline { fill:none; stroke:var(--accent); stroke-width:1.6; }
-  .cmark { stroke:var(--hl); stroke-width:1.2; stroke-dasharray:3 3; }
-
-  .inputs { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:.8rem; margin-bottom:.9rem; }
-  @media (max-width:720px) { .inputs { grid-template-columns:minmax(0,1fr); } }
-  .inputs label { display:block; font-size:.72rem; letter-spacing:.06em; text-transform:uppercase;
-    color:var(--faint); font-weight:600; margin-bottom:.3rem; }
-  #user-form { display:flex; gap:.5rem; }
-  #user { flex:1; min-width:0; }
-  #paste { width:100%; height:64px; resize:vertical; font-family:var(--mono); font-size:.8rem; }
-  #paste-go { margin-top:.4rem; }
-
-  .vhead { display:flex; align-items:baseline; gap:.6rem; margin-bottom:.7rem; }
-  .vhead b { font-size:1rem; }
-  .vhead span { color:var(--muted); font-size:.82rem; }
-  .vstats { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(160px,100%),1fr)); gap:.5rem; margin-bottom:1rem; }
-  .vstats .stat { min-width:0; overflow-wrap:anywhere; }
-  .strip { position:relative; height:26px; border-radius:var(--r-sm); background:
-    linear-gradient(90deg, var(--surface-2), var(--surface-3)); border:1px solid var(--border); }
-  .strip i { position:absolute; top:3px; width:3px; height:18px; border-radius:2px; margin-left:-1.5px; opacity:.9; }
-  .stripax { display:flex; justify-content:space-between; margin:.25rem 0 .9rem; font-size:.7rem; color:var(--faint); }
-  .vrow { display:flex; align-items:center; gap:.6rem; padding:.3rem .35rem; text-decoration:none;
-    border-radius:var(--r-sm); color:var(--dim); }
-  .vrow:hover { background:var(--surface-2); color:var(--text); }
-  .vrow .vn { flex:1; font-family:var(--mono); font-size:.88rem; }
-  .vrow .vp, .vrow .ve { font-family:var(--mono); font-size:.76rem; color:var(--faint); }
-  .loading { display:flex; align-items:center; gap:.6rem; color:var(--muted); font-size:.86rem; }
-  .ctable { display:flex; flex-direction:column; gap:1px; }
-  .crow { display:grid; grid-template-columns:minmax(0,1.6fr) 3.6rem 4.6rem 6.4rem 4rem;
-    align-items:center; gap:.5rem; width:100%; text-align:right; padding:.4rem .5rem; font-size:.84rem;
-    font-weight:400; color:var(--dim); background:transparent; border:0; border-radius:var(--r-sm);
-    font-variant-numeric:tabular-nums; font-family:var(--mono); }
-  .crow:hover { background:var(--surface-2); border:0; color:var(--text); }
-  .crow .cu { text-align:left; font-family:var(--font); overflow:hidden; text-overflow:ellipsis;
-    white-space:nowrap; }
-  .crow .cl { color:var(--hl-lt); }
-  .crow .cl em { display:block; font-style:normal; font-size:.68rem; color:var(--faint);
-    font-family:var(--font); }
-  .crow.chead { color:var(--faint); font-size:.7rem; letter-spacing:.06em; text-transform:uppercase;
-    font-family:var(--font); border-bottom:1px solid var(--border); border-radius:0; }
-  .crow.chead:hover { background:transparent; }
-  .crow.chead > span:first-child { text-align:left; }
-  @media (max-width:600px) { .crow { grid-template-columns:minmax(0,1.4fr) 4.4rem 6rem; }
-    .crow > span:nth-child(2), .crow > span:nth-child(5) { display:none; } }`;
-
-  const body = `<div class="wrap">
-  <div class="tool-head">
-    <h1>Luck Lab <span class="beta-tag">beta</span></h1>
-    <a class="tool-back" href="/beta">&larr; Beta lab</a>
-  </div>
-  <p class="tag">What a roll is worth before you make it - and how lucky yours actually were.</p>
-
-  <div id="page">
-    <div id="head"></div>
-
-    <section class="card">
-      <h2>What a single roll scores</h2>
-      <p class="small">Every one of the 1,000,001 legal rolls, binned by EP on a log axis, with the card
-        tiers shaded behind. Nearly everything lands in the crowded middle; the tiers that matter are
-        the thin tail on the right.</p>
-      <div id="dist"></div>
-    </section>
-
-    <section class="card">
-      <h2>Tier odds per roll</h2>
-      <p class="small">Read down the percentages: 1%, 4%, 5%, 15%, 25%, 49%. The card tiers are not
-        placed at round EP values at all - they are cut at round <b>percentiles</b> of this exact
-        distribution, which is why the thresholds themselves look so arbitrary.</p>
-      <div id="odds"></div>
-    </section>
-
-    <section class="card">
-      <h2>Best of N rolls</h2>
-      <p class="small">The best of N independent rolls is below a score with probability F(score) to the
-        power N - so the whole curve of "how good should my best be by now" is exact, not simulated.</p>
-      <div class="slider"><span class="muted">Rolls</span>
-        <input id="rolls" type="range" min="1" max="2000" value="50">
-        <b id="rollsv">50</b></div>
-      <div id="bon"></div>
-      <div id="curve"></div>
-    </section>
-
-    <section class="card">
-      <h2>How lucky were yours?</h2>
-      <p class="small">Look up a player, or paste any list of numbers. Each roll is scored against the
-        exact distribution above, so nothing here is an estimate. Name several players (up to six) to
-        rank them against each other instead.</p>
-      <div class="inputs">
-        <div><label for="user">rngdle player</label>
-          <form id="user-form"><input id="user" type="text" placeholder="username, or several to compare"
-            autocomplete="off"><button type="submit" class="btn-primary btn-sm">Check</button></form></div>
-        <div><label for="paste">or paste rolls</label>
-          <textarea id="paste" placeholder="123456, 696969, 100000&#10;one per line or comma separated"></textarea>
-          <button type="button" id="paste-go" class="btn-sm">Analyse</button></div>
-      </div>
-      <div id="verdict"></div>
-    </section>
-  </div>
-
-  <footer>
-    <b>Luckier than</b> is F(your best) raised to the power of your roll count: the exact share of
-    players with the same number of rolls whose best would come in below yours. <b>Overall drift</b> is
-    a z-score on the mean percentile of every roll - percentiles are uniform by construction, so their
-    mean has a known spread and any real streak of good or bad luck shows up as sigma. Player rolls come
-    from rngdle's public API and are scored here, locally.
-  </footer>
-</div>
-${overlayHTML('Then sorting all 1,000,001 scores into the exact distribution behind every number here.')}`;
-
-  const script = `${BETA_BOOT_JS}
-const __W = ${JSON.stringify(workerSrc(luckWorker))};
-(${luckClient.toString()})(__W, ${JSON.stringify(tiers)});`;
-
-  return betaShell({ title: 'RNGdle - Luck Lab', width: '900px', slug: 'luck', css, body, script });
 }
 
 // ---------------------------------------------------------------------------
@@ -3610,7 +3133,7 @@ function collectorClient(WORKER_SRC, META) {
       <div class="stat stat-lg"><span class="k">Still missing</span><span class="v">${(R - e).toFixed(1)}</span>
         <span class="sub">${missing.length} of them more likely absent than present</span></div>`;
     $('missing').innerHTML = missing.slice(0, 10).map(m =>
-      `<a class="mrow" href="/badges#${META[m.i][5]}"><span class="me">${META[m.i][1]}</span>
+      `<a class="mrow" href="/badges/${META[m.i][5].toLowerCase()}"><span class="me">${META[m.i][1]}</span>
         <span class="ml">${META[m.i][0]}</span>
         <span class="mv">${(100 * m.p).toFixed(1)}% absent</span></a>`).join('') ||
       '<p class="muted small">Every badge is more likely to be in the collection than not.</p>';
@@ -3632,7 +3155,7 @@ function collectorClient(WORKER_SRC, META) {
         ${solo.length - 6} more. Each is a 1-in-${fmt(N)} roll on its own, and between them they set
         the floor on everything below.</p>` : '') +
       rest.slice(0, 12).map(r =>
-        `<a class="mrow" href="/badges#${META[r.i][5]}"><span class="me">${META[r.i][1]}</span>
+        `<a class="mrow" href="/badges/${META[r.i][5].toLowerCase()}"><span class="me">${META[r.i][1]}</span>
           <span class="ml">${META[r.i][0]}<em>${fmt(EARN[r.i])} numbers earn it</em></span>
           <span class="mv">${compact(1 / r.p)} rolls</span></a>`).join('');
   }
@@ -3667,7 +3190,7 @@ function collectorClient(WORKER_SRC, META) {
       <div class="stat stat-lg"><span class="k">Versus rolling</span><span class="v">${
         compact(T[T.length >> 1] / cover.length)}x</span><span class="sub">fewer numbers than the typical run</span></div>`;
     $('coverlist').innerHTML = cover.map(([n, gain], i) =>
-      `<a class="crow" href="/?n=${n}"><span class="ci">${i + 1}</span>
+      `<a class="crow" href="/n/${n}"><span class="ci">${i + 1}</span>
         <span class="cn">${n.toLocaleString()}</span>
         <span class="cg">+${gain}</span></a>`).join('');
   }
@@ -3734,7 +3257,7 @@ function renderCollector(ctx) {
   const body = `<div class="wrap">
   <div class="tool-head">
     <h1>The Collector <span class="beta-tag">beta</span></h1>
-    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+    <a class="tool-back" href="/other">&larr; Other tools</a>
   </div>
   <p class="tag">How many rolls it takes to earn every badge - and how few numbers it would take if you
     could choose them.</p>
@@ -3927,7 +3450,7 @@ function speciesClient(WORKER_SRC, TIERS, META, PAL) {
   function top(list) {
     $('top').innerHTML = list.map((s, i) => {
       const t = tierOf(s.ep);
-      return `<a class="srow" href="/?n=${s.n}">
+      return `<a class="srow" href="/n/${s.n}">
         <span class="sr">${i + 1}</span>
         <span class="sn">${s.n.toLocaleString()}<em>${s.badges} badge${s.badges === 1 ? '' : 's'} · ${fmt(s.ep)} EP</em></span>
         <span class="pill" style="--tc:${t.accent}">${t.label}</span>
@@ -3960,12 +3483,12 @@ function speciesClient(WORKER_SRC, TIERS, META, PAL) {
           <span class="sub">scores exactly this way</span></div>
       </div>
       ${others.length ? `<div class="fsame">Same badge set: ${
-        others.map(x => `<a href="/?n=${x}">${x.toLocaleString()}</a>`).join(' · ')}${
+        others.map(x => `<a href="/n/${x}">${x.toLocaleString()}</a>`).join(' · ')}${
         m.size > others.length + 1 ? ` and ${fmt(m.size - others.length - 1)} more` : ''}</div>` : ''}
       <div class="fset"><b>The set itself</b> - ${m.badges.length} badges, ${fmt(m.ep)} EP after
         supersession. This exact combination is what defines the kind.
         <div class="pills">${m.badges.slice().sort((a, b) => META[b][2] - META[a][2]).map(i =>
-          `<a class="bpill" href="/badges#${META[i][5]}" style="--tc:${PAL[META[i][3]]}"
+          `<a class="bpill" href="/badges/${META[i][5].toLowerCase()}" style="--tc:${PAL[META[i][3]]}"
             title="${META[i][0]} · ${fmt(META[i][2])} EP">${META[i][1]} ${META[i][0]}</a>`).join('')}</div>
       </div>`;
   }
@@ -4053,7 +3576,7 @@ function renderSpecies(ctx) {
   const body = `<div class="wrap">
   <div class="tool-head">
     <h1>Species <span class="beta-tag">beta</span></h1>
-    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+    <a class="tool-back" href="/other">&larr; Other tools</a>
   </div>
   <p class="tag">Two numbers with the same badges are the same thing to the scorer. Grouped that way,
     the range turns into a population.</p>
@@ -4419,7 +3942,7 @@ void main() {
       <div class="rd-row"><span>EP</span><b>${fmt(Math.round(EP[n]))}</b></div>
       <div class="rd-row"><span>Badges</span><b>${CNT[n]}</b></div>
       <div class="rd-row"><span>Score rank</span><b>${fmt(N - RANK[n])}</b></div>
-      <a class="rd-open" href="/?n=${n}">Open on the calculator &rarr;</a>`;
+      <a class="rd-open" href="/n/${n}">Open in the sandbox &rarr;</a>`;
   }
 
   function cellAt(ev) {
@@ -4664,7 +4187,7 @@ function renderProjections(ctx) {
     <h1>Projections <span class="beta-tag">beta</span></h1>
     <div class="sub">All 1,000,000 numbers, laid out five ways. The layout changes under them,
       so you can watch where a set of numbers travels.</div>
-    <a class="back" href="/beta">&larr; Beta lab</a>
+    <a class="back" href="/other">&larr; Other tools</a>
   </div>
   <div id="layouts">${names.map((n, i) =>
     `<button type="button" data-l="${i}"${i === 0 ? ' class="on"' : ''}>${n}</button>`).join('')}</div>
@@ -4698,325 +4221,6 @@ const __W = ${JSON.stringify(workerSrc(projectionsWorker))};
     title: 'RNGdle - Projections', slug: 'projections', full: true, css, body, script,
     viewport: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no',
   });
-}
-
-// ---------------------------------------------------------------------------
-// /beta/nearmiss - what one different digit would have been worth.
-//
-// Treat every number as its six-digit zero-padded form and it has exactly 54
-// neighbours: six positions times nine other digits, every one of them a legal roll.
-// That turns the range into a graph, and the interesting questions are local ones -
-// was your roll a peak or a valley, and how far off was the peak next door?
-//
-// The global pass is 54 million lookups, which is why it lives in the worker; after
-// that the page holds the EP array and any single number's neighbourhood is 54 reads.
-// ---------------------------------------------------------------------------
-
-function nearmissWorker() {
-  const N = 1000000;
-  const POW = [100000, 10000, 1000, 100, 10, 1];
-
-  self.onmessage = async ev => {
-    if (ev.data.cmd !== 'init') return;
-    try {
-      const swept = await betaSweep(ev.data.origin, 0.5);
-      const ep = new Float64Array(N);
-      for (let i = 0; i < N; i++) ep[i] = swept.ep[i];
-      const mythic = ev.data.mythic;
-
-      self.postMessage({ type: 'progress', pct: 0.55, msg: 'Walking 54 million neighbours…' });
-      let peaks = 0, valleys = 0, nearMythic = 0, sumBest = 0;
-      // Two small top-lists, kept by insertion - a full sort of a million candidates
-      // to show ten rows would cost more than the whole pass.
-      const cruel = [], summits = [];
-      const keep = (list, item, cap, key) => {
-        if (list.length < cap) { list.push(item); list.sort((a, b) => b[key] - a[key]); return; }
-        if (item[key] <= list[cap - 1][key]) return;
-        list[cap - 1] = item;
-        list.sort((a, b) => b[key] - a[key]);
-      };
-
-      for (let n = 0; n < N; n++) {
-        if ((n & 0x1ffff) === 0) self.postMessage({ type: 'progress', pct: 0.55 + 0.45 * (n / N) });
-        const mine = ep[n];
-        let best = -1, bestN = -1, worse = 0;
-        for (let p = 0; p < 6; p++) {
-          const pw = POW[p], cur = ((n / pw) | 0) % 10, base = n - cur * pw;
-          for (let d = 0; d < 10; d++) {
-            if (d === cur) continue;
-            const e = ep[base + d * pw];
-            if (e > best) { best = e; bestN = base + d * pw; }
-            if (e < mine) worse++;
-          }
-        }
-        sumBest += best;
-        if (worse === 54) { peaks++; keep(summits, { n, ep: mine, ep2: 0 }, 10, 'ep'); }
-        if (worse === 0) valleys++;
-        if (best >= mythic) nearMythic++;
-        // A "near miss" is a poor roll with a spectacular neighbour. Ratio, so it is
-        // not just a list of the ten biggest numbers in the range.
-        if (mine < mythic) keep(cruel, { n, ep: mine, best, to: bestN, ratio: best / Math.max(1, mine) }, 10, 'ratio');
-      }
-
-      self.postMessage({ type: 'ready', ep: ep.buffer, N, peaks, valleys, nearMythic,
-        meanBest: sumBest / N, cruel, summits }, [ep.buffer]);
-    } catch (e) {
-      self.postMessage({ type: 'error', message: (e && e.message) || String(e) });
-    }
-  };
-}
-
-function nearmissClient(WORKER_SRC, TIERS) {
-  const $ = id => document.getElementById(id);
-  const N = 1000000, POW = [100000, 10000, 1000, 100, 10, 1];
-  const fmt = n => Math.round(n).toLocaleString();
-  // Signed: the board's cells are mostly negative deltas, and an eight-digit one does
-  // not fit in a 40px cell.
-  const compact = n => {
-    const a = Math.abs(n), sign = n < 0 ? '-' : '';
-    return a >= 1e6 ? sign + (a / 1e6).toFixed(2) + 'M'
-      : a >= 1e4 ? sign + (a / 1e3).toFixed(1) + 'k' : sign + fmt(a);
-  };
-  const tierOf = ep => { let x = TIERS[0]; for (const y of TIERS) if (ep >= y.lo) x = y; return x; };
-  let EP = null, cur = 123456;
-
-  function board(n) {
-    const mine = EP[n], s = String(n).padStart(6, '0');
-    const rows = [];
-    let best = -1, bestN = -1, worst = Infinity;
-    const cells = [];
-    for (let p = 0; p < 6; p++) {
-      const pw = POW[p], curD = Number(s[p]), base = n - curD * pw;
-      for (let d = 0; d < 10; d++) {
-        const m = base + d * pw;
-        const e = EP[m];
-        if (d !== curD && e > best) { best = e; bestN = m; }
-        if (d !== curD && e < worst) worst = e;
-        cells.push({ p, d, m, e, self: d === curD });
-      }
-    }
-    // Mark every cell tied at the extreme, not just the first one found - with 54
-    // neighbours the worst score in particular is often shared, and picking one
-    // arbitrarily would claim a distinction the numbers do not make.
-    for (const c of cells) {
-      // Only mark an extreme when it is actually one. On a local peak every swap loses,
-      // so a "best" star would be pointing at the least-bad way to make things worse;
-      // in a local valley the same is true of the "worst" caret in reverse.
-      c.best = !c.self && c.e === best && best > mine;
-      c.worst = !c.self && c.e === worst && worst < mine && best !== worst;
-    }
-    // Colour on the log ratio against the number itself, so the scale means the same
-    // thing for a 3,000 EP roll and a 3,000,000 one.
-    const lr = e => Math.log10(Math.max(1, e) / Math.max(1, mine));
-    const span = Math.max(0.35, ...cells.map(c => Math.abs(lr(c.e))));
-    const colour = c => {
-      if (c.self) return 'background:var(--hl);color:var(--on-accent)';
-      const t = lr(c.e) / span;
-      const a = Math.min(0.85, Math.abs(t) * 0.9 + 0.08);
-      return t >= 0
-        ? `background:color-mix(in srgb, var(--ok) ${(a * 100).toFixed(0)}%, var(--surface-2));color:var(--text)`
-        : `background:color-mix(in srgb, var(--bad) ${(a * 70).toFixed(0)}%, var(--surface-2));color:var(--dim)`;
-    };
-
-    $('board').innerHTML = [0, 1, 2, 3, 4, 5].map(p => `<div class="col">
-      <div class="chead">${s[p]}</div>
-      <div class="cells">${cells.filter(c => c.p === p).map(c =>
-        `<button type="button" class="cell${c.self ? ' self' : c.best ? ' best' : c.worst ? ' worst' : ''}"
-          data-n="${c.m}" style="${colour(c)}"
-          title="${c.m.toLocaleString()} · ${fmt(c.e)} EP${
-            c.best ? ' · the best swap available' : c.worst ? ' · the worst swap available' : ''}">${
-          c.best ? '<span class="mk">&#9733;</span>' : c.worst ? '<span class="mk">&#9660;</span>' : ''}${c.d}<em>${
-            c.self ? 'this' : (c.e >= mine ? '+' : '') + compact(c.e - mine)}</em></button>`).join('')}</div>
-      <div class="cfoot">${['100k', '10k', '1k', '100', '10', '1'][p]}</div>
-    </div>`).join('');
-
-    const t = tierOf(mine), bt = tierOf(best);
-    const worse = cells.filter(c => !c.self && c.e < mine).length;
-    $('cur').innerHTML = `
-      <div class="stat stat-lg"><span class="k">This number</span><span class="v">${compact(mine)}</span>
-        <span class="sub">EP · <span class="pill" style="--tc:${t.accent}">${t.label}</span></span></div>
-      <div class="stat stat-lg"><span class="k">Best neighbour</span><span class="v">${compact(best)}</span>
-        <span class="sub">EP · <a href="/?n=${bestN}">${bestN.toLocaleString()}</a>
-          · <span class="pill" style="--tc:${bt.accent}">${bt.label}</span></span></div>
-      <div class="stat stat-lg"><span class="k">One digit gains</span><span class="v">${
-        best > mine ? '+' + compact(best - mine) : 'nothing'}</span>
-        <span class="sub">${best > mine ? (best / Math.max(1, mine)).toFixed(1) + 'x this score' : 'this is a local peak'}</span></div>
-      <div class="stat stat-lg"><span class="k">Better than</span><span class="v">${worse}</span>
-        <span class="sub">of its 54 neighbours</span></div>`;
-    $('title').innerHTML = `<span class="tn">${n.toLocaleString()}</span>
-      <a class="tlink" href="/?n=${n}">open on the calculator &rarr;</a>`;
-    cur = n;
-    history.replaceState(null, '', '?n=' + n);
-  }
-
-  function set(n) {
-    if (!Number.isInteger(n) || n < 0 || n >= N) return;
-    board(n);
-  }
-
-  document.addEventListener('click', e => {
-    const b = e.target.closest('[data-n]');
-    if (b) { set(Number(b.dataset.n)); scrollTo({ top: 0, behavior: 'smooth' }); }
-  });
-  $('go').addEventListener('submit', e => {
-    e.preventDefault();
-    set(parseInt(($('n').value || '').replace(/\D/g, ''), 10));
-  });
-  $('rand').addEventListener('click', () => {
-    const n = Math.floor(Math.random() * N);
-    $('n').value = n;
-    set(n);
-  });
-
-  betaBoot(WORKER_SRC, null, { mythic: TIERS[TIERS.length - 1].lo }).then(({ data }) => {
-    EP = new Float64Array(data.ep);
-    $('page').classList.add('on');
-    $('global').innerHTML = `
-      <div class="stat stat-lg"><span class="k">One digit from mythic</span><span class="v">${
-        (100 * data.nearMythic / data.N).toFixed(1)}%</span>
-        <span class="sub">${fmt(data.nearMythic)} numbers have a mythic neighbour</span></div>
-      <div class="stat stat-lg"><span class="k">Local peaks</span><span class="v">${fmt(data.peaks)}</span>
-        <span class="sub">beat all 54 of their neighbours</span></div>
-      <div class="stat stat-lg"><span class="k">Local valleys</span><span class="v">${fmt(data.valleys)}</span>
-        <span class="sub">lose to all 54</span></div>
-      <div class="stat stat-lg"><span class="k">Mean best neighbour</span><span class="v">${
-        compact(data.meanBest)}</span><span class="sub">EP · against a mean roll of 21.5k</span></div>`;
-
-    const row = (n, right, sub) => {
-      const t = tierOf(EP[n]);
-      return `<button type="button" class="nrow" data-n="${n}">
-        <span class="nn">${n.toLocaleString()}</span>
-        <span class="pill" style="--tc:${t.accent}">${t.label}</span>
-        <span class="ns">${sub}</span><span class="nv">${right}</span></button>`;
-    };
-    $('cruel').innerHTML = data.cruel.map(c =>
-      row(c.n, (c.ratio >= 1000 ? compact(c.ratio) : Math.round(c.ratio)) + 'x',
-        `${fmt(c.ep)} EP, next door ${compact(c.best)}`)).join('');
-    $('summits').innerHTML = data.summits.map(s =>
-      row(s.n, compact(s.ep) + ' EP', 'beats every neighbour')).join('');
-
-    const q = parseInt(new URLSearchParams(location.search).get('n') || '', 10);
-    const start = Number.isInteger(q) && q >= 0 && q < N ? q : 123456;
-    $('n').value = start;
-    set(start);
-  });
-}
-
-function renderNearMiss(ctx) {
-  const { CARD_TIERS, CARD_TIER_NAMES, TIER_PALETTE } = ctx;
-  const tiers = CARD_TIER_NAMES.map((key, i) => ({
-    label: TIER_PALETTE[key].label, accent: TIER_PALETTE[key].accent,
-    lo: i === 0 ? 0 : CARD_TIERS[i - 1][0],
-  }));
-
-  const css = `
-  #page { display:none; }
-  #page.on { display:block; }
-  .card { margin-bottom:.9rem; }
-  .card > p.small { margin:-.35rem 0 .8rem; font-size:.8rem; color:var(--muted); line-height:1.6; }
-  .bar { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; margin-bottom:1rem; }
-  #go { display:flex; gap:.5rem; }
-  #n { width:9rem; }
-  #title { display:flex; align-items:baseline; gap:.8rem; flex-wrap:wrap; margin-bottom:.9rem; }
-  #title .tn { font-family:var(--mono); font-size:2rem; font-weight:600; letter-spacing:.06em; }
-  #title .tlink { font-size:.8rem; }
-
-  .cols { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,290px); gap:1rem; align-items:start; }
-  @media (max-width:900px) { .cols { grid-template-columns:minmax(0,1fr); } }
-  #board { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:.5rem; }
-  .col { display:flex; flex-direction:column; gap:.3rem; min-width:0; }
-  .chead { height:28px; display:flex; align-items:center; justify-content:center;
-    font-family:var(--mono); font-size:1.1rem; font-weight:700; color:var(--hl-lt); }
-  .cells { display:flex; flex-direction:column; gap:2px; }
-  .cell { position:relative; display:flex; flex-direction:column; align-items:center;
-    justify-content:center; gap:1px; height:38px; padding:0; border:1px solid transparent;
-    border-radius:var(--r-sm); font-family:var(--mono); font-size:.95rem; font-weight:600; }
-  .cell em { font-style:normal; font-size:.6rem; font-weight:500; opacity:.9; letter-spacing:-.02em; }
-  .cell:hover { border-color:var(--text); }
-  .cell.self { font-weight:800; }
-  /* The two extremes, after :hover so the marking survives the pointer. A star for the
-     best swap and a caret for the worst - a star on the worst cell reads as praise. */
-  /* The ring needs a dark line between it and the fill: the best cell is the greenest
-     one on the board and the worst the reddest, so a same-hue ring sat straight on top
-     of its own colour and vanished. The mark itself goes near-white for the same
-     reason - it has to read on a saturated fill of either colour. */
-  .cell.best, .cell.worst { box-shadow:inset 0 0 0 1px rgba(8,9,12,.75); }
-  .cell.best { border-color:var(--ok); outline:1.5px solid var(--ok); outline-offset:0; }
-  .cell.worst { border-color:var(--bad); outline:1.5px solid var(--bad); outline-offset:0; }
-  .cell .mk { position:absolute; top:0; right:2px; font-size:.66rem; line-height:1.2;
-    font-weight:700; color:var(--text); text-shadow:0 0 3px rgba(8,9,12,.95), 0 1px 1px rgba(8,9,12,.9);
-    pointer-events:none; }
-  .cfoot { text-align:center; font-size:.66rem; color:var(--faint); font-family:var(--mono); }
-  @media (max-width:640px) { .cell { height:30px; font-size:.8rem; } .cell em { display:none; } }
-
-  #cur, #global { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(140px,100%),1fr)); gap:.5rem; }
-  #cur .stat, #global .stat { min-width:0; overflow-wrap:anywhere; }
-  #global { margin-bottom:1.2rem; }
-  .two { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(330px,100%),1fr)); gap:.9rem; }
-
-  .nrow { display:flex; align-items:center; gap:.5rem; width:100%; text-align:left; padding:.34rem .35rem;
-    font-size:.84rem; font-weight:400; color:var(--dim); background:transparent; border:0;
-    border-radius:var(--r-sm); }
-  .nrow:hover { background:var(--surface-2); border:0; color:var(--text); }
-  .nrow .nn { flex:0 0 4.6rem; font-family:var(--mono); }
-  .nrow .ns { flex:1; min-width:0; font-size:.74rem; color:var(--faint); font-family:var(--mono);
-    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .nrow .nv { flex:0 0 auto; font-family:var(--mono); font-size:.8rem; color:var(--hl-lt); }`;
-
-  const body = `<div class="wrap">
-  <div class="tool-head">
-    <h1>Near Misses <span class="beta-tag">beta</span></h1>
-    <a class="tool-back" href="/beta">&larr; Beta lab</a>
-  </div>
-  <p class="tag">Every number has exactly 54 neighbours - six digit positions, nine other digits each.
-    This is what each of them would have scored.</p>
-
-  <div id="page">
-    <div class="bar">
-      <form id="go"><input id="n" type="text" inputmode="numeric" placeholder="a number"
-        autocomplete="off"><button type="submit" class="btn-primary btn-sm">Show</button></form>
-      <button type="button" id="rand" class="btn-sm">Random roll</button>
-    </div>
-
-    <div id="title"></div>
-    <div class="cols">
-      <section class="card"><div id="board"></div></section>
-      <div id="cur"></div>
-    </div>
-
-    <h2 class="eyebrow" style="margin-top:1.6rem">Across the whole range</h2>
-    <div id="global"></div>
-
-    <div class="two">
-      <section class="card"><h2>Cruellest near misses</h2>
-        <p class="small">Ordinary numbers with a spectacular neighbour - ranked by how many times
-          better one different digit would have been.</p>
-        <div id="cruel"></div></section>
-      <section class="card"><h2>Highest local peaks</h2>
-        <p class="small">Numbers that beat all 54 of their neighbours, best first. Nothing one digit
-          away from these is worth more.</p>
-        <div id="summits"></div></section>
-    </div>
-  </div>
-
-  <footer>
-    Neighbours are taken on the <b>six-digit zero-padded</b> form, so 69 is 000069 and changing its
-    leading digit gives 100069 - every one of the 54 is a legal roll in 0-999,999. Green means that
-    digit would have scored more than the number you are looking at, red less, and the shade is the
-    log ratio, so the scale reads the same for a small score and a huge one. The outlined cells are
-    the extremes worth acting on: <b>&#9733;</b> the biggest gain available and <b>&#9660;</b> the
-    biggest loss. Each marks every cell tied at that value rather than picking one, so several can be
-    outlined at once - and neither appears unless it is real, so a number that beats all 54 of its
-    neighbours shows no star at all.
-  </footer>
-</div>
-${overlayHTML('Then walking all 54 million neighbour pairs to find the peaks and the near misses.')}`;
-
-  const script = `${BETA_BOOT_JS}
-const __W = ${JSON.stringify(workerSrc(nearmissWorker))};
-(${nearmissClient.toString()})(__W, ${JSON.stringify(tiers)});`;
-
-  return betaShell({ title: 'RNGdle - Near Misses', width: '1000px', slug: 'nearmiss', css, body, script });
 }
 
 // ---------------------------------------------------------------------------
@@ -5211,7 +4415,7 @@ function renderAnatomy() {
   const body = `<div class="wrap">
   <div class="tool-head">
     <h1>Anatomy <span class="beta-tag">beta</span></h1>
-    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+    <a class="tool-back" href="/other">&larr; Other tools</a>
   </div>
   <p class="tag">Which plain properties of a number actually move its score - and which ones sound
     like they should and do not.</p>
@@ -5414,7 +4618,7 @@ function contactClient(WORKER_SRC, META, PAL) {
   function render() {
     const q = $('q').value.trim().toLowerCase();
     const list = order().filter(i => !q || META[i][0].toLowerCase().includes(q));
-    $('sheet').innerHTML = list.map(i => `<a class="tile" href="/grid#${encodeURIComponent(META[i][0])}"
+    $('sheet').innerHTML = list.map(i => `<a class="tile" href="/grid/${META[i][5].toLowerCase()}"
       title="${META[i][0]} - ${pctf(100 * TOTAL[i] / N)} of numbers, open on /grid"
       style="--tc:${PAL[META[i][3]]}">
       <canvas width="${T}" height="${T}" data-i="${i}"></canvas>
@@ -5480,7 +4684,7 @@ function renderContact(ctx) {
   const body = `<div class="wrap">
   <div class="tool-head">
     <h1>Contact Sheet <span class="beta-tag">beta</span></h1>
-    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+    <a class="tool-back" href="/other">&larr; Other tools</a>
   </div>
   <p class="tag">Every badge's map, all at once. Across is n mod 1000, down is n / 1000 - the same
     frame as /grid, one hundredth the size.</p>
@@ -5583,7 +4787,7 @@ function collectionClient(META, TIERS, PAL) {
 
     $('grid').innerHTML = order().map(i => {
       const m = META[i], mine = have[i];
-      return `<a class="cb${mine ? ' on' : ''}" href="/badges#${m[5]}" style="--tc:${PAL[m[3]]}"
+      return `<a class="cb${mine ? ' on' : ''}" href="/badges/${m[5].toLowerCase()}" style="--tc:${PAL[m[3]]}"
         title="${m[0]} - ${pctf(m[6])} of numbers earn it${mine ? '' : ' - not yet'}">
         <span class="ce">${m[1]}</span><span class="cn">${m[0]}</span></a>`;
     }).join('');
@@ -5594,7 +4798,7 @@ function collectionClient(META, TIERS, PAL) {
     const soon = missing.map(i => ({ i, p: META[i][6] / 100 }))
       .sort((a, b) => b.p - a.p);
     const again = Math.max(rolls, 1);
-    $('next').innerHTML = soon.slice(0, 12).map(x => `<a class="mrow" href="/badges#${META[x.i][5]}">
+    $('next').innerHTML = soon.slice(0, 12).map(x => `<a class="mrow" href="/badges/${META[x.i][5].toLowerCase()}">
       <span class="me">${META[x.i][1]}</span>
       <span class="ml">${META[x.i][0]}<em>${pctf(META[x.i][6])} of numbers</em></span>
       <span class="mv">${x.p > 0 ? compact(1 / x.p) + ' rolls' : 'unreachable'}
@@ -5602,7 +4806,7 @@ function collectionClient(META, TIERS, PAL) {
       || '<p class="muted small">Nothing left to collect.</p>';
 
     const wall = soon.slice(-8).reverse();
-    $('wall').innerHTML = wall.map(x => `<a class="mrow" href="/badges#${META[x.i][5]}">
+    $('wall').innerHTML = wall.map(x => `<a class="mrow" href="/badges/${META[x.i][5].toLowerCase()}">
       <span class="me">${META[x.i][1]}</span>
       <span class="ml">${META[x.i][0]}<em>${pctf(META[x.i][6])} of numbers</em></span>
       <span class="mv">${x.p > 0 ? compact(1 / x.p) + ' rolls' : 'unreachable'}</span></a>`).join('');
@@ -5726,7 +4930,7 @@ function renderCollection(ctx) {
   const body = `<div class="wrap">
   <div class="tool-head">
     <h1>Your Collection <span class="beta-tag">beta</span></h1>
-    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+    <a class="tool-back" href="/other">&larr; Other tools</a>
   </div>
   <p class="tag">Which of the 233 badges you have, which you do not, and how long the ones you are
     missing would realistically take.</p>
@@ -6394,7 +5598,7 @@ function renderBoxes(ctx, shared) {
   const body = `<div class="wrap">
   <div class="tool-head">
     <h1>Box Lab <span class="beta-tag">beta</span></h1>
-    <a class="tool-back" href="/beta">&larr; Beta lab</a>
+    <a class="tool-back" href="/other">&larr; Other tools</a>
   </div>
 ${banner}
 
@@ -7259,7 +6463,6 @@ export function renderSharedBox(ctx, shared) {
 }
 
 export function handleBeta(path, ctx) {
-  if (path === '/beta' || path === '/beta/') return renderBetaIndex();
   if (!path.startsWith('/beta/')) return null;
   const slug = path.slice(6).replace(/\/$/, '');
   if (!TOOL_BY_SLUG.has(slug) || !RENDERERS[slug]) return null;
@@ -7267,18 +6470,17 @@ export function handleBeta(path, ctx) {
 }
 
 // slug -> renderer. Every entry must have a matching BETA_TOOLS record (that is what
-// puts it on the index and makes the route resolve).
+// puts it in the catalogue and makes the route resolve); a record with its own href
+// (/chains) is rendered elsewhere and has no entry here.
 const RENDERERS = {
   atlas: renderAtlas,
   pairs: renderPairs,
   economy: renderEconomy,
   spectrum: renderSpectrum,
   oracle: renderOracle,
-  luck: renderLuck,
   collector: renderCollector,
   species: renderSpecies,
   projections: renderProjections,
-  nearmiss: renderNearMiss,
   anatomy: renderAnatomy,
   contact: renderContact,
   collection: renderCollection,
