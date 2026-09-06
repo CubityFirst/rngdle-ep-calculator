@@ -447,6 +447,18 @@ console.log("ok  EP->Number spot values");
   console.log(`ok  other: ${slugs.length} legacy tools (${slugs.join(", ")}), ${cat.findings.length} findings, none ported here`);
 }
 
+// --- Credits ---------------------------------------------------------------
+// A plain page off the footer. Pin the markup, the footer link and the route.
+{
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  assert.ok(html.includes('id="view-credits"'), "index.html is missing #view-credits");
+  assert.ok(/<footer[^]*href="\/credits"[^]*<\/footer>/.test(html), "the footer no longer links to /credits");
+  assert.ok(html.includes("Cam (sparrowpatch)"), "the credits page no longer thanks rngdle's author");
+  const epSrc = fs.readFileSync(path.join(ROOT, "ep.js"), "utf8");
+  assert.ok(epSrc.includes('credits: { path: "/credits"') && epSrc.includes('epEl("view-credits")'), "ep.js no longer routes /credits");
+  console.log("ok  credits page: markup, footer link, /credits route");
+}
+
 // --- reveal schedule -------------------------------------------------------
 // Pull the real constants out of app.js and check them against what was
 // sampled off rngdle, plus the shape of its tweens.

@@ -657,7 +657,7 @@ there, `node tools/check.cjs` re-checks the catalogue.
 | `app.js` | the sandbox page |
 | `extra.css` | fonts, rngdle's styled-jsx keyframes, a few utilities its bundle omits |
 | `style.css` | built: `extra.css` + `vendor/rngdle.css` |
-| `ep.js` | the EP -> Number page, and the routing for all eleven views |
+| `ep.js` | the EP -> Number page, and the routing for all twelve views |
 | `analysis.js` | the Analysis page |
 | `grid.js` | the Grid page |
 | `neighbours.js` | the Neighbours page |

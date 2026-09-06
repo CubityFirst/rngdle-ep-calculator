@@ -176,6 +176,7 @@ epEl("ep-input").addEventListener("input", e => {
 //   /u                   look up a player
 //   /u/<name>            that player's profile — rngdle's own URL again
 //   /other               the legacy tools, each on its own page under /beta/ or /chains
+//   /credits             who to thank
 //   /n/<number>          open a specific number in the sandbox
 //
 // Workers Static Assets serves the app shell for any path it has no file for
@@ -193,6 +194,7 @@ const VIEWS = {
   badges: { path: "/badges", title: "Badges · RNGdle Sandbox" },
   profiles: { path: "/u", title: "Profiles · RNGdle Sandbox" },
   other: { path: "/other", title: "Other · RNGdle Sandbox" },
+  credits: { path: "/credits", title: "Credits · RNGdle Sandbox" },
 };
 
 // Paths the Worker answers itself rather than the shell: the legacy tools under
@@ -252,6 +254,7 @@ function showView(path, layoutHint) {
   epEl("view-profiles").hidden = view !== "profiles";
   epEl("view-profile").hidden = view !== "profile";
   epEl("view-other").hidden = view !== "other";
+  epEl("view-credits").hidden = view !== "credits";
   document.title = badge ? `${badge.label} · RNGdle Sandbox`
     : who ? `${who[1].split(",").join(" + ")} · RNGdle Sandbox`
     : VIEWS[view].title;
@@ -276,6 +279,7 @@ function showView(path, layoutHint) {
     if (view === "profile") { scrollTo(0, 0); showProfile(who[1].split(","), new URLSearchParams(query).get("layout") || layoutHint); }
     // other.js loads after this file, as the others do.
     if (view === "other" && typeof showOther === "function") showOther();
+    if (view === "credits") scrollTo(0, 0);
   } else if (num) {
     openNumber(Math.min(Number(num[1]), MAX_N));
   }
