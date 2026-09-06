@@ -1,9 +1,32 @@
 name = "rngdle-ep-calculator"
-main = "src/index.js"
+main = "src/worker.js"
 compatibility_date = "2025-01-01"
 
+# Runs before every deploy. check.js is here rather than only in a test script so the
+# guard travels with the deploy: it fails the build if the EP index has gone stale
+# against the vendored engine, or if the legacy tools' catalogue drifts.
+[build]
+command = "node tools/check.cjs && node tools/build-dist.cjs"
+
+# The front end is static: site/ is assembled into dist/ by tools/build-dist.cjs (an
+# allowlist, so nothing else ships). src/worker.js answers /api/rolls, mounts
+# src/index.js for the legacy tools and their APIs, and hands every other path here.
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+# The site routes on real paths (/badges/pronic), so every unknown path has to come
+# back as the app shell for the router to read - that is what makes those URLs
+# survive a reload rather than being a client-side illusion.
+not_found_handling = "single-page-application"
+# Requests are matched against the static files first, and a navigation to a path
+# with no file gets the app shell without the Worker running at all - right for
+# /badges/pronic, wrong for /beta/atlas, which is a page of its own. These run the
+# Worker first: the legacy tools, their engine and APIs, and the old lab index.
+run_worker_first = ["/beta", "/beta/*", "/chains", "/engine.js", "/api", "/api/*"]
+
 # Custom domain (zone cubityfir.st must be on this Cloudflare account).
-# Wrangler provisions the hostname + cert on `wrangler deploy`.
+# Wrangler provisions the hostname + cert on `wrangler deploy`. rngdle.tools will
+# move here later; until then it deploys from its own repo.
 [[routes]]
 pattern = "rng.cubityfir.st"
 custom_domain = true

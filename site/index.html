@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RNGdle Sandbox</title>
+<meta name="description" content="An RNGdle sandbox. Roll as often as you like, or type any number to see the badges and EP it would have earned.">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="stylesheet" href="/style.css">
+<script src="/vendor/rngdle-engine.js" defer></script>
+<script src="/engine-shim.js" defer></script>
+<script src="/app.js" defer></script>
+<script src="/badges.js" defer></script>
+<script src="/profile.js" defer></script>
+<script src="/ep.js" defer></script>
+<script src="/analysis.js" defer></script>
+<script src="/grid.js" defer></script>
+<script src="/neighbours.js" defer></script>
+<script src="/luck.js" defer></script>
+<script src="/other.js" defer></script>
+</head>
+<body class="antialiased">
+<div class="app-shell flex flex-col bg-site-bg font-sans">
+
+  <header class="flex items-center justify-between bg-site-bg px-2 py-1 ps-4 text-prose">
+    <div class="flex items-center gap-1 sm:gap-2 min-w-0">
+      <a class="text-lg font-bold tracking-widest hover:text-prose-2 transition-colors normal-case shrink-0" href="/">RNGdle</a>
+      <nav class="flex items-center gap-1" id="nav">
+        <a href="/" data-view="sandbox" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-dices h-4 w-4 shrink-0" aria-hidden="true"><rect width="12" height="12" x="2" y="10" rx="2" ry="2"></rect><path d="m17.92 14 3.5-3.5a2.24 2.24 0 0 0 0-3l-5-4.92a2.24 2.24 0 0 0-3 0L10 6"></path><path d="M6 18h.01"></path><path d="M10 14h.01"></path><path d="M15 6h.01"></path><path d="M18 9h.01"></path></svg><span class="hidden sm:inline">Sandbox</span></a>
+        <a href="/ep" data-view="ep" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-calculator h-4 w-4 shrink-0" aria-hidden="true"><rect width="16" height="20" x="4" y="2" rx="2"></rect><line x1="8" x2="16" y1="6" y2="6"></line><line x1="16" x2="16" y1="14" y2="18"></line><path d="M16 10h.01"></path><path d="M12 10h.01"></path><path d="M8 10h.01"></path><path d="M12 14h.01"></path><path d="M8 14h.01"></path><path d="M12 18h.01"></path><path d="M8 18h.01"></path></svg><span class="hidden sm:inline">EP&nbsp;to&nbsp;Number</span></a>
+        <a href="/analysis" data-view="analysis" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chart-column h-4 w-4 shrink-0" aria-hidden="true"><path d="M3 3v16a2 2 0 0 0 2 2h16"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path></svg><span class="hidden sm:inline">Analysis</span></a>
+        <a href="/grid" data-view="grid" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-grid-2x2 h-4 w-4 shrink-0" aria-hidden="true"><path d="M12 3v18"></path><path d="M3 12h18"></path><rect x="3" y="3" width="18" height="18" rx="2"></rect></svg><span class="hidden sm:inline">Grid</span></a>
+        <a href="/neighbours" data-view="neighbours" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-arrow-left-right h-4 w-4 shrink-0" aria-hidden="true"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg><span class="hidden sm:inline">Neighbours</span></a>
+        <a href="/luck" data-view="luck" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sparkles h-4 w-4 shrink-0" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path><path d="M4 17v2"></path><path d="M5 18H3"></path></svg><span class="hidden sm:inline">Luck</span></a>
+        <a href="/badges" data-view="badges" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-award h-4 w-4 shrink-0" aria-hidden="true"><path d="m15.477 12.89 1.515 8.526a.5.5 0 0 1-.81.47l-3.58-2.687a1 1 0 0 0-1.197 0l-3.586 2.686a.5.5 0 0 1-.81-.469l1.514-8.526"></path><circle cx="12" cy="8" r="6"></circle></svg><span class="hidden sm:inline">Badges</span></a>
+        <a href="/u" data-view="profiles" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-users h-4 w-4 shrink-0" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><path d="M16 3.128a4 4 0 0 1 0 7.744"></path><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><circle cx="9" cy="7" r="4"></circle></svg><span class="hidden sm:inline">Profiles</span></a>
+        <a href="/other" data-view="other" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-flask-conical h-4 w-4 shrink-0" aria-hidden="true"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"></path><path d="M6.453 15h11.094"></path><path d="M8.5 2h7"></path></svg><span class="hidden sm:inline">Other</span></a>
+      </nav>
+    </div>
+    <div class="flex items-center gap-1">
+      <div class="flex items-center rounded-sm border border-outline overflow-hidden" id="theme-toggle">
+        <button data-theme="light" aria-label="Light mode" title="Light" class="p-1.5 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 pointer-events-none" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg></button>
+        <button data-theme="auto" aria-label="Auto mode" title="Auto" class="p-1.5 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 pointer-events-none" aria-hidden="true"><path d="M12 2v2"></path><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"></path><path d="M16 12a4 4 0 0 0-4-4"></path><path d="m19 5-1.256 1.256"></path><path d="M20 12h2"></path></svg></button>
+        <button data-theme="dark" aria-label="Dark mode" title="Dark" class="p-1.5 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 pointer-events-none" aria-hidden="true"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path></svg></button>
+      </div>
+      <a href="https://www.rngdle.com" target="_blank" rel="noopener noreferrer" class="type-button flex items-center gap-2 px-3 py-2 cursor-pointer rounded-lg border border-outline bg-surface text-prose hover:border-outline-strong hover:shadow-sm active:scale-[0.98] transition-all">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true"><path d="M15 3h6v6"></path><path d="M10 14 21 3"></path><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path></svg><span class="hidden sm:inline">Real Game</span>
+      </a>
+    </div>
+  </header>
+
+  <main class="flex-1 flex flex-col items-center px-4 sm:px-8 pt-[12vh] sm:pt-[15vh] pb-12" id="view-sandbox">
+    <div class="w-full max-w-2xl flex flex-col items-center text-center">
+
+      <div class="mb-6 w-full flex justify-center" id="slot"></div>
+      <div class="flex items-center justify-center gap-3 mb-4" id="rarity-row"></div>
+      <div class="flex flex-col items-center mb-6" id="ep-row"></div>
+
+      <div class="flex items-center justify-center gap-3 mb-6" id="share-row" hidden>
+        <button id="share" class="flex items-center gap-1.5 px-3 py-1.5 type-button border border-outline rounded-lg text-prose-2 hover:text-prose hover:border-outline-strong bg-surface hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-outline-strong active:scale-[0.98] transition-all duration-150 cursor-pointer" aria-label="Copy this result to the clipboard">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 pointer-events-none" aria-hidden="true"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"></line><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"></line></svg>
+          <span id="share-label" class="pointer-events-none">Share</span>
+        </button>
+        <div class="flex items-center gap-1.5 text-prose-3">
+          <span class="type-meta">Next roll in</span>
+          <span class="type-data type-ui font-bold text-prose-2" id="next-roll">0h 00m 00s</span>
+        </div>
+      </div>
+
+      <p class="text-muted text-base sm:text-lg mb-8 normal-case tracking-normal" id="tagline">
+        One roll per day? Not here. Roll as often as you like.
+      </p>
+
+      <div id="generate-wrap" class="w-full max-w-[18rem] sm:max-w-xs mb-4">
+        <button id="generate" class="type-game-action roll-button-charged w-full rounded-lg px-8 py-4 text-2xl sm:text-3xl font-black text-white transition-transform duration-150 hover:scale-[1.01] active:scale-[0.98] cursor-pointer disabled:cursor-not-allowed disabled:hover:transform-none" aria-label="Generate a new number">GENERATE</button>
+      </div>
+
+      <p class="type-meta normal-case text-muted" id="hint">…or click the question marks and type a number of your own</p>
+
+      <div class="w-full mt-8" id="breakdown"></div>
+    </div>
+  </main>
+
+  <main class="flex-1 flex flex-col items-center px-4 sm:px-8 pt-[8vh] pb-12" id="view-ep" hidden>
+    <div class="w-full max-w-2xl flex flex-col items-center text-center">
+
+      <h1 class="type-page-title text-prose mb-2">EP to Number</h1>
+      <p class="text-muted type-ui mb-8 normal-case tracking-normal">
+        Every number from 0 to 1,000,000 that scores exactly this much EP.
+      </p>
+
+      <form id="ep-form" class="w-full max-w-sm flex flex-col items-center gap-3 mb-8">
+        <input id="ep-input" type="text" inputmode="numeric" autocomplete="off"
+               placeholder="EP amount"
+               class="w-full type-data text-center font-roll text-3xl font-bold tabular-nums px-4 py-3 rounded-lg border border-outline bg-surface text-prose placeholder:text-prose-3 focus:outline-none focus:border-outline-strong transition-colors"
+               aria-label="EP amount to search for">
+        <button id="ep-go" type="submit"
+                class="type-game-action roll-button-charged w-full rounded-lg px-8 py-3 text-xl font-black text-white transition-transform duration-150 hover:scale-[1.01] active:scale-[0.98] cursor-pointer disabled:cursor-not-allowed disabled:hover:transform-none">SEARCH</button>
+      </form>
+
+      <div id="ep-status" class="w-full max-w-sm mb-6" hidden>
+        <div class="type-meta text-prose-3 normal-case" id="ep-status-text"></div>
+      </div>
+
+      <div class="w-full" id="ep-results"></div>
+    </div>
+  </main>
+
+  <!-- Analysis: the EP distribution over the whole roll range, filtered by
+       length, EP, rarity and badges. Laid out like the Badges tab: a page
+       header, then polished cards. -->
+  <main class="flex-1 w-full mx-auto max-w-2xl p-3 sm:p-6 major-section-stack text-left" id="view-analysis" hidden>
+    <header class="flex items-start justify-between gap-6">
+      <div class="min-w-0">
+        <h1 class="type-page-title text-prose">Analysis</h1>
+        <p class="type-prose mt-2 text-prose-2">Every number from 0 to 1,000,000, scored. Narrow it by length, EP, rarity, and the badges it must or must not earn.</p>
+      </div>
+      <div class="shrink-0 text-right">
+        <div class="type-data text-2xl font-bold text-prose" id="an-stat-total">—</div>
+        <div class="type-label text-muted">matching</div>
+      </div>
+    </header>
+
+    <div id="an-status" class="flex items-center gap-3 type-ui text-prose-2 normal-case" hidden>
+      <span class="an-spinner" aria-hidden="true"></span>
+      <span id="an-status-text"></span>
+    </div>
+
+    <section id="an-controls" class="an-controls" hidden>
+      <h2 class="sr-only">Filters</h2>
+      <div class="an-side">
+        <div class="polished-card p-4">
+          <div class="type-label text-prose-3 mb-3">Number length</div>
+          <div id="an-lengths" class="an-lengths"></div>
+        </div>
+        <div class="polished-card p-4">
+          <div class="type-label text-prose-3 mb-3">EP score</div>
+          <div class="an-ep-rows">
+            <label class="an-ep-row"><span class="type-ui text-prose-2 normal-case">more than</span>
+              <input id="an-ep-min" type="text" inputmode="numeric" autocomplete="off" placeholder="any" aria-label="Scores more than"
+                     class="type-data text-right px-2 py-1 rounded-sm border border-outline bg-surface text-prose placeholder:text-prose-3 focus:outline-none focus:border-outline-strong"></label>
+            <label class="an-ep-row"><span class="type-ui text-prose-2 normal-case">less than</span>
+              <input id="an-ep-max" type="text" inputmode="numeric" autocomplete="off" placeholder="any" aria-label="Scores less than"
+                     class="type-data text-right px-2 py-1 rounded-sm border border-outline bg-surface text-prose placeholder:text-prose-3 focus:outline-none focus:border-outline-strong"></label>
+            <label class="an-ep-row"><span class="type-ui text-prose-2 normal-case">or exactly</span>
+              <input id="an-ep-eq" type="text" inputmode="numeric" autocomplete="off" placeholder="unset" aria-label="Scores exactly"
+                     class="type-data text-right px-2 py-1 rounded-sm border border-outline bg-surface text-prose placeholder:text-prose-3 focus:outline-none focus:border-outline-strong"></label>
+          </div>
+        </div>
+        <div class="polished-card p-4">
+          <div class="type-label text-prose-3 mb-3">Rarity</div>
+          <div id="an-tiers" class="an-tiers"></div>
+        </div>
+      </div>
+      <div class="polished-card p-4 an-badges">
+        <div class="flex items-baseline justify-between gap-3 mb-3">
+          <div class="type-label text-prose-3">Badges</div>
+          <div class="type-meta text-prose-3 normal-case">✓ must earn · ✕ must not</div>
+        </div>
+        <input id="an-badge-search" type="text" autocomplete="off" spellcheck="false" placeholder="Filter badges or sets…" aria-label="Filter badges"
+               class="type-ui w-full px-3 py-2 mb-2 rounded-lg border border-outline bg-surface text-prose placeholder:text-prose-3 normal-case focus:outline-none focus:border-outline-strong">
+        <div id="an-badge-list" class="an-badge-list"></div>
+        <div id="an-badge-sel" class="an-badge-sel" hidden></div>
+      </div>
+    </section>
+
+    <section id="an-results" class="major-section-stack" hidden>
+      <div>
+        <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 mb-3">
+          <h2 class="type-subsection-title text-prose">EP distribution</h2>
+          <button id="an-clear" type="button" class="type-meta text-prose-3 underline hover:text-prose cursor-pointer normal-case">Reset filters</button>
+        </div>
+        <p id="an-summary" class="type-meta text-prose-3 normal-case mb-3"></p>
+        <div class="polished-card p-3">
+          <div id="an-chart" class="an-chart"></div>
+          <dl class="an-stats">
+            <div><dt class="type-label text-prose-3">Mean EP</dt><dd class="type-data text-prose font-bold" id="an-stat-mean">—</dd></div>
+            <div><dt class="type-label text-prose-3">Lowest</dt><dd class="type-data text-prose font-bold" id="an-stat-min">—</dd></div>
+            <div><dt class="type-label text-prose-3">Highest</dt><dd class="type-data text-prose font-bold" id="an-stat-max">—</dd></div>
+          </dl>
+          <div class="an-tier-breakdown" id="an-tier-breakdown"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 mb-3">
+          <h2 class="type-subsection-title text-prose">Matching numbers</h2>
+          <span class="type-meta text-prose-3 normal-case" id="an-preview-note"></span>
+        </div>
+        <div id="an-preview" class="flex flex-wrap gap-1.5"></div>
+        <div class="flex flex-wrap items-center gap-2 mt-4">
+          <button id="an-copy" type="button" class="type-button px-3 py-1.5 rounded-lg border border-outline bg-surface text-prose-2 hover:text-prose hover:border-outline-strong hover:bg-surface-raised active:scale-[0.98] transition-all cursor-pointer disabled:cursor-not-allowed">Copy all</button>
+          <button id="an-export-csv" type="button" class="type-button px-3 py-1.5 rounded-lg border border-outline bg-surface text-prose-2 hover:text-prose hover:border-outline-strong hover:bg-surface-raised active:scale-[0.98] transition-all cursor-pointer disabled:cursor-not-allowed">Download .csv</button>
+          <button id="an-export-examples" type="button" class="type-button px-3 py-1.5 rounded-lg border border-outline bg-surface text-prose-2 hover:text-prose hover:border-outline-strong hover:bg-surface-raised active:scale-[0.98] transition-all cursor-pointer" title="The first 12 numbers that earn each badge">Examples per badge (.txt)</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Grid: rngdle_solver's 1000x1000 number map — one pixel per number,
+       shaded by badge count, EP or rarity, or lit up for one badge — drawn
+       off the same two indexes the Analysis tab reads. -->
+  <main class="flex-1 w-full mx-auto p-3 sm:p-6 major-section-stack text-left" id="view-grid" hidden>
+    <header class="flex items-start justify-between gap-6">
+      <div class="min-w-0">
+        <h1 class="type-page-title text-prose">Grid</h1>
+        <p class="type-prose mt-2 text-prose-2">Every number from 0 to 999,999 as one pixel on a 1000&times;1000 map: the last three digits run left to right, the first three top to bottom. Pick a badge to light up every number that earns it.</p>
+      </div>
+      <div class="shrink-0 text-right">
+        <div class="type-data text-2xl font-bold text-prose" id="grid-stat">&mdash;</div>
+        <div class="type-label text-muted normal-case" id="grid-stat-label">numbers</div>
+      </div>
+    </header>
+
+    <div id="grid-status" class="flex items-center gap-3 type-ui text-prose-2 normal-case" hidden>
+      <span class="an-spinner" aria-hidden="true"></span>
+      <span id="grid-status-text"></span>
+    </div>
+
+    <section id="grid-body" class="gr-layout" hidden>
+      <h2 class="sr-only">Map</h2>
+      <div class="gr-main">
+        <div class="polished-card gr-stage">
+          <div class="gr-stage-head">
+            <div id="grid-title" class="gr-title type-ui"></div>
+            <div class="gr-ctrls" role="group" aria-label="Zoom">
+              <button type="button" id="grid-zout" title="Zoom out" aria-label="Zoom out">&minus;</button>
+              <button type="button" id="grid-zfit" title="Fit the whole map" aria-label="Fit the whole map">&#x2922;</button>
+              <button type="button" id="grid-zin" title="Zoom in" aria-label="Zoom in">+</button>
+              <button type="button" id="grid-link" title="Copy a link to this view" aria-label="Copy a link to this view"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 pointer-events-none" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></button>
+            </div>
+          </div>
+          <div id="grid-map" class="gr-map">
+            <canvas id="grid-canvas" aria-label="The number map"></canvas>
+            <div id="grid-tip" class="gr-tip type-meta" hidden></div>
+            <div id="grid-toast" class="gr-toast type-ui" role="status"></div>
+          </div>
+          <div class="gr-legend-row">
+            <div id="grid-legend" class="gr-legend type-meta"></div>
+            <select id="grid-cmap" aria-label="Colour scale" title="Colour scale"
+                    class="type-meta px-2 py-1 rounded-sm border border-outline bg-surface text-prose-2 normal-case focus:outline-none focus:border-outline-strong cursor-pointer">
+              <option>Grayscale</option><option>Viridis</option><option>Magma</option><option>Inferno</option><option>Plasma</option><option>Cividis</option>
+            </select>
+          </div>
+        </div>
+        <p class="type-meta text-prose-3 normal-case mt-3">Scroll or pinch to zoom, drag to pan, hover for the number, click to open it in the sandbox. Right-click copies the map as a PNG.</p>
+      </div>
+
+      <div class="gr-side">
+        <div class="polished-card p-4">
+          <div class="type-label text-prose-3 mb-3">View</div>
+          <div id="grid-views" class="gr-views" role="group" aria-label="View">
+            <button type="button" class="gr-item type-ui" data-v="count"><span>#</span><span>Badge count</span></button>
+            <button type="button" class="gr-item type-ui" data-v="ep"><span>&Sigma;</span><span>Total EP</span></button>
+            <button type="button" class="gr-item type-ui" data-v="rarity"><span>&#x25C6;</span><span>Rarity</span></button>
+          </div>
+          <div class="type-label text-prose-3 mb-2">Badge</div>
+          <input id="grid-search" type="search" autocomplete="off" spellcheck="false" placeholder="Filter badges or sets&hellip;" aria-label="Filter badges"
+                 class="type-ui w-full px-3 py-2 mb-2 rounded-lg border border-outline bg-surface text-prose placeholder:text-prose-3 normal-case focus:outline-none focus:border-outline-strong">
+          <div id="grid-list" class="gr-list"></div>
+          <p id="grid-list-empty" class="type-meta text-prose-3 normal-case px-1 py-2" hidden>No badge matches that.</p>
+        </div>
+        <div class="polished-card p-4">
+          <div class="type-label text-prose-3 mb-3">Superseded</div>
+          <div class="gr-suprow">
+            <button type="button" id="grid-sup" class="gr-sup type-ui" aria-pressed="false" disabled
+                    title="Knock back the numbers where a higher badge in the same family outranks this one: it still shows on the card there, but scores 0"><i aria-hidden="true"></i>Hide superseded</button>
+            <div class="flex items-center rounded-sm border border-outline overflow-hidden self-start" id="grid-supmode" role="group" aria-label="How superseded numbers are drawn">
+              <button type="button" data-mode="grey" class="type-button px-2.5 py-1 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised" title="Superseded numbers stay faintly visible">Grey</button>
+              <button type="button" data-mode="black" class="type-button px-2.5 py-1 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised" title="Superseded numbers are hidden entirely">Black</button>
+            </div>
+          </div>
+          <p class="type-meta text-prose-3 normal-case mt-3">Within a family only the highest-EP badge earned scores. Grey keeps the outranked numbers faint; black paints them like non-members.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Neighbours: rngdle_solver's Near Misses — the 54 numbers one digit away
+       from any number, what each would have scored, and the range's peaks,
+       valleys and cruellest misses. Read off the EP index. -->
+  <main class="flex-1 w-full mx-auto p-3 sm:p-6 major-section-stack text-left" id="view-neighbours" hidden>
+    <header class="flex items-start justify-between gap-6">
+      <div class="min-w-0">
+        <h1 class="type-page-title text-prose">Neighbours</h1>
+        <p class="type-prose mt-2 text-prose-2">Every number has exactly 54 neighbours: six digit positions, nine other digits each. This is what each of them would have scored.</p>
+      </div>
+      <div class="shrink-0 text-right">
+        <div class="type-data text-2xl font-bold text-prose" id="nb-stat">&mdash;</div>
+        <div class="type-label text-muted" id="nb-stat-label">EP</div>
+      </div>
+    </header>
+
+    <div id="nb-status" class="flex items-center gap-3 type-ui text-prose-2 normal-case" hidden>
+      <span class="an-spinner" aria-hidden="true"></span>
+      <span id="nb-status-text"></span>
+    </div>
+
+    <section id="nb-body" class="major-section-stack" hidden>
+      <div>
+        <h2 class="sr-only">One number</h2>
+        <!-- The number is the input, as the sandbox's ?????? is: type over it
+             and the board follows each digit as it is typed. -->
+        <div class="nb-titlerow">
+          <form id="nb-form" class="nb-numform">
+            <label class="sr-only" for="nb-input">A number from 0 to 999,999 &mdash; type over it to change it</label>
+            <input id="nb-input" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="6"
+                   class="nb-num font-roll text-3xl sm:text-4xl font-bold tabular-nums tracking-wider text-prose" title="Type any number from 0 to 999,999">
+            <button type="button" id="nb-random" title="Random roll" aria-label="Random roll"
+                    class="p-2 rounded-lg border border-outline bg-surface text-prose-2 hover:text-prose hover:border-outline-strong hover:bg-surface-raised active:scale-[0.98] transition-all cursor-pointer">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-dices h-5 w-5 pointer-events-none" aria-hidden="true"><rect width="12" height="12" x="2" y="10" rx="2" ry="2"></rect><path d="m17.92 14 3.5-3.5a2.24 2.24 0 0 0 0-3l-5-4.92a2.24 2.24 0 0 0-3 0L10 6"></path><path d="M6 18h.01"></path><path d="M10 14h.01"></path><path d="M15 6h.01"></path><path d="M18 9h.01"></path></svg>
+            </button>
+          </form>
+          <a class="type-meta text-prose-3 underline hover:text-prose normal-case" id="nb-open" href="/">open in the sandbox &rarr;</a>
+        </div>
+        <div class="nb-cols">
+          <div class="polished-card p-3 sm:p-4">
+            <div id="nb-board" class="nb-board"></div>
+          </div>
+          <div class="nb-side">
+            <dl class="polished-card grid grid-cols-2 gap-4 p-4 nb-cur" id="nb-cur"></dl>
+            <div>
+              <h2 class="type-label text-prose-3 mb-2">Across the whole range</h2>
+              <dl class="polished-card grid grid-cols-2 gap-4 p-4" id="nb-global"></dl>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nb-two">
+        <div class="polished-card p-4">
+          <h2 class="type-subsection-title text-prose">Cruellest near misses</h2>
+          <p class="type-meta text-prose-3 normal-case mt-1 mb-3">Ordinary numbers with a spectacular neighbour, ranked by how many times better one different digit would have been.</p>
+          <div id="nb-cruel" class="nb-rows"></div>
+        </div>
+        <div class="polished-card p-4">
+          <h2 class="type-subsection-title text-prose">Highest local peaks</h2>
+          <p class="type-meta text-prose-3 normal-case mt-1 mb-3">Numbers that beat all 54 of their neighbours, best first. Nothing one digit away from these is worth more.</p>
+          <div id="nb-summits" class="nb-rows"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Luck: rngdle_solver's Luck Lab — the exact EP distribution, the odds of
+       each tier, best-of-N in closed form, and a luck reading for a player's
+       real rolls. Read off the EP index, sorted once. -->
+  <main class="flex-1 w-full mx-auto p-3 sm:p-6 major-section-stack text-left" id="view-luck" hidden>
+    <header class="flex items-start justify-between gap-6">
+      <div class="min-w-0">
+        <h1 class="type-page-title text-prose">Luck</h1>
+        <p class="type-prose mt-2 text-prose-2">What a roll is worth before you make it, and how lucky yours actually were. Every figure here is exact: it comes from the score of all 1,000,001 legal rolls, not from a simulation.</p>
+      </div>
+      <div class="shrink-0 text-right">
+        <div class="type-data text-2xl font-bold text-prose" id="lk-stat">&mdash;</div>
+        <div class="type-label text-muted">median roll EP</div>
+      </div>
+    </header>
+
+    <div id="lk-status" class="flex items-center gap-3 type-ui text-prose-2 normal-case" hidden>
+      <span class="an-spinner" aria-hidden="true"></span>
+      <span id="lk-status-text"></span>
+    </div>
+
+    <section id="lk-body" class="major-section-stack" hidden>
+      <div>
+        <h2 class="sr-only">The range</h2>
+        <dl class="polished-card grid grid-cols-2 gap-4 p-4 sm:grid-cols-4 sm:p-5 lk-tiles" id="lk-head"></dl>
+      </div>
+
+      <div>
+        <h2 class="type-subsection-title text-prose">Best of N rolls</h2>
+        <p class="type-meta text-prose-3 normal-case mt-1 mb-3">The best of N independent rolls is below a score with probability F(score)<sup>N</sup>, so the whole curve of &ldquo;how good should my best be by now&rdquo; is exact. RNGdle is one roll a day, so N rolls is N days.</p>
+        <div class="polished-card p-4">
+          <div class="lk-slider">
+            <label class="type-label text-prose-3" for="lk-rolls">Rolls</label>
+            <input id="lk-rolls" type="range" min="0" max="1000" value="0" aria-label="Number of rolls (log scale)">
+            <input id="lk-n" type="text" inputmode="numeric" autocomplete="off" aria-label="Number of rolls"
+                   class="type-data font-roll tabular-nums w-20 px-2 py-1 rounded-sm border border-outline bg-surface text-prose text-right focus:outline-none focus:border-outline-strong">
+          </div>
+          <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3 lk-tiles mt-4" id="lk-bon"></dl>
+          <div id="lk-curve" class="an-chart mt-4"></div>
+        </div>
+        <div class="pr-table-wrap rounded-lg border border-outline bg-surface overflow-x-auto mt-4">
+          <table class="pr-table">
+            <thead><tr><th>Rolls</th><th>As daily rolls</th><th>Typical best</th><th>Tier</th><th>At least one mythic</th></tr></thead>
+            <tbody id="lk-milestones"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <h2 class="type-subsection-title text-prose">How lucky were yours?</h2>
+        <p class="type-meta text-prose-3 normal-case mt-1 mb-3">Look up a player, or paste any list of numbers.</p>
+        <div class="lk-inputs">
+          <form id="lk-user-form" class="flex items-center gap-2">
+            <label class="sr-only" for="lk-user">RNGdle usernames</label>
+            <input id="lk-user" type="text" autocomplete="off" spellcheck="false" placeholder="username, or several: alice, bob"
+                   class="type-ui flex-1 min-w-0 px-3 py-2 rounded-lg border border-outline bg-surface text-prose placeholder:text-prose-3 normal-case focus:outline-none focus:border-outline-strong">
+            <button type="submit" class="type-button px-4 py-2 rounded-lg border border-outline bg-surface text-prose hover:border-outline-strong hover:bg-surface-raised active:scale-[0.98] transition-all cursor-pointer">Check</button>
+          </form>
+          <div class="flex items-start gap-2">
+            <label class="sr-only" for="lk-paste">Rolls to analyse</label>
+            <textarea id="lk-paste" rows="2" placeholder="or paste rolls: 123456, 696969, 100000" spellcheck="false"
+                      class="type-ui font-roll flex-1 min-w-0 px-3 py-2 rounded-lg border border-outline bg-surface text-prose placeholder:text-prose-3 normal-case focus:outline-none focus:border-outline-strong resize-y"></textarea>
+            <button type="button" id="lk-paste-go" class="type-button px-4 py-2 rounded-lg border border-outline bg-surface text-prose-2 hover:text-prose hover:border-outline-strong hover:bg-surface-raised active:scale-[0.98] transition-all cursor-pointer">Analyse</button>
+          </div>
+        </div>
+        <div id="lk-verdict" class="mt-4"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Badges: two layouts of the same map. Official is rngdle's /sets layout,
+       minus the progress tracking; Compact is rngdle_solver's badge index
+       (one card per badge with rule, EP, share, family and examples), redrawn
+       in this site's furniture. -->
+  <main class="flex-1 w-full mx-auto max-w-2xl p-3 sm:p-6 major-section-stack text-left" id="view-badges" hidden>
+    <header class="flex items-start justify-between gap-6">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 class="type-page-title text-prose">Badges</h1>
+          <div class="flex items-center rounded-sm border border-outline overflow-hidden" id="badges-mode" role="group" aria-label="Layout">
+            <button type="button" data-mode="official" class="badges-mode-btn type-button px-2.5 py-1 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised" title="rngdle's own /sets layout">Official</button>
+            <button type="button" data-mode="compact" class="badges-mode-btn type-button px-2.5 py-1 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised" title="One card per badge: rule, EP, share of numbers, family and examples">Compact</button>
+          </div>
+        </div>
+        <p class="type-prose mt-2 text-prose-2" id="badges-blurb">Every badge RNGdle can award, in its own collections.</p>
+      </div>
+      <div class="shrink-0 text-right">
+        <div class="type-data text-2xl font-bold text-prose" id="badges-total">—</div>
+        <div class="type-label text-muted">badges</div>
+      </div>
+    </header>
+    <section id="badges-official">
+      <h2 class="sr-only">Badge sets</h2>
+      <div class="space-y-4" id="badges-list"></div>
+    </section>
+    <section id="badges-compact" hidden>
+      <h2 class="sr-only">Badge index</h2>
+      <div class="bc-bar">
+        <input id="bc-search" type="search" autocomplete="off" spellcheck="false" placeholder="Search badges (name, rule, rarity)…" aria-label="Search badges"
+               class="type-ui px-3 py-2 rounded-lg border border-outline bg-surface text-prose placeholder:text-prose-3 normal-case focus:outline-none focus:border-outline-strong">
+        <div class="bc-chips" id="bc-chips" role="group" aria-label="Rarity"></div>
+        <select id="bc-sort" aria-label="Sort badges" title="Sort badges"
+                class="type-ui px-2 py-2 rounded-lg border border-outline bg-surface text-prose-2 normal-case focus:outline-none focus:border-outline-strong cursor-pointer">
+          <option value="ep-desc">Sort: Highest EP</option>
+          <option value="ep-asc">Sort: Lowest EP</option>
+          <option value="prob-asc">Sort: Rarest first</option>
+          <option value="prob-desc">Sort: Most common first</option>
+          <option value="name">Sort: A–Z</option>
+        </select>
+        <div class="bc-count type-meta text-prose-3" id="bc-count"></div>
+      </div>
+      <div class="bc-grid" id="bc-cards"></div>
+      <p class="type-meta text-prose-3 normal-case mt-4 bc-foot">
+        <b class="text-prose-2">Rarity</b> follows a badge's EP exactly as rngdle scores it:
+        Common &lt; 1,000 &le; Uncommon &lt; 10,000 &le; Rare &lt; 100,000 &le; Epic &lt; 1,000,000 &le; Anomaly &lt; 10,000,000 &le; Mythic.
+        <b class="text-prose-2">Families:</b> when a number earns several badges from one family, only the highest-EP one scores;
+        the rest are shown but add 0 EP. <b class="text-prose-2">&ldquo;of numbers&rdquo;</b> is rngdle's own figure for the share of rolls that earn the badge.
+        Examples are the three lowest numbers that earn it.
+      </p>
+    </section>
+  </main>
+
+  <!-- One badge: rngdle's /u/<name>/badges/<id> layout. Its account half —
+       level, times earned, total EP, roll history — has nothing to read here. -->
+  <main class="flex-1 w-full mx-auto max-w-2xl p-6 major-section-stack" id="view-badge" hidden>
+    <header class="text-center">
+      <div class="mb-4 text-6xl" id="badge-emoji"></div>
+      <!-- text-prose is not decoration: `body { color: var(--foreground) }` is
+           #fafafa in BOTH themes, so anything without its own colour is
+           invisible on the light background. Same for the two values below. -->
+      <h1 class="type-page-title normal-case text-prose" id="badge-title"></h1>
+      <p class="type-prose mx-auto mt-4 max-w-xl text-prose-2" id="badge-description"></p>
+    </header>
+    <section>
+      <h2 class="sr-only">Badge details</h2>
+      <dl class="polished-card grid grid-cols-1 gap-5 p-5 text-center sm:grid-cols-3 sm:gap-4 sm:p-6">
+        <div>
+          <dt class="type-label mb-2 text-prose-3">Rarity</dt>
+          <dd><span class="type-label inline-block rounded-sm px-3 py-1 text-lg" id="badge-rarity"></span></dd>
+        </div>
+        <div>
+          <dt class="type-label mb-2 text-prose-3">EP value</dt>
+          <dd class="font-bold"><span class="type-data text-lg text-prose" id="badge-ep"></span></dd>
+        </div>
+        <div>
+          <dt class="type-label mb-2 text-prose-3">Probability</dt>
+          <dd class="type-data text-lg font-bold text-prose" id="badge-probability"></dd>
+        </div>
+      </dl>
+    </section>
+    <p class="text-center type-meta text-prose-3">
+      <a class="underline hover:text-prose-2" href="/badges">Back to all badges</a>
+      <span class="text-outline-strong px-1">&middot;</span>
+      <a class="underline hover:text-prose-2" id="badge-map" href="/grid">See it on the grid</a>
+    </p>
+  </main>
+
+  <!-- Profiles: the search form, then one player, in rngdle's /u/<name> layout. -->
+  <main class="flex-1 w-full mx-auto max-w-2xl p-3 sm:p-6 major-section-stack" id="view-profiles" hidden>
+    <header>
+      <h1 class="type-page-title text-prose">Profiles</h1>
+      <p class="type-prose mt-2 text-prose-2">Search for an RNGdle Profile — or several at once, comma-separated, to pool their rolls.</p>
+    </header>
+    <form id="profile-form" class="flex flex-wrap items-center gap-2">
+      <label class="sr-only" for="profile-input">RNGdle usernames</label>
+      <input id="profile-input" type="text" autocomplete="off" spellcheck="false"
+             placeholder="username, or several: alice, bob, carol"
+             class="type-ui flex-1 min-w-0 px-3 py-2 rounded-lg border border-outline bg-surface text-prose placeholder:text-prose-3 normal-case focus:outline-none focus:border-outline-strong">
+      <button id="profile-go" class="type-button px-4 py-2 rounded-lg border border-outline bg-surface text-prose hover:border-outline-strong hover:bg-surface-raised active:scale-[0.98] transition-all cursor-pointer">Look up</button>
+    </form>
+  </main>
+
+  <main class="flex-1 w-full mx-auto max-w-2xl p-3 sm:p-6 major-section-stack" id="view-profile" hidden>
+    <section class="min-w-0">
+      <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+        <h1 class="type-profile-name type-display-name max-w-full shrink-0 break-words text-balance text-prose" id="profile-name"></h1>
+        <button id="profile-copy" hidden
+                class="shrink-0 p-1.5 rounded-lg border border-outline bg-surface text-prose-2 hover:text-prose hover:border-outline-strong hover:bg-surface-raised active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-outline-strong transition-all cursor-pointer"
+                aria-label="Copy this profile's summary" title="Copy summary">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+               class="lucide lucide-copy h-4 w-4 pointer-events-none" aria-hidden="true">
+            <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+          </svg>
+        </button>
+      </div>
+      <p class="type-ui text-muted mt-2" id="profile-since"></p>
+    </section>
+
+    <p class="type-ui text-prose-2 normal-case" id="profile-status" hidden></p>
+    <!-- A combined view's caveats: a name that failed to load, or names past the cap. -->
+    <p class="type-meta text-prose-3 normal-case rounded-lg border border-outline bg-surface-dim px-4 py-3" id="profile-note" hidden></p>
+
+    <div id="profile-body">
+      <div class="major-section-stack">
+        <div>
+          <h2 class="sr-only">Statistics</h2>
+          <div class="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-6 sm:gap-8">
+            <div class="min-w-0">
+              <div class="type-label text-prose-3">Total EP</div>
+              <div class="type-data mt-1 text-2xl font-bold text-prose" id="profile-total-ep"></div>
+            </div>
+            <div class="min-w-0">
+              <div class="type-label text-prose-3">Best roll</div>
+              <div class="mt-2 flex flex-wrap items-center gap-2" id="profile-best"></div>
+              <div class="type-meta text-muted mt-1" id="profile-best-ep"></div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h2 class="type-subsection-title text-prose">Badge Collection</h2>
+          <div class="mb-4 flex items-center justify-between">
+            <div class="text-sm text-prose-3" id="profile-badge-count"></div>
+            <a class="flex items-center gap-1 text-sm text-prose hover:underline" href="/badges">View badge sets →</a>
+          </div>
+          <div class="flex flex-wrap gap-1" id="profile-badges"></div>
+        </div>
+
+        <!-- Combined views only: one line per player, best collection first. -->
+        <div id="profile-players" hidden>
+          <h2 class="type-subsection-title text-prose mb-3">Players</h2>
+          <div class="pr-table-wrap rounded-lg border border-outline bg-surface overflow-x-auto">
+            <table class="pr-table">
+              <thead><tr><th>Player</th><th>Rolls</th><th>EP</th><th>Badges</th><th>Streak</th><th>Best roll</th></tr></thead>
+              <tbody id="profile-players-rows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Roll history in two layouts: Official is rngdle's own roll cards;
+             Compact is rngdle_solver's rolls table in this site's furniture. -->
+        <div>
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+            <div class="flex items-center gap-3">
+              <h2 class="type-subsection-title text-prose">Roll History</h2>
+              <div class="flex items-center rounded-sm border border-outline overflow-hidden" id="rolls-mode" role="group" aria-label="Layout">
+                <button type="button" data-mode="official" class="type-button px-2.5 py-1 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised" title="rngdle's own roll cards">Official</button>
+                <button type="button" data-mode="compact" class="type-button px-2.5 py-1 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised" title="One row per roll: date, number, tier, EP, badges">Compact</button>
+              </div>
+            </div>
+            <span class="flex items-center gap-3">
+              <span class="type-ui text-muted" id="profile-roll-count"></span>
+              <a class="flex items-center gap-1 text-sm text-prose hover:underline" id="profile-luck" href="/luck">How lucky? →</a>
+            </span>
+          </div>
+          <div class="space-y-3" id="profile-rolls"></div>
+          <div class="pr-table-wrap rounded-lg border border-outline bg-surface overflow-x-auto" id="profile-rolls-compact" hidden>
+            <table class="pr-table">
+              <thead><tr id="profile-rolls-head"></tr></thead>
+              <tbody id="profile-rolls-rows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-center type-meta text-prose-3">
+      <a class="underline hover:text-prose-2" href="/u">Look up another player</a>
+    </p>
+  </main>
+
+  <!-- Other: the tools that were not ported — rngdle_solver's /beta lab and its EP
+       graph — listed in this site's furniture, each opening on its own page in the
+       solver's. The cards come from the solver's own catalogue (/api/other), so the
+       titles, blurbs and marks are copied from it rather than retyped here. -->
+  <main class="flex-1 w-full mx-auto p-3 sm:p-6 major-section-stack text-left" id="view-other" hidden>
+    <header class="flex items-start justify-between gap-6">
+      <div class="min-w-0">
+        <h1 class="type-page-title text-prose">Other</h1>
+        <p class="type-prose mt-2 text-prose-2">Tools from the original solver that have no tab here. Each opens on its own page, in the solver's own style, and scores every number in the browser the first time you visit.</p>
+      </div>
+      <div class="shrink-0 text-right">
+        <div class="type-data text-2xl font-bold text-prose" id="other-total">&mdash;</div>
+        <div class="type-label text-muted">tools</div>
+      </div>
+    </header>
+
+    <div id="other-status" class="flex items-center gap-3 type-ui text-prose-2 normal-case" hidden>
+      <span class="an-spinner" aria-hidden="true"></span>
+      <span id="other-status-text"></span>
+    </div>
+
+    <section id="other-tools" hidden>
+      <h2 class="sr-only">Tools</h2>
+      <div class="ot-grid" id="other-cards"></div>
+    </section>
+
+    <section id="other-insights" hidden>
+      <h2 class="type-subsection-title text-prose">Some insights</h2>
+      <p class="type-meta text-prose-3 normal-case mt-1 mb-3">Things those tools turned up. Every one is a measurement, not a constant: the tool named beside it recomputes it from the live rules on every visit.</p>
+      <div class="ot-finds" id="other-findings"></div>
+    </section>
+  </main>
+
+  <footer class="type-meta text-prose-3 text-center pb-6 normal-case px-4">
+    Unofficial sandbox — not affiliated with RNGdle.
+    <a class="underline hover:text-prose-2" href="https://www.rngdle.com" target="_blank" rel="noopener noreferrer">Play the real game</a>,
+    where it really is one roll a day.
+  </footer>
+</div>
+
+<!-- rngdle's Vignette: a full-screen radial darkening of the edges that fades
+     in for the length of a roll. Its own markup, with the gradient inline
+     because the bundle only carries the utilities, not that arbitrary value. -->
+<div id="vignette" aria-hidden="true"
+     class="pointer-events-none fixed inset-0 z-50 transition-all duration-600 mix-blend-multiply opacity-0"
+     style="background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.1) 100%)"></div>
+</body>
+</html>

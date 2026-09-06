@@ -5,6 +5,9 @@ node_modules/
 .wrangler/
 .dev.vars
 
+# Assembled from site/ by tools/build-dist.js (and by wrangler's build on deploy)
+dist/
+
 # Logs
 *.log
 

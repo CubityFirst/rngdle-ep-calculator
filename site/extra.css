@@ -1,0 +1,433 @@
+/* Prepended to rngdle's own Tailwind bundle (site.css).
+   ponytail: fonts via Google Fonts instead of self-hosting rngdle's woff2 files. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+
+:root {
+  --font-inter: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-space-mono: "Space Mono", ui-monospace, monospace;
+}
+
+/* Verbatim from rngdle's styled-jsx block (component id 127bce407691d237). */
+@keyframes gem-shimmer { 0% { background-position: 200% 0 } to { background-position: -200% 0 } }
+@keyframes digit-spin { 0%, to { opacity: 1 } }
+@keyframes digit-settle { 0% { text-shadow: 0 0 8px; transform: scale(1.5) } to { text-shadow: 0 1px 2px #ffffff80; transform: scale(1) } }
+@keyframes finale-pulse {
+  0% { filter: brightness(); transform: scale(1) }
+  15% { filter: brightness(1.15); transform: scale(1.25) }
+  40% { filter: brightness(1.05); transform: scale(.98) }
+  60% { filter: brightness(); transform: scale(1.03) }
+  to { filter: brightness(); transform: scale(1) }
+}
+@keyframes breathing { 0%, to { transform: scale(1) } 50% { transform: scale(1.015) } }
+.animate-digit-spin { animation: .2s ease-in-out infinite digit-spin }
+.animate-digit-settle { animation: .5s ease-out forwards digit-settle }
+.animate-attention-glow { box-shadow: 0 0 12px 4px #94a3b84d, 0 0 24px 8px #94a3b826 }
+.animate-finale-pulse { animation: .7s ease-out finale-pulse }
+.animate-breathing { animation: 3s ease-in-out infinite breathing }
+
+/* Sandbox-only: the ?????? doubles as a number input. The input sits invisibly
+   on top of the display div so the shimmer (which needs background-clip:text,
+   and so can't live on an <input>) still works. */
+#sandbox-input {
+  background: none;
+  border: 0;
+  outline: none;
+  padding: 0;
+  text-align: center;
+  color: transparent;
+  caret-color: var(--prose-3);
+  cursor: text;
+}
+#sandbox-input::selection { background: color-mix(in srgb, var(--prose-3) 35%, transparent) }
+.sandbox-edit { cursor: text }
+.cursor-text { cursor: text }
+
+/* Header nav tabs. */
+/* rngdle's header links (Leaderboard / Feed / Friends) are borderless: an icon,
+   a label, and a tinted panel on hover. These are the same, plus an active
+   state, which rngdle has no need for — its nav points at separate pages. */
+.nav-tab {
+  /* rngdle's own nav links sit at full --prose. Inactive tabs step down one
+     stop rather than to --prose-3, which reads at 2.4:1 on the light ground. */
+  color: var(--prose-2);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.nav-tab:hover { background-color: var(--surface-raised); color: var(--prose) }
+.nav-tab.is-active { background-color: var(--surface-raised); color: var(--prose) }
+/* Nine tabs with labels need ~1,200px beside the theme toggle and the Real
+   Game button; under that the tabs show their icons alone (each carries its
+   name as a title, set by ep.js). rngdle's own markup hides them under sm. */
+@media (max-width: 1359px) { .nav-tab > span { display: none !important } }
+/* Even as icons alone, nine tabs are wider than a phone (390px measured 416px).
+   The strip scrolls sideways inside the header rather than widening the page,
+   with its scrollbar hidden; each tab keeps its size instead of being squeezed. */
+#nav { min-width: 0; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch }
+#nav::-webkit-scrollbar { display: none }
+.nav-tab { flex: 0 0 auto }
+
+/* The roll button drops away while a roll is running and eases back once the
+   badges have finished revealing. max-height collapses the gap it leaves. */
+#generate-wrap {
+  max-height: 6rem;
+  transition: opacity .45s ease, transform .45s ease, max-height .45s ease, margin-bottom .45s ease;
+}
+#generate-wrap.is-away {
+  opacity: 0;
+  transform: translateY(1.75rem);
+  max-height: 0;
+  margin-bottom: 0;
+  pointer-events: none;
+}
+
+/* Utilities this page needs that aren't in rngdle's bundle (it only ships the
+   classes its own markup uses). */
+body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale }
+.app-shell { min-height: 100dvh; background-color: var(--site-bg) }
+html, body { background-color: var(--site-bg) }
+@media (min-width: 640px) { .sm\:pt-\[15vh\] { padding-top: 15vh } }
+.pt-\[8vh\] { padding-top: 8vh }
+.h-1\.5 { height: .375rem }
+.bg-prose-3 { background-color: var(--prose-3) }
+.transition-\[width\] { transition-property: width; transition-timing-function: cubic-bezier(.4, 0, .2, 1) }
+.placeholder\:text-prose-3::placeholder { color: var(--prose-3) }
+.focus\:border-outline-strong:focus { border-color: var(--outline-strong) }
+.shadow-glow-epic { box-shadow: 0 0 15px rgba(168, 85, 247, .3) }
+.shadow-glow-anomaly { box-shadow: 0 0 18px rgba(249, 115, 22, .3) }
+.shadow-glow-mythic { box-shadow: 0 0 20px rgba(236, 72, 153, .3), 0 0 35px rgba(168, 85, 247, .15) }
+
+/* Analysis tab. Layout only — colour comes from the tokens above and the
+   rarity accents rngdle's palette hands the script. The Tailwind bundle only
+   ships the utilities rngdle's own markup uses, so the grids live here. */
+.an-controls { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: 1rem; align-items: start }
+@media (max-width: 640px) { .an-controls { grid-template-columns: minmax(0, 1fr) } }
+.an-side { display: flex; flex-direction: column; gap: 1rem }
+.an-lengths { display: grid; grid-template-columns: repeat(7, 1fr); gap: .25rem }
+.an-len {
+  font-size: 1.5rem; font-weight: 700; line-height: 1; padding: .35rem 0;
+  border-radius: 6px; color: var(--prose); background: none; border: 0; cursor: pointer;
+  transition: opacity .15s, background-color .15s;
+}
+.an-len:not(.is-on) { opacity: .3 }
+.an-len:hover { opacity: 1; background-color: var(--surface-raised) }
+.an-ep-rows { display: flex; flex-direction: column; gap: .5rem }
+.an-ep-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem }
+.an-ep-row input { width: 7.5rem; flex: 0 0 auto }
+.an-ep-row:has(input:disabled) { opacity: .45 }
+.an-tiers { display: flex; flex-wrap: wrap; gap: .35rem }
+.an-tier {
+  --tc: var(--prose-3);
+  padding: .3rem .6rem; border-radius: 9999px; line-height: 1; cursor: pointer;
+  border: 1px solid var(--tc); color: var(--tc); background: transparent;
+  transition: opacity .15s, background-color .15s;
+}
+.an-tier.is-on { background-color: color-mix(in srgb, var(--tc) 18%, transparent); color: var(--prose) }
+.an-tier:not(.is-on) { opacity: .4; border-style: dashed }
+.an-tier:hover { opacity: 1 }
+
+.an-badge-list { max-height: 24rem; overflow-y: auto; padding-right: .25rem; display: flex; flex-direction: column; gap: .5rem }
+.an-group-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .25rem .35rem; position: sticky; top: 0; background-color: var(--surface) }
+/* The body is uppercase by default on rngdle, and badge names are proper nouns. */
+.an-badge-name, .an-group-name, .an-tip, .an-chart .an-tick { text-transform: none; letter-spacing: normal }
+.an-group-name { color: var(--prose); font-weight: 600 }
+.an-group-x { color: var(--prose-3); background: none; border: 0; padding: .1rem .35rem; border-radius: 4px; cursor: pointer; text-transform: none; letter-spacing: normal }
+.an-group-x:hover { color: var(--prose); background-color: var(--surface-raised) }
+.an-group-x.is-on { color: #dc2626 }
+.an-badge { display: flex; align-items: center; gap: .5rem; padding: .15rem .35rem; border-radius: 6px }
+.an-badge:hover { background-color: var(--surface-raised) }
+.an-badge-name { flex: 1; min-width: 0; color: var(--prose-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.an-badge em { flex: 0 0 auto; color: var(--prose-3); font-style: normal; text-transform: uppercase; letter-spacing: .04em; font-size: .65rem }
+.an-tri { display: inline-flex; flex: 0 0 auto }
+.an-tri button {
+  font-size: .7rem; line-height: 1; padding: .2rem .4rem; cursor: pointer;
+  border: 1px solid var(--outline); background-color: var(--surface); color: var(--prose-3);
+}
+.an-tri button:first-child { border-radius: 4px 0 0 4px }
+.an-tri button:last-child { border-radius: 0 4px 4px 0; border-left: 0 }
+.an-tri button:hover { color: var(--prose); border-color: var(--outline-strong) }
+.an-tri button[data-act="do"].is-on { background-color: #059669; border-color: #059669; color: #fff }
+.an-tri button[data-act="dont"].is-on { background-color: #dc2626; border-color: #dc2626; color: #fff }
+.an-badge-sel { display: flex; flex-direction: column; gap: .35rem; margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--outline) }
+.an-sel-row { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem }
+.an-chip {
+  display: inline-flex; align-items: center; gap: .15rem; padding: .15rem .5rem; border-radius: 9999px; cursor: pointer;
+  border: 1px solid var(--outline); background-color: var(--surface); color: var(--prose-2); text-transform: none; letter-spacing: normal;
+}
+.an-chip:hover { color: var(--prose); background-color: var(--surface-raised) }
+.an-chip-do { border-color: #059669 }
+.an-chip-dont { border-color: #dc2626 }
+
+.an-spinner {
+  width: 1rem; height: 1rem; border-radius: 9999px; flex: 0 0 auto;
+  border: 2px solid var(--outline); border-top-color: var(--prose-2);
+  animation: an-spin .8s linear infinite;
+}
+@keyframes an-spin { to { transform: rotate(360deg) } }
+
+.an-chart { position: relative }
+.an-chart svg { display: block }
+.an-chart .an-grid { stroke: var(--outline); stroke-width: 1 }
+.an-chart .an-axis { stroke: var(--outline-strong); stroke-width: 1 }
+.an-chart .an-tick { fill: var(--prose-3); font-size: 10px; font-family: var(--font-space-mono), monospace }
+.an-chart .an-hit { fill: transparent }
+.an-chart .an-bar.is-hover .an-hit { fill: var(--surface-raised) }
+.an-tip {
+  position: absolute; pointer-events: none; white-space: pre-line; z-index: 10; max-width: 18rem;
+  padding: .4rem .6rem; border-radius: 6px; border: 1px solid var(--outline);
+  background-color: var(--surface); color: var(--prose-2); box-shadow: 0 4px 12px rgba(0, 0, 0, .15);
+}
+.an-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; margin: .75rem .25rem 0; text-align: center }
+.an-stats dd { margin: .15rem 0 0 }
+
+/* The breakdown sits under the stats in the chart card, behind a rule. */
+.an-tier-breakdown { margin: 1rem .25rem 0; padding-top: 1rem; border-top: 1px solid var(--outline) }
+.an-tb-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .5rem; margin-bottom: .6rem }
+.an-tb-bar { display: flex; height: .5rem; border-radius: 9999px; overflow: hidden; background-color: var(--surface-raised); margin-bottom: .75rem; gap: 2px }
+.an-tb-bar i { display: block; min-width: 2px }
+.an-tb-rows { display: flex; flex-direction: column; gap: .1rem }
+.an-tb-row {
+  display: grid; grid-template-columns: .6rem 5.5rem 5rem 4rem minmax(0, 1fr) 8rem; align-items: center; gap: .6rem;
+  padding: .25rem .4rem; border-radius: 6px; cursor: pointer; transition: background-color .12s, opacity .12s;
+}
+.an-tb-row:hover { background-color: var(--surface-raised) }
+.an-tb-row.is-off { opacity: .4 }
+.an-tb-row.is-empty { opacity: .45 }
+.an-tb-row.is-off.is-empty { opacity: .25 }
+.an-tb-sw { width: .6rem; height: .6rem; border-radius: 2px }
+.an-tb-name { color: var(--prose-2) }
+.an-tb-n, .an-tb-p { color: var(--prose); text-align: right; font-size: .8rem }
+.an-tb-track { height: .35rem; border-radius: 9999px; background-color: var(--surface-raised); overflow: hidden }
+.an-tb-track i { display: block; height: 100%; min-width: 1px }
+.an-tb-ep { color: var(--prose-3); text-align: right }
+@media (max-width: 640px) {
+  .an-tb-row { grid-template-columns: .6rem 5rem 4.5rem 3.5rem minmax(0, 1fr) }
+  .an-tb-ep { display: none }
+}
+
+/* Grid tab: rngdle_solver's /grid — the 1000×1000 number map — in this site's
+   furniture. The solver draws it full-bleed with glass panels floating over
+   the canvas; here the map sits in a card with its legend under it and the
+   badge list beside it, and the card's own surface shows around the map. */
+#view-grid { max-width: 76rem }
+.gr-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 17rem); gap: 1rem; align-items: start }
+@media (max-width: 720px) { .gr-layout { grid-template-columns: minmax(0, 1fr) } }
+.gr-side { display: flex; flex-direction: column; gap: 1rem }
+.gr-stage { padding: .75rem }
+.gr-stage-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem .75rem; margin-bottom: .75rem }
+.gr-title { min-width: 0; color: var(--prose-2); text-transform: none; letter-spacing: normal }
+.gr-ctrls { display: flex; align-items: center; gap: .25rem; flex: 0 0 auto }
+.gr-ctrls button {
+  width: 2rem; height: 2rem; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  border-radius: 6px; border: 1px solid var(--outline); background-color: var(--surface); color: var(--prose-2); font-size: 1rem; line-height: 1;
+}
+.gr-ctrls button:hover { color: var(--prose); border-color: var(--outline-strong); background-color: var(--surface-raised) }
+/* A square that shrinks to fit the viewport; the map letterboxes inside it. */
+.gr-map {
+  position: relative; width: 100%; aspect-ratio: 1 / 1; max-height: calc(100dvh - 15rem); min-height: 16rem;
+  border-radius: 6px; overflow: hidden; background-color: var(--surface-dim); border: 1px solid var(--outline-subtle);
+}
+.gr-map canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none }
+.gr-map canvas:active { cursor: grabbing }
+.gr-tip {
+  position: absolute; z-index: 5; pointer-events: none; white-space: nowrap; text-transform: none; letter-spacing: normal;
+  padding: .35rem .6rem; border-radius: 6px; border: 1px solid var(--outline);
+  background-color: var(--surface); color: var(--prose-2); box-shadow: 0 4px 12px rgba(0, 0, 0, .15);
+}
+.gr-tip b { display: block; color: var(--prose); font-family: var(--font-roll), monospace; font-size: .95rem; font-variant-numeric: tabular-nums }
+.gr-toast {
+  position: absolute; left: 50%; bottom: .75rem; transform: translateX(-50%); z-index: 6; pointer-events: none;
+  padding: .4rem .8rem; border-radius: 6px; border: 1px solid var(--outline); background-color: var(--surface); color: var(--prose);
+  white-space: nowrap; text-transform: none; letter-spacing: normal; opacity: 0; transition: opacity .2s;
+}
+.gr-toast.is-on { opacity: 1 }
+.gr-legend-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem .75rem; margin-top: .75rem }
+.gr-legend { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .75rem; color: var(--prose-3); text-transform: none; letter-spacing: normal }
+.gr-scale { display: inline-block; width: 9rem; height: .6rem; border-radius: 9999px }
+.gr-sw { display: inline-block; width: .65rem; height: .65rem; border-radius: 2px; margin-right: .3rem; vertical-align: -1px }
+#grid-cmap:disabled { opacity: .45; cursor: default }
+.gr-views { display: flex; flex-direction: column; gap: .15rem; margin-bottom: .75rem; padding-bottom: .75rem; border-bottom: 1px solid var(--outline) }
+.gr-list { max-height: 26rem; overflow-y: auto; padding-right: .25rem; display: flex; flex-direction: column; gap: .5rem }
+.gr-group-head { position: sticky; top: 0; padding: .25rem .5rem; background-color: var(--surface); color: var(--prose); font-weight: 600; text-transform: none; letter-spacing: normal }
+.gr-item {
+  display: flex; align-items: center; gap: .5rem; width: 100%; padding: .3rem .5rem; border-radius: 6px; cursor: pointer;
+  border: 0; background: none; text-align: left; color: var(--prose-2); text-transform: none; letter-spacing: normal;
+}
+.gr-item:hover { background-color: var(--surface-raised); color: var(--prose) }
+.gr-item.is-on { background-color: var(--surface-raised); color: var(--prose); box-shadow: inset 0 0 0 1px var(--outline-strong) }
+.gr-item > span:first-child { flex: 0 0 auto; min-width: 1.25rem; text-align: center; white-space: nowrap }   /* some icons are two emoji */
+.gr-item > span:nth-child(2) { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.gr-item em { flex: 0 0 auto; color: var(--prose-3); font-style: normal; text-transform: uppercase; letter-spacing: .04em; font-size: .65rem }
+.gr-suprow { display: flex; flex-direction: column; gap: .5rem }
+.gr-sup {
+  display: flex; align-items: center; gap: .5rem; width: 100%; padding: .4rem .6rem; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--outline); background-color: var(--surface); color: var(--prose-2); text-align: left; text-transform: none; letter-spacing: normal;
+}
+.gr-sup:hover:not(:disabled) { color: var(--prose); border-color: var(--outline-strong) }
+.gr-sup:disabled { opacity: .45; cursor: default }
+.gr-sup i { flex: 0 0 auto; width: .8rem; height: .8rem; border-radius: 3px; border: 1px solid var(--outline-strong) }
+.gr-sup[aria-pressed="true"] i { background-color: var(--prose); border-color: var(--prose) }
+#grid-supmode button:disabled { opacity: .45; cursor: default }
+
+/* Neighbours tab: rngdle_solver's Near Misses in this site's furniture. Gains
+   are shaded with rngdle's success green and losses with its danger red, over
+   the dim surface, so the board reads in both themes; the number's own digits
+   sit on the plain surface, outlined. */
+#view-neighbours { max-width: 68rem }
+.nb-titlerow { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; margin-bottom: 1rem }
+.nb-numform { display: flex; align-items: center; gap: .75rem }
+/* The number is an input dressed as the heading: no box, a dashed rule under
+   it as the only hint that it takes typing, solid while it has focus. */
+.nb-num {
+  width: 7ch; padding: 0 .1em; background: none; border: 0; border-bottom: 2px dashed var(--outline-strong); border-radius: 0;
+  outline: none; caret-color: var(--prose-3); cursor: text; line-height: 1.15;
+}
+.nb-num:focus { border-bottom-color: var(--prose) }
+.nb-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 19rem); gap: 1rem; align-items: start }
+@media (max-width: 860px) { .nb-cols { grid-template-columns: minmax(0, 1fr) } }
+.nb-side { display: flex; flex-direction: column; gap: 1rem }
+.nb-cur dd, .nb-cur dt, #nb-global dd, #nb-global dt { margin: 0; overflow-wrap: anywhere }
+.nb-board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: .5rem }
+.nb-col { display: flex; flex-direction: column; gap: .3rem; min-width: 0 }
+.nb-head { height: 1.75rem; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 700; color: var(--prose); font-variant-numeric: tabular-nums }
+.nb-cells { display: flex; flex-direction: column; gap: 2px }
+.nb-cell {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  height: 2.4rem; padding: 0; border: 1px solid transparent; border-radius: 6px; cursor: pointer; line-height: 1;
+  font-size: .95rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--prose); background-color: var(--surface-dim);
+}
+/* line-height 1 on both lines, or the site's 1.5 pushes the digit to the top
+   of the cell and the caption to the bottom. */
+.nb-cell em { font-style: normal; font-size: .6rem; font-weight: 400; line-height: 1; letter-spacing: -.02em; opacity: .85; font-family: var(--font-inter), sans-serif; text-transform: none }
+.nb-cell:hover { border-color: var(--prose) }
+/* The number's own digits: the plain surface, no ring — a dark cell with light
+   text in dark mode, the reverse in light. The filled (inverted) version read
+   as glare against the shaded board, and an outline in the text colour as a
+   hard black or white frame. */
+.nb-cell.is-self { background-color: var(--surface); color: var(--prose); font-weight: 800 }
+/* The two extremes keep their ring through :hover. A dark line sits between
+   the ring and the fill: the best cell is the greenest on the board and the
+   worst the reddest, so a same-hue ring on its own fill vanished. */
+.nb-cell.is-best, .nb-cell.is-worst { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .55) }
+.nb-cell.is-best { border-color: var(--status-success); outline: 1.5px solid var(--status-success); outline-offset: 0 }
+.nb-cell.is-worst { border-color: var(--status-danger); outline: 1.5px solid var(--status-danger); outline-offset: 0 }
+.nb-mk { position: absolute; top: 0; right: 2px; font-size: .66rem; line-height: 1.2; font-weight: 700; color: #fff; text-shadow: 0 0 3px rgba(0, 0, 0, .95), 0 1px 1px rgba(0, 0, 0, .9); pointer-events: none }
+.nb-foot { text-align: center; font-size: .66rem; color: var(--prose-3); text-transform: none }
+@media (max-width: 640px) { .nb-cell { height: 1.9rem; font-size: .8rem } .nb-cell em { display: none } }
+.nb-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr)); gap: 1rem }
+.nb-rows { display: flex; flex-direction: column; gap: .1rem }
+.nb-row {
+  display: flex; align-items: center; gap: .5rem; width: 100%; text-align: left; padding: .35rem .4rem; cursor: pointer;
+  border: 0; border-radius: 6px; background: none; color: var(--prose-2); text-transform: none; letter-spacing: normal;
+}
+.nb-row:hover { background-color: var(--surface-raised); color: var(--prose) }
+.nb-row-n { flex: 0 0 4.8rem; font-size: .85rem; color: var(--prose); font-variant-numeric: tabular-nums }
+.nb-row-s { flex: 1; min-width: 0; font-size: .74rem; color: var(--prose-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.nb-row-v { flex: 0 0 auto; font-size: .8rem; color: var(--prose); font-variant-numeric: tabular-nums }
+
+/* Luck tab: rngdle_solver's Luck Lab in this site's furniture. The charts
+   borrow the Analysis chart's tick and tooltip styles; the tables are the
+   Profiles table. */
+#view-luck { max-width: 60rem }
+.lk-tiles dt, .lk-tiles dd { margin: 0; overflow-wrap: anywhere }
+.lk-tier { font-size: 8.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; opacity: .9 }
+.lk-slider { display: flex; align-items: center; gap: .75rem }
+.lk-slider input[type="range"] { flex: 1; min-width: 0; accent-color: var(--prose) }
+.lk-band { fill: color-mix(in srgb, var(--prose) 12%, transparent) }
+.lk-line { fill: none; stroke: var(--prose); stroke-width: 1.6 }
+.lk-mark { stroke: var(--prose-3); stroke-width: 1.2; stroke-dasharray: 3 3 }
+.lk-dot { fill: var(--prose); stroke: var(--surface); stroke-width: 1.5 }
+.lk-inputs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .75rem; align-items: start }
+@media (max-width: 720px) { .lk-inputs { grid-template-columns: minmax(0, 1fr) } }
+.lk-vhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .75rem; margin-bottom: .75rem }
+/* Every roll as a tick on a 0–100 percentile line, in its tier colour. */
+.lk-strip { position: relative; height: 1.6rem; margin-top: 1rem; border-radius: 6px; border: 1px solid var(--outline); background: linear-gradient(90deg, var(--surface-dim), var(--surface-raised)) }
+.lk-strip i { position: absolute; top: 3px; width: 3px; height: calc(100% - 6px); border-radius: 2px; margin-left: -1.5px; opacity: .9 }
+.lk-stripax { display: flex; justify-content: space-between; margin-top: .25rem }
+.lk-player { cursor: pointer }
+
+/* Other tab: the legacy tools' gallery. The solver's own /beta index drew a
+   mark per tool on an accent wash; here the same marks sit on this site's
+   cards, on the dim surface, in the secondary text colour. */
+#view-other { max-width: 64rem }
+.ot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: .75rem }
+.ot-card { display: flex; flex-direction: column; overflow: hidden; text-decoration: none; color: inherit; transition: border-color .12s, transform .12s }
+.ot-card:hover { border-color: var(--outline-strong); transform: translateY(-2px) }
+.ot-thumb { display: flex; align-items: center; justify-content: center; height: 6rem; color: var(--prose-2); background-color: var(--surface-dim); border-bottom: 1px solid var(--outline-subtle) }
+.ot-thumb svg { width: 8rem; height: 5rem }
+.ot-body { display: flex; flex-direction: column; gap: .35rem; flex: 1; padding: .8rem .95rem 1rem }
+.ot-title { display: flex; align-items: center; gap: .5rem; margin: 0; font-weight: 600; line-height: 1.3; text-transform: none; letter-spacing: normal }
+.ot-title > span { flex: 1; min-width: 0 }
+.ot-kind { flex: 0 0 auto; font-style: normal; padding: .1rem .45rem; border-radius: 4px; border: 1px solid var(--outline); color: var(--prose-3) }
+.ot-blurb { margin: 0; line-height: 1.55 }
+.ot-note { margin-top: auto; padding-top: .35rem }
+.ot-see b { font-weight: 500; color: var(--prose-2) }
+.ot-finds { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: .75rem }
+.ot-find { display: flex; flex-direction: column; gap: .3rem; padding: .8rem .95rem }
+.ot-find b { line-height: 1.4 }
+.ot-find span { line-height: 1.55 }
+.ot-find a { margin-top: auto; padding-top: .35rem; color: var(--prose-2) }
+
+/* Badges tab, compact layout: rngdle_solver's badge index in this site's
+   furniture. The solver colours each card's left edge by rarity; here the
+   pill carries the rarity, as it does everywhere else. */
+#view-badges.is-compact { max-width: 64rem }
+.badges-mode-btn[aria-pressed="true"] { cursor: default }
+.bc-bar {
+  position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+  padding: .6rem 0; margin-bottom: 1rem; border-bottom: 1px solid var(--outline);
+  background: linear-gradient(var(--site-bg) 85%, transparent);
+}
+#bc-search { flex: 1 1 14rem; min-width: 10rem }
+.bc-chips { display: flex; flex-wrap: wrap; gap: .3rem }
+.bc-chip {
+  display: inline-flex; align-items: center; gap: .3rem; padding: .2rem .6rem; border-radius: 9999px; cursor: pointer;
+  text-transform: none; letter-spacing: normal; transition: background-color .12s, color .12s, border-color .12s;
+}
+.bc-chip em { font-style: normal; opacity: .7; font-variant-numeric: tabular-nums }
+.bc-count { flex-basis: 100% }
+.bc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); gap: .75rem }
+.bc-card {
+  display: flex; flex-direction: column; gap: .4rem; padding: .75rem .9rem .8rem; scroll-margin-top: 4.5rem;
+  content-visibility: auto; contain-intrinsic-size: auto 11rem;   /* 233 cards: lay out only what is in view */
+  transition: box-shadow .3s;
+}
+.bc-card.is-target { box-shadow: 0 0 0 3px color-mix(in srgb, var(--outline-strong) 55%, transparent) }
+.bc-head { display: flex; align-items: center; gap: .5rem; min-width: 0 }
+.bc-emoji { font-size: 1.25rem; flex: 0 0 auto }
+.bc-name { flex: 1; min-width: 0; font-weight: 600; line-height: 1.3 }
+.bc-pill { flex: 0 0 auto; padding: .1rem .5rem; border-radius: 4px }
+.bc-desc { margin: 0 }
+.bc-stats { display: flex; align-items: baseline; flex-wrap: wrap; gap: .8rem }
+.bc-fam { line-height: 1.6 }
+.bc-fam a { color: var(--prose-3); text-decoration: none; border-bottom: 1px dotted var(--outline-strong) }
+.bc-fam a:hover { color: var(--prose) }
+.bc-ex { margin-top: auto; padding-top: .15rem }
+.bc-ex a { color: var(--prose-2) }
+.bc-foot { line-height: 1.6 }
+/* rngdle's body is uppercase; the solver's toolbar is not, and a search box
+   shouting its placeholder reads wrong. */
+#bc-search, #bc-search::placeholder, #bc-sort { text-transform: none }
+
+/* Profiles: the compact roll history and the combined view's Players table —
+   rngdle_solver's rolls table in this site's furniture. */
+.pr-table { width: 100%; border-collapse: collapse; text-transform: none; letter-spacing: normal }
+.pr-table th {
+  text-align: left; padding: .55rem .8rem; background-color: var(--surface-dim); color: var(--prose-3);
+  font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap;
+}
+.pr-table td { padding: .5rem .8rem; border-top: 1px solid var(--outline-subtle); font-variant-numeric: tabular-nums; font-size: .85rem; color: var(--prose-2); white-space: nowrap }
+.pr-table tr:hover td { background-color: var(--surface-raised) }
+.pr-table .pr-num a { font-family: var(--font-mono), monospace; color: var(--prose); text-decoration: none }
+.pr-table .pr-num a:hover { text-decoration: underline }
+.pr-table .pr-ep { font-family: var(--font-mono), monospace; color: var(--prose) }
+.pr-table .pr-who a { font-family: var(--font-mono), monospace; color: var(--prose-2); text-decoration: none }
+.pr-table .pr-who a:hover { text-decoration: underline }
+.pr-table .pr-who .at { color: var(--prose-3) }
+.pr-table .pr-dim { color: var(--prose-3) }
+.pr-table .pr-pill { display: inline-block; padding: .1rem .5rem; border-radius: 4px; font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase }
+/* The poem is the row's title; a mark says there is one to hover for. */
+.pr-table .pr-poem { cursor: help; color: var(--prose-3) }
+/* Several names in the profile heading: the "+" between them steps back. */
+#profile-name .plus { color: var(--prose-3); font-weight: 400; margin: 0 .35rem }

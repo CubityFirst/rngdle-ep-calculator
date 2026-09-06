@@ -1,21 +1,35 @@
 # rngdle_solver
 
-## What this repo is now
+## What this repo is
 
-The badge engine and the legacy tools behind **rngdle.tools** (`G:\Scripts\rngdle.tools`),
-which is the front end. This Worker no longer renders a calculator, `/badges`, `/grid` or
-`/u`: those paths 301 to rngdle.tools (`FRONT_END` / `FRONT_END_PATHS` in `src/index.js`).
-It still serves `/engine.js`, `/api`, `/api/profile`, `/chains`, `/beta/<tool>` and the
-Box Lab's `/api/palettes` - and rngdle.tools serves exactly those too, by copying
-`src/*.js` + `schema.sql` into its `legacy/` directory (`node tools/sync-legacy.js` over
-there) and mounting this module on its own Worker with `env.FRONT_END` set to its origin.
+One Cloudflare Worker, deployed at rng.cubityfir.st (rngdle.tools moves here later):
 
-- New UI goes in rngdle.tools, not here. Don't add HTML pages to this Worker.
-- After a commit here that touches `src/` or `schema.sql`, re-run rngdle.tools'
-  `node tools/sync-legacy.js` and commit its `legacy/` - it is a byte-for-byte copy, never
-  edited there, and Workers Builds clones that repo alone.
-- Links emitted by the legacy pages point at the new front end's paths (`/n/<number>`,
-  `/badges/<slug>`, `/grid/<slug>`, `/other`), which resolve on rngdle.tools' origin.
+- `site/` - the front end, a static single-page site in rngdle's own furniture around
+  rngdle's own vendored engine (`site/vendor/`). Documented in `site/README.md`.
+- `src/index.js` + `beta.js`, `gallery.js`, `ui.js` - the badge engine (full parity with
+  rngdle.com) and the legacy tools the front end has no tab for: `/chains`, `/beta/<tool>`,
+  `/engine.js`, `/api`, `/api/profile`, the D1 palette gallery.
+- `src/worker.js` - the entry point (`wrangler.toml` main): `/api/rolls`, `/api/other`,
+  the legacy mount, and the asset binding for everything else.
+- `tools/*.cjs` - `check.cjs` (run before every deploy; wrangler's build runs it),
+  `build-dist.cjs` (site/ -> dist/), `refresh.cjs` (re-vendor rngdle's bundle),
+  `build-ep-table.cjs` (the two shipped indexes).
+
+Rules that follow from that:
+
+- New UI goes in `site/`, not in `src/`. Don't add HTML pages to the legacy module.
+- A tool ported into `site/` comes *out* of `BETA_TOOLS` / `RENDERERS` in `src/beta.js`
+  (as `nearmiss` and `luck` did) - `tools/check.cjs` fails if the Other tab's catalogue
+  still lists something the site has a tab for.
+- Links emitted by the legacy pages point at the front end's paths (`/n/<number>`,
+  `/badges/<slug>`, `/grid/<slug>`, `/other`); `src/index.js` 301s its retired pages
+  (`/`, `/badges`, `/grid`, `/u`, `/beta`) to the same origin (`FRONT_END_PATHS`).
+- The legacy paths are listed in `run_worker_first` in `wrangler.toml`. Without that a
+  browser navigation to `/beta/atlas` gets the app shell (curl does not show this).
+- `tools/*.cjs` are CommonJS on purpose (the package is `"type": "module"`).
+- `npm run serve` serves `site/` from disk; `npm run dev` (wrangler) serves `dist/`, so
+  after editing `site/` under wrangler run `npm run build` or the change is invisible.
+- The rngdle.tools repo is frozen; it carries a note. Don't develop there.
 
 ## Before any commit or deploy
 
@@ -29,6 +43,10 @@ files with the change:
 
 `npm run deploy` runs the generator automatically via `predeploy`, but the resulting
 diff still has to be committed. Never hand-edit `*.gen.js` files.
+
+When rngdle ships a new bundle: `npm run refresh`, `npm run ep-table`, `npm run check`
+(see `site/README.md`, "Refreshing from upstream"), and commit `site/vendor/`, the two
+`.bin.gz` indexes and `site/style.css` together.
 
 ## Commit messages
 
@@ -51,10 +69,9 @@ CONTRIBUTING.md. Pre-2026-07-21 history uses an older style; don't rewrite it.
   it, so an edge back would be a cycle. Everything it needs arrives through `betaCtx()`.
   New tools need a `BETA_TOOLS` entry *and* a `RENDERERS` entry or the route 404s; a tool
   rendered elsewhere carries an `href` instead (`/chains`). Every `BETA_TOOLS` entry is a
-  card on rngdle.tools' Other tab through `legacyCatalogue()`, so give it a `THUMBS` mark.
-- A tool that gets ported to rngdle.tools comes *out* of `BETA_TOOLS` and `RENDERERS`
-  (as `nearmiss` and `luck` did) - rngdle.tools' `tools/check.js` fails if the catalogue
-  still lists something it has a tab for.
+  card on the Other tab through `legacyCatalogue()`, so give it a `THUMBS` mark.
+- The page scripts in `site/` are classic `<script>` tags sharing one global scope; a
+  duplicate top-level name silently overwrites (`tools/check.cjs` scans for this).
 - Wrangler is invoked via npm scripts / `npx wrangler`, never a global install.
 - `HOT_RANK` in `src/gallery.js` and the `palettes_hot` index in `schema.sql` must spell
   the same expression character for character - SQLite only uses an expression index
@@ -64,6 +81,4 @@ CONTRIBUTING.md. Pre-2026-07-21 history uses an older style; don't rewrite it.
   through `EXPLAIN QUERY PLAN` and fails on a full scan or a temp B-tree.
 - `schema.sql` is all `IF NOT EXISTS`, so it is also the migration - after adding an
   index, re-apply it (`npx wrangler d1 execute rngdle --file=schema.sql --remote`) or
-  production keeps the old plan. Deploying the Worker does not touch the database. The
-  database is on the cubityfir.st account; rngdle.tools deploys to a different one and
-  has no binding yet (its `wrangler.jsonc` has the steps), so its gallery answers 503.
+  production keeps the old plan. Deploying the Worker does not touch the database.

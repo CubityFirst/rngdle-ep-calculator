@@ -1,12 +1,16 @@
 {
   "name": "rngdle-ep-calculator",
   "version": "1.0.0",
-  "description": "Cloudflare Worker that returns total EP + badges for any number 0..999999",
+  "description": "RNGdle sandbox: the front end (site/), the badge engine and the legacy tools, one Cloudflare Worker",
   "type": "module",
   "scripts": {
     "serve": "node serve.mjs",
     "dev": "wrangler dev",
     "gen": "node research/gen-snapshot.mjs",
+    "check": "node tools/check.cjs",
+    "build": "node tools/build-dist.cjs",
+    "refresh": "node tools/refresh.cjs",
+    "ep-table": "node tools/build-ep-table.cjs",
     "predeploy": "node research/gen-snapshot.mjs",
     "deploy": "wrangler deploy",
     "test": "node test/test.mjs",

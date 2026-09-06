@@ -2,9 +2,9 @@
 //
 // The badge table, the scorer (compute), the browser engine (/engine.js), the JSON APIs
 // and the tools that were never ported to the new front end (/chains and /beta/<tool>).
-// The front end itself - the calculator, /badges, /grid, /u - moved to rngdle.tools,
-// which embeds this module for the legacy routes and gets the rest of this Worker's
-// old paths by redirect (see FRONT_END below).
+// The front end itself - the calculator, /badges, /grid, /u - is the static site under
+// site/, in rngdle's own furniture; src/worker.js serves it and mounts this module for
+// the legacy routes, and this module's old paths redirect there (see FRONT_END below).
 // EP per badge = the "Score (Decimal)" column from the source CSV.
 //
 // The badge `test` functions and the FAMILIES map are reconciled to full parity with the
@@ -2794,15 +2794,15 @@ export { compute, BADGES, FAMILIES, engineModuleSource, CARD_TIERS, cardTier,
 // The new front end
 // ---------------------------------------------------------------------------
 
-// Every page this Worker used to render itself - the calculator, /badges, /grid, /u -
-// is now rngdle.tools, a sibling repo that copies this module in under legacy/ and
-// mounts the routes below on its own Worker. When that Worker embeds this one it passes
-// its own origin as env.FRONT_END, so the redirects stay on-site; on its own
-// (rng.cubityfir.st, `npm run serve`) this points at the live site.
-const FRONT_END = 'https://rngdle.tools';
+// Every page this module used to render itself - the calculator, /badges, /grid, /u -
+// is now the static front end under site/, served by src/worker.js from the same
+// origin. That Worker only hands this module the legacy paths, so the redirects below
+// are for this module served on its own (`node test/browser.mjs`, an old deploy):
+// they go to env.FRONT_END when the caller names one, else to the request's origin.
+const FRONT_END = '';
 
-// Paths the new front end owns. A link the legacy pages emit (/n/123, /grid/pronic,
-// /other) redirects there rather than 404ing when this Worker is browsed on its own.
+// Paths the front end owns. A link the legacy pages emit (/n/123, /grid/pronic,
+// /other) redirects there rather than 404ing when this module is browsed on its own.
 const FRONT_END_PATHS = /^\/(?:$|beta\/?$|n\/\d|other$|analysis$|ep$|(?:grid|neighbours|luck|badges|u)(?:\/|$))/;
 
 // Old URL -> its home on the new front end. `/?n=696969` is `/n/696969` there and the old
@@ -2932,7 +2932,7 @@ export default {
     }
     // Everything this Worker used to render itself now lives on the new front end.
     if (FRONT_END_PATHS.test(url.pathname)) {
-      return Response.redirect(`${(env && env.FRONT_END) || FRONT_END}${frontEndPath(url)}`, 301);
+      return Response.redirect(`${(env && env.FRONT_END) || FRONT_END || url.origin}${frontEndPath(url)}`, 301);
     }
 
     return new Response('Not found', { status: 404 });

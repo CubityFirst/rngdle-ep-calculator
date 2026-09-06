@@ -1,11 +1,19 @@
-# RNGdle badge engine + legacy tools (Cloudflare Worker)
+# RNGdle sandbox (Cloudflare Worker)
 
-The badge rules behind [rngdle.tools](https://rngdle.tools), and the tools that were
-never ported there. This repo used to be the front end too - the calculator, `/badges`,
-`/grid`, `/u` - and all of that has moved: rngdle.tools is the front end now, drawn in
-rngdle's own furniture, and this Worker is what it embeds for the rest.
+One Worker, three parts:
 
-What is still served from here, and where it is reached:
+- **`site/`** - the front end: the sandbox, EP to Number, Analysis, Grid, Neighbours,
+  Luck, Badges, Profiles and Other, drawn in rngdle's own furniture around rngdle's own
+  vendored engine. Documented in [`site/README.md`](site/README.md).
+- **`src/index.js`** and friends - the badge engine reverse-engineered to full parity
+  with rngdle.com (this README), and the legacy tools the front end has no tab for.
+- **`src/worker.js`** - the entry point: `/api/rolls`, the legacy mount, static assets.
+
+Deployed at **rng.cubityfir.st**; rngdle.tools moves here later. This repo used to be
+the front end in its own right - the calculator, `/badges`, `/grid`, `/u` - and all
+of that is now `site/`.
+
+What `src/index.js` still serves, and where it is reached:
 
 | Route | What it is |
 | --- | --- |
@@ -16,30 +24,30 @@ What is still served from here, and where it is reached:
 | `/beta/<tool>` | The legacy lab - see below. |
 | `/api/palettes…` | The Box Lab's shared gallery (D1, `src/gallery.js`). |
 
-Every other path this Worker used to answer - `/`, `/?n=`, `/badges`, `/grid`, `/u/<name>`,
-the old `/beta` index - is a 301 to the same place on rngdle.tools (`FRONT_END` in
-`src/index.js`; `/?n=696969` becomes `/n/696969`, `/beta` becomes `/other`).
-
-**How rngdle.tools uses this.** Its `tools/sync-legacy.js` copies `src/*.js` and
-`schema.sql` into its `legacy/` directory byte for byte, and its Worker mounts that
-module for `/beta/`, `/chains`, `/engine.js` and the APIs, passing its own origin in as
-`env.FRONT_END` so the redirects above stay on-site. Its **Other** tab is drawn from
-`legacyCatalogue()` (`src/beta.js`): the titles, blurbs and marks the old `/beta` index
-used. So after a change here - a badge rule, a tool - re-run that sync over there and
-commit the copy; nothing is retyped on either side.
+`src/worker.js` hands this module only those paths. Every other path it used to answer
+- `/`, `/?n=`, `/badges`, `/grid`, `/u/<name>`, the old `/beta` index - is a 301 to
+the front end on the same origin (`FRONT_END_PATHS` in `src/index.js`; `/?n=696969`
+becomes `/n/696969`, `/beta` becomes `/other`), which is what keeps old links alive.
+The front end's **Other** tab is drawn from `legacyCatalogue()` (`src/beta.js`): the
+titles, blurbs and marks the old `/beta` index used, so a tool added to `BETA_TOOLS`
+gets a card with nothing retyped.
 
 ## Run / deploy
 
 ```bash
 npm install          # installs wrangler
-npm run dev          # local dev server (http://localhost:8787)
-npm run deploy       # publish to your Cloudflare account (wrangler login first)
+npm run serve        # plain-Node dev server, site/ straight from disk (http://127.0.0.1:8787)
+npm run dev          # wrangler dev: the same plus a local D1 for the gallery
+npm run check        # tools/check.cjs - vendored engine, EP index, markup, legacy catalogue
+npm run build        # tools/build-dist.cjs - assemble dist/ from site/
+npm run deploy       # gen-snapshot, then wrangler (check + build-dist run as its build step)
 npm test             # run the badge-logic test harness
 npm run test:browser # real-browser smoke test of /chains and the /beta tools
 ```
 
-The deploy target is `rng.cubityfir.st`. It still serves the legacy tools itself, and
-sends everything else to rngdle.tools, so old links keep working.
+The deploy target is `rng.cubityfir.st`. When rngdle's own bundle changes, `npm run
+refresh` re-vendors it into `site/vendor/` and `npm run ep-table` rebuilds the two
+shipped indexes; `npm run check` proves they agree (see `site/README.md`).
 
 ## Legacy lab (`/beta/<tool>`, `/chains`)
 
@@ -69,15 +77,15 @@ are the two halves of that protocol.
 | `/beta/economy` | **Badge pricing**, written up as a finding: EP turns out to be exactly `100 / P(earn)` for every badge, so supersession is the only thing that varies. |
 | `/beta/species` | The range grouped by **exact badge set** - distinct kinds, their rank-size curve, and the numbers that score like nothing else. |
 
-Ported to rngdle.tools, and gone from here: the calculator and its *Analyze all scores*
+Ported to `site/`, and gone from here: the calculator and its *Analyze all scores*
 panel (now **Sandbox** and **Analysis**), `/badges` (**Badges**, compact layout), `/grid`
 (**Grid**), `/u` (**Profiles**), `/beta/nearmiss` (**Neighbours**) and `/beta/luck`
-(**Luck**). The old `/beta` index is its **Other** tab.
+(**Luck**). The old `/beta` index is the **Other** tab.
 
 Three things worth knowing about the code:
 
-- Tool pages are marked `noindex`. Their only entry point is rngdle.tools' **Other**
-  tab; the rail down their left edge links to that site's tabs.
+- Tool pages are marked `noindex`. Their only entry point is the front end's **Other**
+  tab; the rail down their left edge links to its tabs.
 - The shared loading overlay is `.beta-ov`, deliberately prefixed: it is a full-screen
   fixed layer, so a tool reusing a bare class name would paint over the whole page.
 - `betaShell` prepends a no-op `__name` shim to every page script, because the clients

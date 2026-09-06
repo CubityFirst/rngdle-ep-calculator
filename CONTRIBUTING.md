@@ -4,23 +4,27 @@
 
 ```bash
 npm install          # installs wrangler
-npm run dev          # wrangler dev server (http://localhost:8787)
-npm run serve        # plain-Node dev server (same worker, no wrangler hotkey loop)
+npm run serve        # plain-Node dev server: site/ from disk + the Worker (http://127.0.0.1:8787)
+npm run dev          # wrangler dev: serves dist/, so run npm run build after editing site/; has a local D1
+npm run check        # tools/check.cjs - engine, indexes, markup, legacy catalogue
+npm run build        # tools/build-dist.cjs - assemble dist/ from site/
 npm test             # badge-logic test harness
 npm run test:browser # real-browser smoke test of /chains and the /beta tools
 npm run test:deploy  # the same, against the esbuild bundle - run before deploying
 npm run test:supersession  # /beta's family rule vs research/badge-tally.json (~2 min)
 npm run test:gallery # the /beta/boxes gallery's routes, against schema.sql
 npm run test:gallery-ui    # the same gallery in a browser, against a real D1
-npm run deploy       # publish to Cloudflare (runs the generator via predeploy)
+npm run deploy       # publish to Cloudflare (gen-snapshot first; wrangler runs check + build)
 ```
 
-This Worker is the engine and the legacy tools; the front end is
-[rngdle.tools](../rngdle.tools), which copies `src/` in under `legacy/` and mounts it.
-`/`, `/badges`, `/grid` and `/u` here are redirects to it, so on a local `npm run dev`
-the only pages are `/chains` and `/beta/<tool>`. After landing a change here, go to the
-rngdle.tools checkout and run `node tools/sync-legacy.js && node tools/check.js`, then
-commit its `legacy/` - that copy is what deploys.
+The repo is one Worker in three parts - `site/` (the front end), `src/index.js` and
+friends (the engine and the legacy tools), `src/worker.js` (the entry point) - see
+CLAUDE.md for the map and the rules that follow from it. `site/README.md` documents
+the front end page by page.
+
+`tools/check.cjs` is the deploy gate: wrangler's build runs it, so a stale EP index,
+a duplicate top-level name across the page scripts, or a legacy tool the site has
+already ported all fail the deploy rather than shipping.
 
 `test:browser` loads every legacy page at desktop and phone widths, waits for its
 sweep, and then drives its controls, failing on any console error, any horizontal
@@ -46,7 +50,7 @@ check runs both implementations over the whole range and compares them against t
 committed tally. Run it after touching `FAMILIES`, a badge's EP, or either copy of the
 supersession logic.
 
-**Run `npm run test:deploy` before any deploy that touches a page's client code.**
+**Run `npm run test:deploy` before any deploy that touches a legacy page's client code.**
 The tools ship their client to the browser via `Function.prototype.toString()`, and
 esbuild's `keepNames` rewrites those functions to call `__name()` - a helper that only
 exists inside the bundle. A page can therefore work perfectly from `src/` and be broken
@@ -77,8 +81,8 @@ Never hand-edit `*.gen.js` files.
   self-contained (no closing over module-level helpers that aren't shipped).
 - `FAMILY_NAMES` in `src/index.js` is index-aligned with `FAMILIES` - keep them in
   sync.
-- No new HTML pages here. New UI belongs in rngdle.tools; a tool that gets ported there
-  comes out of `BETA_TOOLS` / `RENDERERS` so the Other tab stops listing it.
+- New UI goes in `site/`. A tool ported there comes out of `BETA_TOOLS` / `RENDERERS`
+  so the Other tab stops listing it (`npm run check` enforces this).
 
 ## Commit messages
 
@@ -90,17 +94,18 @@ type(scope): summary in imperative mood
 
 Types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `chore`.
 
-Scopes are optional but preferred; the ones in use: `badges` (the badge table, EP
-values, families, history), `beta` (the `/beta` lab in `src/beta.js`), `chains`,
-`engine` (`/engine.js`, the sweep), `api` (`/api`, `/api/profile`), `gallery` (the Box
-Lab's D1 gallery in `src/gallery.js`), `gen` (generator/snapshots), `research`.
-Older history also uses `card`, `grid`, `analysis` and `profiles` for the pages that
-have since moved to rngdle.tools.
+Scopes are optional but preferred; the ones in use: `site` (the front end as a whole),
+or a tab - `sandbox`, `ep`, `analysis`, `grid`, `neighbours`, `luck`, `badges`,
+`profiles`, `other`; `engine` (the badge table, EP values, families, history,
+`/engine.js`), `beta` (the `/beta` lab in `src/beta.js`), `chains`, `api`, `gallery`
+(the Box Lab's D1 gallery), `gen` (generator/snapshots), `tools`, `research`.
+Older history uses `card` for the calculator that became the sandbox.
 
 Examples:
 
 ```
-feat(badges): track prod's 2026-09-05 bundle - Void Depth swallows the zero ladders
+feat(other): list the legacy tools from the engine's own catalogue
+feat(engine): track prod's 2026-09-05 bundle - Void Depth swallows the zero ladders
 fix(beta): keep the atlas picking pass off the main thread
 chore(gen): regenerate snapshots after EP rebalance
 docs: add contributing guide
