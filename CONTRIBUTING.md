@@ -95,11 +95,11 @@ type(scope): summary in imperative mood
 Types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `chore`.
 
 Scopes are optional but preferred; the ones in use: `site` (the front end as a whole),
-or a tab - `sandbox`, `ep`, `analysis`, `grid`, `neighbours`, `luck`, `badges`,
+or a tab - `roll`, `ep`, `analysis`, `grid`, `neighbours`, `luck`, `badges`,
 `profiles`, `other`; `engine` (the badge table, EP values, families, history,
 `/engine.js`), `beta` (the `/beta` lab in `src/beta.js`), `chains`, `api`, `gallery`
 (the Box Lab's D1 gallery), `gen` (generator/snapshots), `tools`, `research`.
-Older history uses `card` for the calculator that became the sandbox.
+Older history uses `card` for the calculator that became the Roll tab, and `sandbox` for the Roll tab itself.
 
 Examples:
 

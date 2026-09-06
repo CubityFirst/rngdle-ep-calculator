@@ -135,7 +135,7 @@ const NEIGHBOURS = (() => {
     $("nb-stat-label").textContent = `EP · ${tierOf(n).label}`;
     $("nb-input").value = String(n);
     cur = n;
-    document.title = `${fmt(n)} · Neighbours · RNGdle Sandbox`;
+    document.title = `${fmt(n)} · Neighbours · RNGdle Tools`;
     if (location.pathname.startsWith("/neighbours") && location.pathname !== `/neighbours/${n}`) {
       history.replaceState(null, "", `/neighbours/${n}`);
     }
@@ -214,7 +214,7 @@ const NEIGHBOURS = (() => {
   function show(n) {
     pending = n;
     if (!ready) { start(); return; }
-    if (n == null) { if (location.pathname === "/neighbours") history.replaceState(null, "", `/neighbours/${cur}`); document.title = `${fmt(cur)} · Neighbours · RNGdle Sandbox`; return; }
+    if (n == null) { if (location.pathname === "/neighbours") history.replaceState(null, "", `/neighbours/${cur}`); document.title = `${fmt(cur)} · Neighbours · RNGdle Tools`; return; }
     if (n !== cur) set(n);
   }
   return { show };

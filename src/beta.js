@@ -1393,7 +1393,7 @@ void main() {
       <div class="rd-row"><span>EP</span><b>${fmt(Math.round(EP[n]))}</b></div>
       <div class="rd-row"><span>Badges</span><b>${CNT[n]}</b></div>
       <div class="rd-row"><span>Cell</span><b>${n % SIDE}, ${Math.floor(n / SIDE)}</b></div>
-      <a class="rd-open" href="/n/${n}">Open in the sandbox &rarr;</a>`;
+      <a class="rd-open" href="/n/${n}">Open on the Roll tab &rarr;</a>`;
   }
 
   function flyTo(n) {
@@ -3942,7 +3942,7 @@ void main() {
       <div class="rd-row"><span>EP</span><b>${fmt(Math.round(EP[n]))}</b></div>
       <div class="rd-row"><span>Badges</span><b>${CNT[n]}</b></div>
       <div class="rd-row"><span>Score rank</span><b>${fmt(N - RANK[n])}</b></div>
-      <a class="rd-open" href="/n/${n}">Open in the sandbox &rarr;</a>`;
+      <a class="rd-open" href="/n/${n}">Open on the Roll tab &rarr;</a>`;
   }
 
   function cellAt(ev) {

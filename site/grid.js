@@ -332,7 +332,7 @@ const GRID = (() => {
     legendEl.innerHTML = legend;
     $("grid-stat").textContent = stat;
     $("grid-stat-label").textContent = statLabel;
-    document.title = `${docTitle} · RNGdle Sandbox`;
+    document.title = `${docTitle} · RNGdle Tools`;
   }
 
   /* --- the badge list ------------------------------------------------------------ */

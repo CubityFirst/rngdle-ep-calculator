@@ -2,7 +2,7 @@
 
 One Worker, three parts:
 
-- **`site/`** - the front end: the sandbox, EP to Number, Analysis, Grid, Neighbours,
+- **`site/`** - the front end: Roll, EP to Number, Analysis, Grid, Neighbours,
   Luck, Badges, Profiles and Other, drawn in rngdle's own furniture around rngdle's own
   vendored engine. Documented in [`site/README.md`](site/README.md).
 - **`src/index.js`** and friends - the badge engine reverse-engineered to full parity
@@ -78,7 +78,7 @@ are the two halves of that protocol.
 | `/beta/species` | The range grouped by **exact badge set** - distinct kinds, their rank-size curve, and the numbers that score like nothing else. |
 
 Ported to `site/`, and gone from here: the calculator and its *Analyze all scores*
-panel (now **Sandbox** and **Analysis**), `/badges` (**Badges**, compact layout), `/grid`
+panel (now **Roll** and **Analysis**), `/badges` (**Badges**, compact layout), `/grid`
 (**Grid**), `/u` (**Profiles**), `/beta/nearmiss` (**Neighbours**) and `/beta/luck`
 (**Luck**). The old `/beta` index is the **Other** tab.
 

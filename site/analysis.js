@@ -592,7 +592,7 @@ function renderPreview(numbers, total) {
   grid.replaceChildren();
   for (const n of numbers) {
     const pill = RARITY.RARITY_PALETTE[TIERS[tierOfN[n]].key].pill;
-    grid.appendChild(anNode(`<a href="/n/${n}" title="Open ${fmt(n)} in the sandbox · ${fmt(table[n])} EP" class="font-roll tabular-nums text-sm px-2 py-1 rounded-sm border transition-opacity hover:opacity-70 ${pill.bgClass} ${pill.textClass} ${pill.borderClass}">${n}</a>`));
+    grid.appendChild(anNode(`<a href="/n/${n}" title="Open ${fmt(n)} on the Roll tab · ${fmt(table[n])} EP" class="font-roll tabular-nums text-sm px-2 py-1 rounded-sm border transition-opacity hover:opacity-70 ${pill.bgClass} ${pill.textClass} ${pill.borderClass}">${n}</a>`));
   }
   anEl("an-preview-note").textContent = total > numbers.length
     ? `The first ${fmt(numbers.length)} of ${fmt(total)}, lowest first.` : total ? "Every match, lowest first." : "";

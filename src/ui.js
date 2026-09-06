@@ -186,7 +186,7 @@ const svg = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 // pages are served from its origin, so the links are relative and land on its tabs.
 export const NAV_GROUPS = [
   [null, [
-    ['calc', '/', 'Sandbox', 'calc'],
+    ['calc', '/', 'Roll', 'calc'],
     ['badges', '/badges', 'Badges', 'badges'],
     ['profiles', '/u', 'Profiles', 'profiles'],
   ]],

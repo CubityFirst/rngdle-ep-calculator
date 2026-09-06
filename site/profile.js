@@ -195,7 +195,7 @@ function renderProfile(members, capped) {
 
   setProfileHeading(members.map(m => m.username));
   // The router titled the tab from the URL; retitle from who actually loaded.
-  document.title = `${members.map(m => m.username).join(" + ")} · RNGdle Sandbox`;
+  document.title = `${members.map(m => m.username).join(" + ")} · RNGdle Tools`;
   const first = scored.map(r => r.rolledAt).filter(Boolean).sort()[0];
   profEl("profile-since").textContent = [
     combined ? `${members.length} players · ${fmt(scored.length)} roll${scored.length === 1 ? "" : "s"} pooled` : "",

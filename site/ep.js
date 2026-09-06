@@ -111,7 +111,7 @@ function renderMatches(target, matches) {
 
   const grid = card('<div class="flex flex-wrap justify-center gap-1.5"></div>');
   for (const n of matches.slice(0, SHOWN_LIMIT)) {
-    grid.appendChild(card(`<a href="/n/${n}" title="Open ${fmt(n)} in the sandbox" class="font-roll tabular-nums text-sm px-2 py-1 rounded-sm border transition-opacity hover:opacity-70 ${pill.bgClass} ${pill.textClass} ${pill.borderClass}">${n}</a>`));
+    grid.appendChild(card(`<a href="/n/${n}" title="Open ${fmt(n)} on the Roll tab" class="font-roll tabular-nums text-sm px-2 py-1 rounded-sm border transition-opacity hover:opacity-70 ${pill.bgClass} ${pill.textClass} ${pill.borderClass}">${n}</a>`));
   }
   res.appendChild(grid);
 
@@ -185,16 +185,16 @@ epEl("ep-input").addEventListener("input", e => {
 // the site now needs to be served rather than opened off disk — `file://` has
 // no such fallback, and every one of these links would 404 against it.
 const VIEWS = {
-  sandbox: { path: "/", title: "RNGdle Sandbox" },
-  ep: { path: "/ep", title: "EP to Number · RNGdle Sandbox" },
-  analysis: { path: "/analysis", title: "Analysis · RNGdle Sandbox" },
-  grid: { path: "/grid", title: "Grid · RNGdle Sandbox" },
-  neighbours: { path: "/neighbours", title: "Neighbours · RNGdle Sandbox" },
-  luck: { path: "/luck", title: "Luck · RNGdle Sandbox" },
-  badges: { path: "/badges", title: "Badges · RNGdle Sandbox" },
-  profiles: { path: "/u", title: "Profiles · RNGdle Sandbox" },
-  other: { path: "/other", title: "Other · RNGdle Sandbox" },
-  credits: { path: "/credits", title: "Credits · RNGdle Sandbox" },
+  sandbox: { path: "/", title: "RNGdle Tools" },
+  ep: { path: "/ep", title: "EP to Number · RNGdle Tools" },
+  analysis: { path: "/analysis", title: "Analysis · RNGdle Tools" },
+  grid: { path: "/grid", title: "Grid · RNGdle Tools" },
+  neighbours: { path: "/neighbours", title: "Neighbours · RNGdle Tools" },
+  luck: { path: "/luck", title: "Luck · RNGdle Tools" },
+  badges: { path: "/badges", title: "Badges · RNGdle Tools" },
+  profiles: { path: "/u", title: "Profiles · RNGdle Tools" },
+  other: { path: "/other", title: "Other · RNGdle Tools" },
+  credits: { path: "/credits", title: "Credits · RNGdle Tools" },
 };
 
 // Paths the Worker answers itself rather than the shell: the legacy tools under
@@ -255,8 +255,8 @@ function showView(path, layoutHint) {
   epEl("view-profile").hidden = view !== "profile";
   epEl("view-other").hidden = view !== "other";
   epEl("view-credits").hidden = view !== "credits";
-  document.title = badge ? `${badge.label} · RNGdle Sandbox`
-    : who ? `${who[1].split(",").join(" + ")} · RNGdle Sandbox`
+  document.title = badge ? `${badge.label} · RNGdle Tools`
+    : who ? `${who[1].split(",").join(" + ")} · RNGdle Tools`
     : VIEWS[view].title;
   // One badge is still the Badges tab as far as the nav is concerned.
   const tabView = view === "badge" ? "badges" : view === "profile" ? "profiles" : view;

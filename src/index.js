@@ -2662,10 +2662,10 @@ function renderChains() {
     </table></div>
   </section>
 
-  <footer><p>Every number scored with the same engine as <a href="/">the sandbox</a>; edges are
+  <footer><p>Every number scored with the same engine as <a href="/">the Roll tab</a>; edges are
     <span class="mono">n &rarr; EP(n)</span>, kept only where the score is itself a legal input. Loops are
-    found by walking each number until it meets a settled node or itself. Any number here opens in the
-    sandbox. See also <a href="/grid">the grid</a> and <a href="/badges">every badge</a>.</p></footer>
+    found by walking each number until it meets a settled node or itself. Any number here opens on the
+    Roll tab. See also <a href="/grid">the grid</a> and <a href="/badges">every badge</a>.</p></footer>
 </div>`;
 
   const script = `

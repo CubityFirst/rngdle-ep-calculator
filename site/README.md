@@ -1,6 +1,6 @@
 # The front end (site/)
 
-The RNGdle sandbox, served at rng.cubityfir.st (and, once the domain moves, at
+RNGdle Tools, served at rng.cubityfir.st (and, once the domain moves, at
 rngdle.tools). This directory is the static site; `src/worker.js` serves it, and the
 repo's root README covers the engine and the legacy tools around it. Paths below
 are relative to the repo root.
@@ -226,10 +226,10 @@ Which badges get a diagram at all — and which get an equation instead — is u
 
 The Share button copies rngdle's share format, transcribed from its own builder
 (`RARITY_SQUARE` and the badge/percentile layout are theirs), with this
-sandbox's wordmark and URL:
+site's wordmark and URL:
 
 ```
-RNGdle [Sandbox] 🎲 361061
+RNGdle [Tools] 🎲 361061
 
 ⬜ COMMON • Bottom 21%
 
@@ -347,7 +347,7 @@ higher badge in the same family supersedes it — grey keeps them faint, black
 paints them like non-members — using the same first-defined-wins tie rule the
 scorer uses. Six colour scales (grayscale and matplotlib's viridis family),
 zoom and pan by wheel, drag, pinch or the buttons, hover for the number, click
-to open it in the sandbox, right-click to copy the map as a PNG. Every view is
+to open it on the Roll tab, right-click to copy the map as a PNG. Every view is
 a shareable URL: `/grid`, `/grid/ep`, `/grid/rarity`, `/grid/pronic`. Each
 badge's page and compact card links to its map. The Konami code is honoured.
 
@@ -575,7 +575,7 @@ Badges tab's is, with the same Back behaviour.
 ## Other
 
 Ninth tab (`/other`). The engine in `src/` had a second life as a site of its
-own - the "solver" - and most of it has been ported here: its calculator is the Sandbox, *Analyze all scores*
+own - the "solver" - and most of it has been ported here: its calculator is the Roll tab, *Analyze all scores*
 is Analysis, its `/badges` is the compact Badges layout, its `/grid` is Grid, its
 `/u` is Profiles, and two of its `/beta` lab tools are Neighbours and Luck. What
 had not been ported had no way in. This tab is that way in: one card per remaining
@@ -584,7 +584,7 @@ solver's own style. The full map, tool by tool:
 
 | the solver (`src/`) | here |
 |---|---|
-| `/` calculator (click-to-type card, badge pills, contributor digits) | Sandbox, `/n/<number>` |
+| `/` calculator (click-to-type card, badge pills, contributor digits) | Roll, `/n/<number>` |
 | `/` *Analyze all scores* panel | Analysis |
 | `/badges` index (rule, EP, share, family, examples, history panel) | Badges, compact layout (no history panel) |
 | `/grid` (and its *Extend to 10,000,000* mode) | Grid (no 10M mode) |

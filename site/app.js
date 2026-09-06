@@ -1200,7 +1200,7 @@ function shareText() {
   const pct = ENGINE.getPercentileForScore(total);
 
   const lines = [
-    `RNGdle [Sandbox] 🎲 ${value}`,
+    `RNGdle [Tools] 🎲 ${value}`,
     "",
     `${RARITY_SQUARE[tier]} ${label} • ${formatPercentile(pct)}`,
     "",

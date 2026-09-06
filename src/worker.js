@@ -24,7 +24,7 @@ const VALID_USERNAME = /^[A-Za-z0-9_-]{1,40}$/;   // rngdle's own shape
 const PAGE = 100;                                 // the API's max page size
 const MAX_ROLLS = 2000;                           // 20 upstream requests, worst case
 const UPSTREAM = "https://www.rngdle.com/api/users";
-const UA = "rngdle.tools (+https://rngdle.tools) — sandbox profile view";
+const UA = "rngdle.tools (+https://rngdle.tools) — profile view";
 const CACHE = "public, max-age=300";
 
 // What the legacy Worker answers: the tools themselves, their browser engine, and the
