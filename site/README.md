@@ -33,8 +33,9 @@ npm run deploy             # gen-snapshot, then wrangler: check.js, build-dist.j
 `wrangler.toml` attaches the custom domain and runs `tools/check.cjs && tools/build-dist.cjs`
 as its build, so a bare `npx wrangler deploy` works too. `src/worker.js` is the
 server code. It answers `/api/rolls` - rngdle's rolls API sends no CORS header, so
-the Profiles page cannot read it from the browser - mounts `src/index.js` for the
-Other tab's tools (below), and hands every other path to the asset binding.
+the Profiles page cannot read it from the browser - and `/u/<names>/raw`, the
+profile as CSV for spreadsheets, mounts `src/index.js` for the Other tab's tools
+(below), and hands every other path to the asset binding.
 
 The EP index ships **gzipped** and is inflated in the browser with
 `DecompressionStream`. That is not premature: Cloudflare only auto-compresses by
@@ -513,6 +514,25 @@ which badges, how many times, what level — is recomputed locally from the
 numbers with the vendored engine. The proxy walks 100 rolls a page, stops at
 2,000, sends an identifying user-agent and caches for five minutes.
 
+**The same profile as CSV: `/u/<name>/raw`**, or `/u/<a>,<b>/raw` for several. The
+page is drawn in the browser, so a spreadsheet's `IMPORTHTML` / `IMPORTXML` only
+ever see the empty shell; this is the server-rendered version, for `IMPORTDATA`:
+
+```
+=IMPORTDATA("https://rng.cubityfir.st/u/alice,bob/raw")
+```
+
+One row per roll, newest first, players interleaved by date as the pooled page
+lists them: `date, user, roll, tier, ep, badges, hearts, poem, badge_list`, where
+`badge_list` is every badge the roll earned as `Label+EP` in one cell (a badge its
+family outranked shows `+0`). `?by=player` gives one row per player instead:
+`player, rolls, total_ep, badges` (distinct badges collected), `best_number,
+best_ep, first_roll, last_roll, capped`. EP, tier and badges are the engine's,
+from the number alone, exactly as on the page. A name that fails in a pooled
+list is dropped and named in an `x-missing-players` header; if none load, the
+answer is a 404 (unknown) or 502 (rngdle unreachable) with the names as text.
+Same 2,000-roll cap, ten-player cap and five-minute cache as the page.
+
 **The star levels are Fibonacci minus one.** rngdle computes them server-side,
 so they are in no chunk to copy. Derived instead: pair every pill's star count
 on a 100-roll profile against the number of times that badge was actually
@@ -665,7 +685,7 @@ there, `node tools/check.cjs` re-checks the catalogue.
 | `badges.js` | the Badges map and the per-badge page |
 | `profile.js` | the Profiles page |
 | `other.js` | the Other tab: the legacy tools' gallery |
-| `src/worker.js` | the `/api/rolls` proxy and the legacy mount; everything else falls through to the assets |
+| `src/worker.js` | the `/api/rolls` proxy, `/u/<names>/raw` (the profile as CSV) and the legacy mount; everything else falls through to the assets |
 | `src/index.js` etc. | the engine and the legacy tools - the root README |
 | `ep-table.bin.gz` | precomputed EP for every number, built by `tools/` |
 | `badge-table.bin.gz` | precomputed badge bitsets, one row per badge, same build |

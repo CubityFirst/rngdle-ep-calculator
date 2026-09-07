@@ -21,8 +21,10 @@ not_found_handling = "single-page-application"
 # Requests are matched against the static files first, and a navigation to a path
 # with no file gets the app shell without the Worker running at all - right for
 # /badges/pronic, wrong for /beta/atlas, which is a page of its own. These run the
-# Worker first: the legacy tools, their engine and APIs, and the old lab index.
-run_worker_first = ["/beta", "/beta/*", "/chains", "/engine.js", "/api", "/api/*"]
+# Worker first: the legacy tools, their engine and APIs, and the old lab index. /u/*
+# is here for /u/<names>/raw, the profile as CSV; every other /u path the Worker
+# hands straight back to the shell.
+run_worker_first = ["/beta", "/beta/*", "/chains", "/engine.js", "/api", "/api/*", "/u/*"]
 
 # Custom domain (zone cubityfir.st must be on this Cloudflare account).
 # Wrangler provisions the hostname + cert on `wrangler deploy`. rngdle.tools will

@@ -193,7 +193,7 @@ console.log("ok  finale glow + palettes for all " + TIERS.length + " tiers");
   // decode the path before matching it, or the pooled view is lost on refresh.
   assert.ok(epSrc.includes("pathOnly = decodeURIComponent(rawPath)"), "ep.js no longer decodes the path before routing (/u/a%2Cb must reach the pooled profile)");
   const indexHtml = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
-  for (const id of ["rolls-mode", "profile-note", "profile-players", "profile-players-rows", "profile-rolls", "profile-rolls-compact", "profile-rolls-head", "profile-rolls-rows"]) {
+  for (const id of ["rolls-mode", "profile-note", "profile-players", "profile-players-rows", "profile-rolls", "profile-rolls-compact", "profile-rolls-head", "profile-rolls-rows", "profile-raw"]) {
     assert.ok(indexHtml.includes(`id="${id}"`), `index.html is missing #${id} for the Profiles page`);
   }
   assert.ok(profileJs.includes("const MAX_COMBINE = 10"), "profile.js should cap a pooled view at 10 players, as the solver does");
@@ -420,9 +420,12 @@ console.log("ok  EP->Number spot values");
   const wranglerCfg = fs.readFileSync(path.join(REPO, "wrangler.toml"), "utf8");
   const rwf = /run_worker_first\s*=\s*\[([^\]]*)\]/.exec(wranglerCfg);
   assert.ok(rwf, "wrangler.toml has no run_worker_first list, so the legacy pages would render as the app shell");
-  for (const p of ["/beta", "/beta/*", "/chains", "/engine.js", "/api", "/api/*"]) {
+  for (const p of ["/beta", "/beta/*", "/chains", "/engine.js", "/api", "/api/*", "/u/*"]) {
     assert.ok(rwf[1].includes(JSON.stringify(p)), `wrangler.toml run_worker_first is missing ${p}`);
   }
+  // /u/<names>/raw is the profile as CSV for spreadsheets; it needs /u/* above, and
+  // the Worker must hand every other /u path back to the shell.
+  assert.ok(/RAW_PATH = \/\^\\\/u\\\/\(/.test(worker) && worker.includes('"text/csv; charset=utf-8"'), "src/worker.js no longer serves /u/<names>/raw as CSV");
   // The mount's path test, read out of worker.js so this checks the real one.
   const legacyRe = new RegExp(/const LEGACY = \/(.*)\/;/.exec(worker)[1]);
   // Load the module the way the Worker does (it is ESM; this file is not).
@@ -444,7 +447,7 @@ console.log("ok  EP->Number spot values");
   }
   assert.ok(legacyRe.test("/engine.js") && legacyRe.test("/api/profile") && legacyRe.test("/api/palettes") && legacyRe.test("/api"),
     "worker.js no longer forwards the engine and APIs the legacy tools read");
-  for (const p of ["/", "/grid", "/grid/pronic", "/badges", "/u", "/u/alice", "/luck", "/neighbours", "/other", "/api/rolls", "/api/other"]) {
+  for (const p of ["/", "/grid", "/grid/pronic", "/badges", "/u", "/u/alice", "/u/alice,bob/raw", "/luck", "/neighbours", "/other", "/api/rolls", "/api/other"]) {
     assert.ok(!legacyRe.test(p), `worker.js would hand ${p} to the legacy Worker`);
   }
   console.log(`ok  other: ${slugs.length} legacy tools (${slugs.join(", ")}), ${cat.findings.length} findings, none ported here`);

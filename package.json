@@ -13,7 +13,7 @@
     "ep-table": "node tools/build-ep-table.cjs",
     "predeploy": "node research/gen-snapshot.mjs",
     "deploy": "wrangler deploy",
-    "test": "node test/test.mjs",
+    "test": "node test/test.mjs && node test/raw.mjs",
     "test:browser": "node test/browser.mjs",
     "test:deploy": "node test/browser.mjs --bundle",
     "test:supersession": "node test/supersession.mjs",

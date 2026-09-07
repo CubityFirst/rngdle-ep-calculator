@@ -292,6 +292,7 @@ async function showProfile(names, layout) {
   const key = wanted.join(",");
   setProfileHeading(wanted);
   profEl("profile-luck").href = `/luck/${wanted.join(",")}`;     // the Luck tab's reading of the same players
+  profEl("profile-raw").href = `/u/${wanted.join(",")}/raw`;    // the same rolls as CSV (worker.js), for a spreadsheet
   setRollsMode(layout === "compact" || layout === "official" ? layout : readRollsMode(), false);
   profileStatus(`Loading ${wanted.join(", ")}…`, false);
   profileLoading = key;
