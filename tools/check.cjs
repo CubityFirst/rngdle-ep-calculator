@@ -189,6 +189,9 @@ console.log("ok  finale glow + palettes for all " + TIERS.length + " tiers");
   // Official / Compact switch as the Badges tab; pin the route and the markup.
   const epSrc = fs.readFileSync(path.join(ROOT, "ep.js"), "utf8");
   assert.ok(/\(\?:,\[A-Za-z0-9_-\]\{1,40\}\)\*\)\$\//.test(epSrc), "ep.js no longer routes /u/<a>,<b> to a pooled profile");
+  // ...and a reload can hand that route back as /u/a%2Cb, so the router has to
+  // decode the path before matching it, or the pooled view is lost on refresh.
+  assert.ok(epSrc.includes("pathOnly = decodeURIComponent(rawPath)"), "ep.js no longer decodes the path before routing (/u/a%2Cb must reach the pooled profile)");
   const indexHtml = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
   for (const id of ["rolls-mode", "profile-note", "profile-players", "profile-players-rows", "profile-rolls", "profile-rolls-compact", "profile-rolls-head", "profile-rolls-rows"]) {
     assert.ok(indexHtml.includes(`id="${id}"`), `index.html is missing #${id} for the Profiles page`);

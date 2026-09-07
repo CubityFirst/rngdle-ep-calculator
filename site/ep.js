@@ -220,7 +220,14 @@ function legacyPath(hash) {
 function showView(path, layoutHint) {
   // The query is only read on /badges, where ?layout= picks the map's layout;
   // everywhere else it is carried but ignored.
-  const [pathOnly, query = ""] = path.split("?");
+  const [rawPath, query = ""] = path.split("?");
+  // Match against the decoded path: a browser is free to hand back
+  // location.pathname with the comma in /u/alice,bob as %2C (some do on a
+  // reload), and matched raw that never fits the pooled-profile route, so the
+  // page silently fell back to the roll page. Decode once here, so every route
+  // below sees the path as it was written.
+  let pathOnly = rawPath;
+  try { pathOnly = decodeURIComponent(rawPath); } catch { /* malformed escape: match it raw */ }
   const clean = pathOnly.replace(/\/+$/, "") || "/";
   const num = /^\/n\/(\d+)$/.exec(clean);
   const slug = /^\/badges\/(.+)$/.exec(clean);
@@ -235,7 +242,7 @@ function showView(path, layoutHint) {
   const luckWho = /^\/luck\/([A-Za-z0-9_-]{1,40}(?:,[A-Za-z0-9_-]{1,40})*)$/.exec(clean);
   // A badge slug that names nothing falls back to the map rather than the roll
   // page — a stale link should land somewhere related.
-  const badge = slug ? showBadge(decodeURIComponent(slug[1])) : null;
+  const badge = slug ? showBadge(slug[1]) : null;
   const view = badge ? "badge"
     : slug ? "badges"
     : who ? "profile"
@@ -270,7 +277,7 @@ function showView(path, layoutHint) {
     // itself once that script has run; this covers navigating there later.
     if (view === "analysis" && typeof startAnalysis === "function") startAnalysis();
     // grid.js loads after this file too, and covers its own cold load the same way.
-    if (view === "grid" && typeof showGrid === "function") showGrid(gridSub ? decodeURIComponent(gridSub[1]) : "");
+    if (view === "grid" && typeof showGrid === "function") showGrid(gridSub ? gridSub[1] : "");
     if (view === "neighbours" && typeof showNeighbours === "function") showNeighbours(nbNum ? Number(nbNum[1]) : null);
     if (view === "luck" && typeof showLuck === "function") showLuck(luckWho ? luckWho[1].split(",") : null);
     if (view === "badges") buildBadges(new URLSearchParams(query).get("layout") || layoutHint);
