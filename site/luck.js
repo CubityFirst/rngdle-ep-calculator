@@ -122,6 +122,9 @@ const LUCK = (() => {
     const meanP = rows.reduce((s, r) => s + r.p, 0) / k;
     return { rows, k, best, beat, meanP, z: (meanP - .5) / Math.sqrt(1 / 12 / k), par: bestAt(k, .5) };
   }
+  // "Luckier than" runs to two decimals, so a strong set is not flattened into a
+  // round number — but a value that is not actually 0 or 1 never prints as one.
+  const beatPct = b => b > 0 && b < .0001 ? "&lt;0.01%" : b < 1 && b > .9999 ? "&gt;99.99%" : pct(b, 2);
   const verdictOf = b => b >= .999 ? "extraordinary" : b >= .99 ? "very lucky" : b >= .75 ? "lucky" : b >= .25 ? "about par" : b >= .01 ? "unlucky" : "brutal";
   const sigma = z => `${z >= 0 ? "+" : ""}${z.toFixed(2)}<span class="normal-case">σ</span>`;   // the site's caps would make it Σ
 
@@ -133,7 +136,7 @@ const LUCK = (() => {
       <div class="lk-vhead"><span class="type-subsection-title text-prose"></span><span class="type-meta text-prose-3 normal-case">${fmt(k)} roll${k === 1 ? "" : "s"} · ${days(k)}</span></div>
       <dl class="polished-card grid grid-cols-2 gap-4 p-4 sm:grid-cols-4 sm:p-5 lk-tiles">
         ${tile("Best roll", `${compact(best.ep)} EP`, `<a class="underline hover:text-prose" href="/n/${best.n}">${fmt(best.n)}</a> · ${(100 * best.p).toFixed(3)}th percentile`, pillOf(tierIdx(best.ep)))}
-        ${tile("Luckier than", pct(beat), `of players with ${fmt(k)} rolls — <b class="text-prose-2">${verdictOf(beat)}</b>`)}
+        ${tile("Luckier than", beatPct(beat), `of players with ${fmt(k)} rolls — <b class="text-prose-2">${verdictOf(beat)}</b>`)}
         ${tile(`Par for ${fmt(k)} rolls`, `${compact(par)} EP`, "what a median player's best would be", pillOf(tierIdx(par)))}
         ${tile("Overall drift", sigma(z), `mean percentile ${(100 * meanP).toFixed(1)} against 50 expected`)}
       </dl>
@@ -168,7 +171,7 @@ const LUCK = (() => {
         <thead><tr><th>Player</th><th>Rolls</th><th>Best</th><th>Luckier than</th><th>Verdict</th><th>Drift</th></tr></thead>
         <tbody>${ok.map(p => `<tr class="lk-player" data-u="${escHtml(p.username)}" title="Click for the full reading">
           <td class="pr-who"><a href="/u/${escHtml(p.username)}">${escHtml(p.username)}</a></td><td class="pr-dim">${fmt(p.st.k)}</td>
-          <td class="pr-ep">${compact(p.st.best.ep)}</td><td class="pr-ep">${pct(p.st.beat)}</td><td class="pr-dim">${verdictOf(p.st.beat)}</td><td class="pr-dim">${sigma(p.st.z)}</td></tr>`).join("")}</tbody>
+          <td class="pr-ep">${compact(p.st.best.ep)}</td><td class="pr-ep">${beatPct(p.st.beat)}</td><td class="pr-dim">${verdictOf(p.st.beat)}</td><td class="pr-dim">${sigma(p.st.z)}</td></tr>`).join("")}</tbody>
       </table></div>
       <p class="type-meta text-prose-3 normal-case mt-2">Click a row for that player's full reading.${bad.length ? ` Couldn't load ${escHtml(bad.map(p => p.username).join(", "))}.` : ""}</p>`;
     for (const tr of $("lk-verdict").querySelectorAll(".lk-player")) {
