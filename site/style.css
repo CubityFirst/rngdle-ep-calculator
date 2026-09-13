@@ -58,9 +58,27 @@
 .nav-tab:hover { background-color: var(--surface-raised); color: var(--prose) }
 .nav-tab.is-active { background-color: var(--surface-raised); color: var(--prose) }
 /* Nine tabs with labels need ~1,200px beside the theme toggle and the Real
-   Game button; under that the tabs show their icons alone (each carries its
-   name as a title, set by ep.js). rngdle's own markup hides them under sm. */
-@media (max-width: 1359px) { .nav-tab > span { display: none !important } }
+   Game button. Under that only the active tab keeps its name; the rest fold
+   their label away to the icon and slide it open again on hover or focus,
+   like an accordion (each also carries its name as a title, set by ep.js).
+   rngdle's own markup hides the labels under sm; this overrides that too, so
+   a phone still shows which tab it is on. */
+@media (max-width: 1359px) {
+  .nav-tab { gap: 0 }
+  .nav-tab > span {
+    display: inline-block !important;
+    max-width: 0;
+    margin-left: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-width .25s ease, margin-left .25s ease, opacity .2s ease;
+  }
+  .nav-tab.is-active > span, .nav-tab:hover > span, .nav-tab:focus-visible > span {
+    max-width: 8rem;
+    margin-left: .25rem;
+    opacity: 1;
+  }
+}
 /* Even as icons alone, nine tabs are wider than a phone (390px measured 416px).
    The strip scrolls sideways inside the header rather than widening the page,
    with its scrollbar hidden; each tab keeps its size instead of being squeezed. */

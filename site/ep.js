@@ -270,6 +270,11 @@ function showView(path, layoutHint) {
   for (const tab of document.querySelectorAll(".nav-tab")) {
     tab.classList.toggle("is-active", tab.dataset.view === tabView);
   }
+  // On a phone the strip scrolls sideways, and the active tab is the one that
+  // has its name showing, so keep it in view. Its label slides open over
+  // .25s (style.css), hence the second pass once it has its final width.
+  revealActiveTab();
+  setTimeout(revealActiveTab, 300);
   if (view !== "sandbox") {
     finishAnyRoll();              // don't leave a roll animating out of sight
     if (view === "ep") epEl("ep-input").focus();
@@ -314,6 +319,14 @@ addEventListener("popstate", () => showView(location.pathname + location.search,
 // The tabs drop their labels on narrower screens (extra.css), so each carries
 // its name as a tooltip.
 for (const tab of document.querySelectorAll(".nav-tab")) tab.title = tab.textContent.trim();
+
+function revealActiveTab() {
+  const nav = epEl("nav"), tab = nav.querySelector(".nav-tab.is-active");
+  if (!tab) return;
+  const t = tab.getBoundingClientRect(), n = nav.getBoundingClientRect();
+  if (t.left < n.left) nav.scrollLeft += t.left - n.left;
+  else if (t.right > n.right) nav.scrollLeft += t.right - n.right;
+}
 
 // One-time upgrade for a hash URL from before the switch.
 const legacy = legacyPath(location.hash);
