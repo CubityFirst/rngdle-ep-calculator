@@ -307,8 +307,13 @@ log/log histogram stacked by card tier, narrowed by a number range (the slice of
 length, an EP window (or an exact total), rarity tier, and the badges a number
 must or must not earn.
 Each badge is tri-state — neutral, ✓ require, ✕ exclude. The ✓ set combines
-either way: **all** (a number earns every one) or **any** (it earns at least one,
-so *Duality or Funny Numbers*); ✕ is always "none of these". The picker itself
+three ways: **all** (a number earns every one), **any** (it earns at least one, so
+*Duality or Funny Numbers*), and **advanced** — a group builder, AND inside a
+group and OR between them, so *(Nice + Even) or (Prime Number + Odd)*. That is
+plain disjunctive normal form, which the other two modes are the single-group and
+one-badge-per-group cases of; switching seeds one from the other rather than
+emptying the builder, and switching back flattens the groups to their union. ✕ is
+always "none of these", and excluding a badge drops it from every group. The picker itself
 narrows by the free-text box and by rarity chips — the six rarities badges carry,
 Common through Mythic — and a set's own button excludes the badges of it the list
 is currently showing, so it follows both. Hiding a rarity does not clear a badge

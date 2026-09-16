@@ -169,6 +169,34 @@ html, body { background-color: var(--site-bg) }
    so a rarity looks the same wherever it is used. */
 .an-badge-rarities { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .5rem }
 
+/* The advanced builder: one row per group, "or" between them, and the active
+   row — the one a ✓ in the picker lands in — lit by the accent border. */
+.an-groups { display: flex; flex-direction: column; gap: .25rem; width: 100% }
+.an-grp {
+  display: flex; align-items: flex-start; gap: .5rem; padding: .4rem .5rem;
+  border: 1px solid var(--outline); border-radius: 8px; cursor: pointer;
+  transition: border-color .15s, background-color .15s;
+}
+.an-grp:hover { border-color: var(--outline-strong) }
+.an-grp.is-active { border-color: var(--outline-strong); background-color: var(--surface-raised) }
+.an-grp-n {
+  flex: 0 0 auto; min-width: 1.25rem; text-align: center; padding: .1rem 0;
+  border-radius: 4px; background-color: var(--surface); color: var(--prose-3);
+}
+.an-grp.is-active .an-grp-n { color: var(--prose) }
+.an-grp-chips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: .25rem }
+.an-grp-del { flex: 0 0 auto; background: none; border: 0; color: var(--prose-3); cursor: pointer; padding: .1rem .25rem }
+.an-grp-del:hover { color: var(--prose) }
+.an-grp-or { align-self: center; color: var(--prose-3) }
+.an-grp-add {
+  align-self: flex-start; margin-top: .15rem; padding: .2rem .6rem; cursor: pointer;
+  border: 1px dashed var(--outline); border-radius: 9999px; background: none; color: var(--prose-3);
+  transition: color .15s, border-color .15s;
+}
+.an-grp-add:hover { color: var(--prose); border-color: var(--outline-strong) }
+/* A badge already used by another group: marked, but not as "on" here. */
+.an-tri button.is-elsewhere { color: var(--prose-2); border-style: dashed }
+
 .an-badge-list { max-height: 24rem; overflow-y: auto; padding-right: .25rem; display: flex; flex-direction: column; gap: .5rem }
 .an-group-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .25rem .35rem; position: sticky; top: 0; background-color: var(--surface) }
 /* The body is uppercase by default on rngdle, and badge names are proper nouns. */
