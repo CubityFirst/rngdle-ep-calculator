@@ -302,8 +302,10 @@ link to `/n/<number>`, which opens that number on the sandbox page.
 ## Analysis
 
 Third page (`/analysis`). The EP distribution over the whole roll range, as a
-log/log histogram stacked by card tier, narrowed by digit length, an EP window
-(or an exact total), rarity tier, and the badges a number must or must not earn.
+log/log histogram stacked by card tier, narrowed by a number range (the slice of
+0-1,000,000 to search, inclusive, so `1,000` to `5,000` is 4,001 numbers), digit
+length, an EP window (or an exact total), rarity tier, and the badges a number
+must or must not earn.
 Each badge is tri-state — neutral, ✓ require, ✕ exclude — and a whole set can be
 excluded at once. Under the chart: the rarity breakdown (which doubles as the
 legend and as the tier toggles), the first 48 matching numbers linking into the

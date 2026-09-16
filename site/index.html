@@ -107,13 +107,13 @@
   </main>
 
   <!-- Analysis: the EP distribution over the whole roll range, filtered by
-       length, EP, rarity and badges. Laid out like the Badges tab: a page
+       number range, length, EP, rarity and badges. Laid out like the Badges tab: a page
        header, then polished cards. -->
   <main class="flex-1 w-full mx-auto max-w-2xl p-3 sm:p-6 major-section-stack text-left" id="view-analysis" hidden>
     <header class="flex items-start justify-between gap-6">
       <div class="min-w-0">
         <h1 class="type-page-title text-prose">Analysis</h1>
-        <p class="type-prose mt-2 text-prose-2">Every number from 0 to 1,000,000, scored. Narrow it by length, EP, rarity, and the badges it must or must not earn.</p>
+        <p class="type-prose mt-2 text-prose-2">Every number from 0 to 1,000,000, scored. Narrow it by range, length, EP, rarity, and the badges it must or must not earn.</p>
       </div>
       <div class="shrink-0 text-right">
         <div class="type-data text-2xl font-bold text-prose" id="an-stat-total">—</div>
@@ -129,6 +129,18 @@
     <section id="an-controls" class="an-controls" hidden>
       <h2 class="sr-only">Filters</h2>
       <div class="an-side">
+        <div class="polished-card p-4">
+          <div class="type-label text-prose-3 mb-3">Number range</div>
+          <div class="an-ep-rows">
+            <label class="an-ep-row"><span class="type-ui text-prose-2 normal-case">from</span>
+              <input id="an-n-min" type="text" inputmode="numeric" autocomplete="off" placeholder="0" aria-label="Lowest number searched"
+                     class="type-data text-right px-2 py-1 rounded-sm border border-outline bg-surface text-prose placeholder:text-prose-3 focus:outline-none focus:border-outline-strong"></label>
+            <label class="an-ep-row"><span class="type-ui text-prose-2 normal-case">to</span>
+              <input id="an-n-max" type="text" inputmode="numeric" autocomplete="off" placeholder="1,000,000" aria-label="Highest number searched"
+                     class="type-data text-right px-2 py-1 rounded-sm border border-outline bg-surface text-prose placeholder:text-prose-3 focus:outline-none focus:border-outline-strong"></label>
+          </div>
+          <p class="type-meta text-prose-3 normal-case mt-2" id="an-n-note">Inclusive, anywhere in 0–1,000,000.</p>
+        </div>
         <div class="polished-card p-4">
           <div class="type-label text-prose-3 mb-3">Number length</div>
           <div id="an-lengths" class="an-lengths"></div>

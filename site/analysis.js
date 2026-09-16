@@ -154,18 +154,28 @@ function epBounds() {
   return { min: p("an-ep-min"), max: p("an-ep-max"), eq: p("an-ep-eq") };
 }
 
+// The slice of the roll range to search, inclusive at both ends. Blank means
+// the open end, out-of-range values are clamped, and a reversed pair is read
+// the way round the user meant rather than matching nothing.
+function numBounds() {
+  const p = id => { const d = anEl(id).value.replace(/[^0-9]/g, ""); return d ? Math.min(Number(d), TABLE_LEN - 1) : null; };
+  let lo = p("an-n-min"), hi = p("an-n-max");
+  if (lo != null && hi != null && lo > hi) { const t = lo; lo = hi; hi = t; }
+  return { lo, hi, from: lo == null ? 0 : lo, to: hi == null ? TABLE_LEN - 1 : hi };
+}
+
 // One pass over the table with every filter applied. `visit(n, ep, tier)` is
 // called for each number passing the length, EP and badge filters, before the
 // tier filter — the rarity breakdown is a facet count, so it sees every tier.
 function scan(visit) {
-  const t = table, ep = epBounds();
+  const t = table, ep = epBounds(), num = numBounds();
   const req = [...required], exc = [...excluded];
   const epMin = ep.min == null ? -Infinity : ep.min;
   const epMax = ep.max == null ? Infinity : ep.max;
   const epEq = ep.eq;
   let lenMask = 0xFE;
   for (const L of offLengths) lenMask &= ~(1 << L);
-  outer: for (let n = 0; n < TABLE_LEN; n++) {
+  outer: for (let n = num.from; n <= num.to; n++) {
     if (!(lenMask & (1 << lenOfN[n]))) continue;
     const v = t[n];
     if (epEq != null ? v !== epEq : (v <= epMin || v >= epMax)) continue;
@@ -238,6 +248,13 @@ function syncLengthTiles() {
     t.classList.toggle("is-on", on);
     t.setAttribute("aria-pressed", String(on));
   }
+}
+
+function syncRangeNote() {
+  const { lo, hi, from, to } = numBounds();
+  anEl("an-n-note").textContent = lo == null && hi == null
+    ? "Inclusive, anywhere in 0–1,000,000."
+    : `${fmt(from)}–${fmt(to)} · ${fmt(to - from + 1)} number${to === from ? "" : "s"} searched.`;
 }
 
 function buildTierChips() {
@@ -341,6 +358,7 @@ function renderSelected() {
 function wireControls() {
   buildLengthTiles();
   buildBadgeList();
+  syncRangeNote();
 
   anEl("an-badge-search").addEventListener("input", buildBadgeList);
   anEl("an-badge-list").addEventListener("click", e => {
@@ -370,10 +388,11 @@ function wireControls() {
   });
   anEl("an-clear").addEventListener("click", () => {
     required.clear(); excluded.clear(); offLengths.clear(); offTiers.clear();
-    for (const id of ["an-ep-min", "an-ep-max", "an-ep-eq"]) anEl(id).value = "";
+    for (const id of ["an-ep-min", "an-ep-max", "an-ep-eq", "an-n-min", "an-n-max"]) anEl(id).value = "";
     anEl("an-ep-min").disabled = anEl("an-ep-max").disabled = false;
     syncLengthTiles();
     syncTierChips();
+    syncRangeNote();
     afterBadgeChange();
   });
 
@@ -383,6 +402,17 @@ function wireControls() {
       const digits = e.target.value.replace(/[^0-9]/g, "").slice(0, 12);
       e.target.value = digits ? fmt(Number(digits)) : "";
       if (id === "an-ep-eq") anEl("an-ep-min").disabled = anEl("an-ep-max").disabled = !!digits;
+      scheduleFilter();
+    });
+  }
+
+  // The range ends are clamped to the roll range as they are typed, so the
+  // box can never show a number the scan would not reach.
+  for (const id of ["an-n-min", "an-n-max"]) {
+    anEl(id).addEventListener("input", e => {
+      const digits = e.target.value.replace(/[^0-9]/g, "").slice(0, 9);
+      e.target.value = digits ? fmt(Math.min(Number(digits), TABLE_LEN - 1)) : "";
+      syncRangeNote();
       scheduleFilter();
     });
   }
@@ -418,10 +448,13 @@ function renderStats(s) {
 
 function renderSummary(total) {
   const parts = [];
+  const num = numBounds();
+  const ranged = num.lo != null || num.hi != null;
   if (offLengths.size) {
     const on = [1, 2, 3, 4, 5, 6, 7].filter(L => !offLengths.has(L));
-    parts.push(on.length === 1 ? `${on[0]}-digit numbers` : `${on.join(", ")}-digit numbers`);
-  } else parts.push("every number from 0 to 1,000,000");
+    const lens = on.length === 1 ? `${on[0]}-digit numbers` : `${on.join(", ")}-digit numbers`;
+    parts.push(ranged ? `${lens} from ${fmt(num.from)} to ${fmt(num.to)}` : lens);
+  } else parts.push(`every number from ${fmt(num.from)} to ${fmt(num.to)}`);
   const ep = epBounds();
   if (ep.eq != null) parts.push(`scoring exactly ${fmt(ep.eq)} EP`);
   else if (ep.min != null && ep.max != null) parts.push(`scoring between ${fmt(ep.min)} and ${fmt(ep.max)} EP`);
