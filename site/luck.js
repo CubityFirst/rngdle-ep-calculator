@@ -20,7 +20,7 @@
 const LUCK_MAX_ROLLS = 10000;               // the best-of-N slider's top
 const LUCK_MILESTONES = [[1, "one roll"], [7, "a week"], [30, "a month"], [100, "100 days"], [365, "a year"], [1000, "1,000 days"], [3650, "ten years"]];
 const LUCK_MAX_PLAYERS = 6;                 // the solver's cap on a comparison
-const LUCK_ROWS = 8;                        // best rolls listed in a reading
+const LUCK_ROWS = 8;                        // best rolls shown before "show all"
 
 const LUCK = (() => {
   const $ = id => document.getElementById(id);
@@ -143,12 +143,42 @@ const LUCK = (() => {
       <div class="lk-strip" title="Every roll by percentile, worst on the left">${rows.slice().sort((a, b) => a.p - b.p).map(r =>
         `<i style="left:${(100 * r.p).toFixed(3)}%;background:${tiers[tierIdx(r.ep)].accent}" title="${fmt(r.n)} · ${fmt(r.ep)} EP · ${(100 * r.p).toFixed(2)}th percentile"></i>`).join("")}</div>
       <div class="lk-stripax type-meta text-prose-3 normal-case"><span>worst possible</span><span>median</span><span>best possible</span></div>
-      <div class="pr-table-wrap rounded-lg border border-outline bg-surface overflow-x-auto mt-4"><table class="pr-table">
-        <thead><tr><th>Roll</th><th>Tier</th><th>Percentile</th><th>EP</th></tr></thead>
-        <tbody>${rows.slice(0, LUCK_ROWS).map(r => `<tr><td class="pr-num"><a href="/n/${r.n}">${fmt(r.n)}</a></td><td>${pillOf(tierIdx(r.ep))}</td><td class="pr-dim">${(100 * r.p).toFixed(2)}th</td><td class="pr-ep">${fmt(r.ep)}</td></tr>`).join("")}</tbody>
-      </table></div>
-      ${rows.length > LUCK_ROWS ? `<p class="type-meta text-prose-3 normal-case mt-2">The best ${LUCK_ROWS} of ${fmt(rows.length)}.</p>` : ""}`;
+      <div class="lk-list mt-4" id="lk-list">
+        <div class="pr-table-wrap rounded-lg border border-outline bg-surface overflow-x-auto"><table class="pr-table">
+          <thead><tr><th>Roll</th><th>Tier</th><th>Percentile</th><th>EP</th></tr></thead>
+          <tbody>${rows.map(r => `<tr><td class="pr-num"><a href="/n/${r.n}">${fmt(r.n)}</a></td><td>${pillOf(tierIdx(r.ep))}</td><td class="pr-dim">${(100 * r.p).toFixed(2)}th</td><td class="pr-ep">${fmt(r.ep)}</td></tr>`).join("")}</tbody>
+        </table></div>
+        <span class="lk-fade" aria-hidden="true"></span>
+      </div>
+      ${rows.length > LUCK_ROWS ? `<button type="button" class="lk-more type-meta" id="lk-more" aria-controls="lk-list" aria-expanded="false"></button>` : ""}`;
     $("lk-verdict").querySelector(".lk-vhead span").textContent = label;
+    if (rows.length > LUCK_ROWS) {
+      clipRolls(false);
+      // Open it when it is clipped, collapse it when it is not.
+      $("lk-more").addEventListener("click", () => clipRolls($("lk-list").classList.contains("is-clipped")));
+    }
+  }
+
+  // Collapsed, the table is cut through the middle of the ninth row rather than
+  // between rows, so the list visibly continues rather than looking like it ends
+  // at eight. Every row is in the DOM either way — the toggle is a height — so
+  // the ones out of view give up their tab stop while they are unreachable.
+  function clipRolls(open) {
+    const box = $("lk-list"), wrap = box.firstElementChild, btn = $("lk-more");
+    const trs = wrap.querySelectorAll("tbody tr");
+    box.classList.toggle("is-clipped", !open);
+    if (open) wrap.style.maxHeight = "";
+    else {
+      wrap.style.maxHeight = "";                                  // measure unclipped
+      const cut = trs[LUCK_ROWS].getBoundingClientRect();
+      wrap.style.maxHeight = `${Math.round(cut.top - wrap.getBoundingClientRect().top + cut.height / 2)}px`;
+    }
+    trs.forEach((tr, i) => {
+      const a = tr.querySelector("a");
+      if (a) a.tabIndex = !open && i >= LUCK_ROWS ? -1 : 0;
+    });
+    btn.setAttribute("aria-expanded", String(open));
+    btn.textContent = open ? `The best ${LUCK_ROWS} of ${fmt(trs.length)}` : `Show all ${fmt(trs.length)} rolls`;
   }
 
   // A player's rolls come through the site's own proxy (profile.js's fetchRolls),
