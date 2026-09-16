@@ -145,8 +145,8 @@ const LUCK = (() => {
       <div class="lk-stripax type-meta text-prose-3 normal-case"><span>worst possible</span><span>median</span><span>best possible</span></div>
       <div class="lk-list mt-4" id="lk-list">
         <div class="pr-table-wrap rounded-lg border border-outline bg-surface overflow-x-auto"><table class="pr-table">
-          <thead><tr><th>Roll</th><th>Tier</th><th>Percentile</th><th>EP</th></tr></thead>
-          <tbody>${rows.map(r => `<tr><td class="pr-num"><a href="/n/${r.n}">${fmt(r.n)}</a></td><td>${pillOf(tierIdx(r.ep))}</td><td class="pr-dim">${(100 * r.p).toFixed(2)}th</td><td class="pr-ep">${fmt(r.ep)}</td></tr>`).join("")}</tbody>
+          <thead><tr><th class="pr-rank" title="Best first">#</th><th>Roll</th><th>Tier</th><th>Percentile</th><th>EP</th></tr></thead>
+          <tbody>${rows.map((r, i) => `<tr><td class="pr-rank">${i + 1}</td><td class="pr-num"><a href="/n/${r.n}">${fmt(r.n)}</a></td><td>${pillOf(tierIdx(r.ep))}</td><td class="pr-dim">${(100 * r.p).toFixed(2)}th</td><td class="pr-ep">${fmt(r.ep)}</td></tr>`).join("")}</tbody>
         </table></div>
         <span class="lk-fade" aria-hidden="true"></span>
         ${rows.length > LUCK_ROWS ? `<button type="button" class="lk-more type-meta" id="lk-more" aria-controls="lk-list" aria-expanded="false"></button>` : ""}

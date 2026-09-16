@@ -520,6 +520,10 @@ html, body { background-color: var(--site-bg) }
 .pr-table .pr-who a { font-family: var(--font-mono), monospace; color: var(--prose-2); text-decoration: none }
 .pr-table .pr-who a:hover { text-decoration: underline }
 .pr-table .pr-who .at { color: var(--prose-3) }
+.pr-table .pr-rank {
+  width: 1%; text-align: right; padding-right: .4rem;
+  font-family: var(--font-mono), monospace; color: var(--prose-3);
+}
 .pr-table .pr-dim { color: var(--prose-3) }
 .pr-table .pr-pill { display: inline-block; padding: .1rem .5rem; border-radius: 4px; font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase }
 /* The poem is the row's title; a mark says there is one to hover for. */

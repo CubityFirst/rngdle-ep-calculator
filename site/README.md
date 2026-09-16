@@ -437,7 +437,8 @@ that?" question has a closed-form answer:
   its percentile, "luckier than" — F(best)^k, the exact share of players with
   k rolls whose best would come in below it — par for that many rolls, and the
   overall drift as a z-score on the mean percentile. Every roll sits as a tick
-  on a percentile strip, and the table under it lists the best eight, clipped
+  on a percentile strip, and the table under it ranks them best first,
+  #1 to #k, showing eight, clipped
   inside the ninth row - through its padding, not its text - so the list visibly
   continues, with a
   *show all* toggle. Every row is in the DOM either way — the toggle is a height,
