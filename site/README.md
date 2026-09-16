@@ -306,8 +306,13 @@ log/log histogram stacked by card tier, narrowed by a number range (the slice of
 0-1,000,000 to search, inclusive, so `1,000` to `5,000` is 4,001 numbers), digit
 length, an EP window (or an exact total), rarity tier, and the badges a number
 must or must not earn.
-Each badge is tri-state — neutral, ✓ require, ✕ exclude — and a whole set can be
-excluded at once. Under the chart: the rarity breakdown (which doubles as the
+Each badge is tri-state — neutral, ✓ require, ✕ exclude. The ✓ set combines
+either way: **all** (a number earns every one) or **any** (it earns at least one,
+so *Duality or Funny Numbers*); ✕ is always "none of these". The picker itself
+narrows by the free-text box and by rarity chips — the six rarities badges carry,
+Common through Mythic — and a set's own button excludes the badges of it the list
+is currently showing, so it follows both. Hiding a rarity does not clear a badge
+already chosen; the chips under the list keep it in view. Under the chart: the rarity breakdown (which doubles as the
 legend and as the tier toggles), the first 48 matching numbers linking into the
 sandbox, a copy-all, a `.csv` of every match, and the first 12 numbers that earn
 each badge as a `.txt`.

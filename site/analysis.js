@@ -148,6 +148,8 @@ const required = new Set();     // badge indices a number must earn
 const excluded = new Set();     // badge indices a number must not earn
 const offLengths = new Set();   // digit lengths toggled off
 const offTiers = new Set();     // tier indices toggled off
+const offRarities = new Set(); // badge rarities hidden from the picker
+let reqMode = "all";            // how the required badges combine: "all" (AND) or "any" (OR)
 
 function epBounds() {
   const p = id => { const v = parseFloat(anEl(id).value.replace(/[^0-9.]/g, "")); return Number.isFinite(v) && v >= 0 ? v : null; };
@@ -170,6 +172,7 @@ function numBounds() {
 function scan(visit) {
   const t = table, ep = epBounds(), num = numBounds();
   const req = [...required], exc = [...excluded];
+  const anyMode = reqMode === "any" && req.length > 0;
   const epMin = ep.min == null ? -Infinity : ep.min;
   const epMax = ep.max == null ? Infinity : ep.max;
   const epEq = ep.eq;
@@ -179,7 +182,13 @@ function scan(visit) {
     if (!(lenMask & (1 << lenOfN[n]))) continue;
     const v = t[n];
     if (epEq != null ? v !== epEq : (v <= epMin || v >= epMax)) continue;
-    for (let j = 0; j < req.length; j++) if (!earns(n, req[j])) continue outer;
+    if (anyMode) {
+      let hit = false;
+      for (let j = 0; j < req.length; j++) if (earns(n, req[j])) { hit = true; break; }
+      if (!hit) continue;
+    } else {
+      for (let j = 0; j < req.length; j++) if (!earns(n, req[j])) continue outer;
+    }
     for (let j = 0; j < exc.length; j++) if (earns(n, exc[j])) continue outer;
     visit(n, v, tierOfN[n]);
   }
@@ -250,6 +259,14 @@ function syncLengthTiles() {
   }
 }
 
+function syncReqMode() {
+  for (const b of anEl("an-req-mode").children) {
+    const on = b.dataset.mode === reqMode;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-pressed", String(on));
+  }
+}
+
 function syncRangeNote() {
   const { lo, hi, from, to } = numBounds();
   anEl("an-n-note").textContent = lo == null && hi == null
@@ -283,28 +300,65 @@ function syncTierChips() {
   }
 }
 
+// The rarities badges actually carry — no badge is priced low enough to be
+// Trash — lowest first, each wearing the accent its pill has on the card.
+const BADGE_RARITIES = (() => {
+  const low = new Map(), count = new Map();
+  for (const b of badgeMeta) {
+    if (!low.has(b.rarity) || b.score < low.get(b.rarity)) low.set(b.rarity, b.score);
+    count.set(b.rarity, (count.get(b.rarity) || 0) + 1);
+  }
+  return [...low].sort((a, b) => a[1] - b[1]).map(([label]) => {
+    const pal = RARITY.RARITY_PALETTE[label.toLowerCase()];
+    return { label, count: count.get(label), accent: pal ? pal.highlight.border : "var(--prose-3)" };
+  });
+})();
+
+function buildRarityChips() {
+  const wrap = anEl("an-badge-rarities");
+  wrap.replaceChildren();
+  for (const r of BADGE_RARITIES) {
+    const b = anNode(`<button type="button" class="an-tier is-on type-label" aria-pressed="true" data-rarity="${escHtml(r.label)}">${escHtml(r.label)}</button>`);
+    b.style.setProperty("--tc", r.accent);
+    b.title = `${r.label} · ${r.count} badges`;
+    wrap.appendChild(b);
+  }
+}
+function syncRarityChips() {
+  for (const b of anEl("an-badge-rarities").children) {
+    const on = !offRarities.has(b.dataset.rarity);
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-pressed", String(on));
+  }
+}
+
 // Each badge is tri-state — neutral, required (✓) or excluded (✕) — and the
 // two are exclusive, so turning one on clears the other. A set's own button
-// excludes every badge in it at once; a matching "require all" is left out,
-// since almost no number can earn a whole set.
+// excludes the badges of that set the list is currently showing, so it follows
+// the search and rarity chips rather than reaching past them; a matching
+// "require all" is left out, since almost no number can earn a whole set.
+const visibleSetIds = new Map();   // set name -> the badge ids it is showing
 function buildBadgeList() {
   const list = anEl("an-badge-list");
   const filter = anEl("an-badge-search").value.trim().toLowerCase();
   list.replaceChildren();
+  visibleSetIds.clear();
   for (const g of badgeSetGroups()) {
     const ids = g.ids.filter(id => {
-      if (!filter) return true;
       const b = badgeMeta[badgeByIndex.get(id)];
+      if (offRarities.has(b.rarity)) return false;
+      if (!filter) return true;
       return b.label.toLowerCase().includes(filter) || b.rarity.toLowerCase().includes(filter) || g.name.toLowerCase().includes(filter);
     });
     if (!ids.length) continue;
+    visibleSetIds.set(g.name, ids);
     const allOff = ids.every(id => excluded.has(badgeByIndex.get(id)));
     const group = anNode(`
       <div class="an-group">
         <div class="an-group-head">
           <span class="an-group-name type-ui"><span>${g.icon}</span> <span></span></span>
           <button type="button" class="an-group-x type-meta ${allOff ? "is-on" : ""}" data-set="${escHtml(g.name)}"
-                  title="${allOff ? "Stop excluding this set" : "Exclude every badge in this set"}">${allOff ? "set excluded" : "exclude set"}</button>
+                  title="${allOff ? "Stop excluding these" : `Exclude ${ids.length === g.ids.length ? "every badge in this set" : `the ${ids.length} shown here`}`}">${allOff ? "set excluded" : "exclude set"}</button>
         </div>
         <div class="an-group-rows"></div>
       </div>`);
@@ -341,7 +395,8 @@ function renderSelected() {
   box.replaceChildren();
   const chips = (set, kind) => {
     const wrap = anNode(`<div class="an-sel-row"><span class="type-meta text-prose-3 normal-case"></span></div>`);
-    wrap.firstElementChild.textContent = kind === "do" ? "Must earn:" : "Must not earn:";
+    wrap.firstElementChild.textContent = kind !== "do" ? "Must not earn:"
+      : set.size > 1 ? (reqMode === "any" ? "Must earn any of:" : "Must earn all of:") : "Must earn:";
     for (const i of set) {
       const b = badgeMeta[i];
       const chip = anNode(`<button type="button" class="an-chip an-chip-${kind} type-meta" data-bi="${i}" title="Remove"><span></span> ×</button>`);
@@ -357,16 +412,36 @@ function renderSelected() {
 
 function wireControls() {
   buildLengthTiles();
+  buildRarityChips();
   buildBadgeList();
   syncRangeNote();
 
   anEl("an-badge-search").addEventListener("input", buildBadgeList);
+  anEl("an-badge-rarities").addEventListener("click", e => {
+    const b = e.target.closest(".an-tier");
+    if (!b) return;
+    const r = b.dataset.rarity;
+    if (e.shiftKey) { offRarities.clear(); for (const o of BADGE_RARITIES) if (o.label !== r) offRarities.add(o.label); }
+    else if (offRarities.has(r)) offRarities.delete(r);
+    else offRarities.add(r);
+    if (offRarities.size === BADGE_RARITIES.length) offRarities.clear();   // never hide them all
+    syncRarityChips();
+    buildBadgeList();
+  });
+  anEl("an-req-mode").addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (!b || b.dataset.mode === reqMode) return;
+    reqMode = b.dataset.mode;
+    syncReqMode();
+    renderSelected();
+    scheduleFilter();
+  });
   anEl("an-badge-list").addEventListener("click", e => {
     const setBtn = e.target.closest(".an-group-x");
     if (setBtn) {
-      const g = badgeSetGroups().find(g => g.name === setBtn.dataset.set);
-      if (!g) return;
-      const idx = g.ids.map(id => badgeByIndex.get(id));
+      const ids = visibleSetIds.get(setBtn.dataset.set);
+      if (!ids) return;
+      const idx = ids.map(id => badgeByIndex.get(id));
       const allOff = idx.every(i => excluded.has(i));
       for (const i of idx) setBadge(i, allOff ? null : "dont");
       afterBadgeChange();
@@ -387,11 +462,15 @@ function wireControls() {
     afterBadgeChange();
   });
   anEl("an-clear").addEventListener("click", () => {
-    required.clear(); excluded.clear(); offLengths.clear(); offTiers.clear();
+    required.clear(); excluded.clear(); offLengths.clear(); offTiers.clear(); offRarities.clear();
+    reqMode = "all";
     for (const id of ["an-ep-min", "an-ep-max", "an-ep-eq", "an-n-min", "an-n-max"]) anEl(id).value = "";
     anEl("an-ep-min").disabled = anEl("an-ep-max").disabled = false;
+    anEl("an-badge-search").value = "";
     syncLengthTiles();
     syncTierChips();
+    syncRarityChips();
+    syncReqMode();
     syncRangeNote();
     afterBadgeChange();
   });
@@ -460,7 +539,10 @@ function renderSummary(total) {
   else if (ep.min != null && ep.max != null) parts.push(`scoring between ${fmt(ep.min)} and ${fmt(ep.max)} EP`);
   else if (ep.min != null) parts.push(`scoring more than ${fmt(ep.min)} EP`);
   else if (ep.max != null) parts.push(`scoring less than ${fmt(ep.max)} EP`);
-  if (required.size) parts.push(`earning ${[...required].map(i => badgeMeta[i].label).join(" + ")}`);
+  if (required.size) {
+    const labels = [...required].map(i => badgeMeta[i].label);
+    parts.push(reqMode === "any" && labels.length > 1 ? `earning ${labels.join(" or ")}` : `earning ${labels.join(" + ")}`);
+  }
   if (excluded.size) parts.push(`not earning ${[...excluded].map(i => badgeMeta[i].label).join(", ")}`);
   if (offTiers.size) parts.push(`in ${TIERS.filter((_, i) => !offTiers.has(i)).map(t => t.label.toLowerCase()).join(" / ")}`);
   anEl("an-summary").textContent = `${fmt(total)} match: ${parts.join(", ")}.`;
