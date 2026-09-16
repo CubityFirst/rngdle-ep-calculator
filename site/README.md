@@ -309,11 +309,20 @@ must or must not earn.
 Each badge is tri-state — neutral, ✓ require, ✕ exclude. The ✓ set combines
 three ways: **all** (a number earns every one), **any** (it earns at least one, so
 *Duality or Funny Numbers*), and **advanced** — a group builder, AND inside a
-group and OR between them, so *(Nice + Even) or (Prime Number + Odd)*. That is
-plain disjunctive normal form, which the other two modes are the single-group and
-one-badge-per-group cases of; switching seeds one from the other rather than
-emptying the builder, and switching back flattens the groups to their union. ✕ is
-always "none of these", and excluding a badge drops it from every group. The picker itself
+group and OR between them, with its own ✕ per group, so *(Even + no Prime Number)
+or (Odd + no Nice)*. That is full disjunctive normal form, which the other two
+modes are the single-group and one-badge-per-group cases of, and the per-group ✕
+is the part one global exclusion list cannot express: two different nots on two
+different groups. A badge can be required by one group and excluded by another.
+
+Switching modes carries the selection rather than dropping it. Into advanced,
+"all" seeds one group and "any" one group per badge, and the global exclusions go
+onto every group — identical matches, since a NOT outside an OR distributes into
+it — so exclusions live in one place while the builder is open. A builder that
+already has groups is left alone, so toggling the switch cannot throw away a
+combination. Coming back out, the positives flatten to their union and only the
+exclusions every group shares survive; the simple modes have nowhere to put the
+rest. The picker itself
 narrows by the free-text box and by rarity chips — the six rarities badges carry,
 Common through Mythic — and a set's own button excludes the badges of it the list
 is currently showing, so it follows both. Hiding a rarity does not clear a badge

@@ -155,9 +155,14 @@ let reqMode = "all";            // how the required badges combine: "all", "any"
 // simple modes are the two shapes it can already express, kept as their own
 // controls because they are what almost every filter wants; switching seeds
 // one from the other rather than starting the builder empty.
-let reqGroups = [[]];           // badge indices per group; a group is an AND, the list an OR
-let activeGrp = 0;              // the group a ✓ in the picker adds to
-const liveGroups = () => reqGroups.filter(g => g.length);
+// A group is {has, not}: badges it must earn and badges it must not, AND-ed
+// together; the list of groups is the OR. Excluding per group is what makes it
+// a full DNF — "even but not prime, or odd but not a palindrome" needs the two
+// nots attached to different groups, which one global exclusion list cannot say.
+let reqGroups = [{ has: [], not: [] }];
+let activeGrp = 0;              // the group a ✓ or ✕ in the picker lands in
+const liveGroups = () => reqGroups.filter(g => g.has.length || g.not.length);
+const newGroup = () => ({ has: [], not: [] });
 
 function epBounds() {
   const p = id => { const v = parseFloat(anEl(id).value.replace(/[^0-9.]/g, "")); return Number.isFinite(v) && v >= 0 ? v : null; };
@@ -197,7 +202,8 @@ function scan(visit) {
         for (let g = 0; g < groups.length && !hit; g++) {
           const grp = groups[g];
           hit = true;
-          for (let j = 0; j < grp.length; j++) if (!earns(n, grp[j])) { hit = false; break; }
+          for (let j = 0; j < grp.has.length; j++) if (!earns(n, grp.has[j])) { hit = false; break; }
+          if (hit) for (let j = 0; j < grp.not.length; j++) if (earns(n, grp.not[j])) { hit = false; break; }
         }
         if (!hit) continue;
       }
@@ -385,14 +391,17 @@ function buildBadgeList() {
     const rows = group.lastElementChild;
     for (const id of ids) {
       const b = badgeMeta[badgeByIndex.get(id)];
-      const on = isRequired(b.i);
-      const elsewhere = reqMode === "adv" && !on && reqGroups.some((g, gi) => gi !== activeGrp && g.includes(b.i));
+      const on = isRequired(b.i), off = isExcluded(b.i);
+      const adv = reqMode === "adv", G = activeGrp + 1;
+      const elsewhere = adv && !on && !off && usedElsewhere(b.i) ? " is-elsewhere" : "";
+      const note = elsewhere ? " (another group already uses it)" : "";
       const row = anNode(`
         <div class="an-badge">
           <span class="an-tri" data-bi="${b.i}">
-            <button type="button" data-act="do" class="${on ? "is-on" : elsewhere ? "is-elsewhere" : ""}" aria-pressed="${on}"
-                    title="${reqMode === "adv" ? (on ? `Remove from group ${activeGrp + 1}` : `Add to group ${activeGrp + 1}`) + (elsewhere ? " (it is already in another group)" : "") : "Require this badge"}">✓</button>
-            <button type="button" data-act="dont" class="${excluded.has(b.i) ? "is-on" : ""}" title="Exclude this badge" aria-pressed="${excluded.has(b.i)}">✕</button>
+            <button type="button" data-act="do" class="${on ? "is-on" : elsewhere.trim()}" aria-pressed="${on}"
+                    title="${adv ? `${on ? "Remove from" : "Require in"} group ${G}${note}` : "Require this badge"}">✓</button>
+            <button type="button" data-act="dont" class="${off ? "is-on" : elsewhere.trim()}" aria-pressed="${off}"
+                    title="${adv ? `${off ? "Stop excluding from" : "Exclude from"} group ${G}${note}` : "Exclude this badge"}">✕</button>
           </span>
           <span class="an-badge-name type-ui"><span>${b.emoji}</span> <span></span></span>
           <em class="type-meta">${escHtml(b.rarity)}</em>
@@ -405,35 +414,53 @@ function buildBadgeList() {
   if (!list.children.length) list.appendChild(anNode(`<p class="type-meta text-prose-3 normal-case px-1 py-2">No badge matches that.</p>`));
 }
 
-// In advanced mode ✓ means "in the group being built"; ✕ is global either way,
-// so excluding a badge also drops it from every group.
-const isRequired = i => reqMode === "adv" ? reqGroups[activeGrp].includes(i) : required.has(i);
-function dropFromGroups(i) { reqGroups = reqGroups.map(g => g.filter(x => x !== i)); if (!reqGroups.length) reqGroups = [[]]; }
+// In advanced mode both ✓ and ✕ mean "in the group being built", so the same
+// badge can be required by one group and excluded by another; in the simple
+// modes they are the two flat sets.
+const isRequired = i => reqMode === "adv" ? reqGroups[activeGrp].has.includes(i) : required.has(i);
+const isExcluded = i => reqMode === "adv" ? reqGroups[activeGrp].not.includes(i) : excluded.has(i);
+const usedElsewhere = i => reqGroups.some((g, gi) => gi !== activeGrp && (g.has.includes(i) || g.not.includes(i)));
 function setBadge(i, state) {
-  excluded.delete(i);
   if (reqMode === "adv") {
-    dropFromGroups(i);
-    if (state === "do") reqGroups[activeGrp] = reqGroups[activeGrp].concat(i);
-  } else {
-    required.delete(i);
-    if (state === "do") required.add(i);
+    const g = reqGroups[activeGrp];
+    reqGroups = reqGroups.map((o, gi) => gi !== activeGrp ? o
+      : { has: g.has.filter(x => x !== i), not: g.not.filter(x => x !== i) });
+    if (state === "do") reqGroups[activeGrp].has = reqGroups[activeGrp].has.concat(i);
+    if (state === "dont") reqGroups[activeGrp].not = reqGroups[activeGrp].not.concat(i);
+    return;
   }
-  if (state === "dont") { excluded.add(i); if (reqMode === "adv") dropFromGroups(i); }
+  required.delete(i); excluded.delete(i);
+  if (state === "do") required.add(i);
+  if (state === "dont") excluded.add(i);
 }
 
-// Switching modes carries the selection across rather than dropping it: into
-// advanced, "all" is one group and "any" is one group per badge — exactly the
-// two shapes those modes mean; out of it, the groups flatten to their union.
+// Switching modes carries the selection across rather than dropping it. Into
+// advanced, "all" seeds one group and "any" one group per badge — exactly the
+// two shapes those modes mean — and the global exclusions go onto every group,
+// which leaves the matches identical (a NOT outside an OR distributes into it).
+// A builder that already has groups is left alone, so toggling the switch by
+// accident cannot throw away a combination someone built. Coming back out, the
+// positives flatten to their union and only the exclusions every group shares
+// survive, since the simple modes have nowhere else to put the rest.
 function setReqMode(next) {
   if (next === reqMode) return;
   if (next === "adv") {
-    const ids = [...required];
-    reqGroups = !ids.length ? [[]] : reqMode === "any" ? ids.map(i => [i]) : [ids];
+    if (!liveGroups().length) {
+      const ids = [...required];
+      reqGroups = !ids.length ? [newGroup()] : reqMode === "any" ? ids.map(i => ({ has: [i], not: [] })) : [{ has: ids, not: [] }];
+    }
+    // Whatever was excluded globally goes onto every group, so the builder is
+    // the only place exclusions live while it is open and the two kinds never
+    // show at once. The matches do not move: a NOT outside an OR distributes in.
+    for (const g of reqGroups) for (const i of excluded) if (!g.not.includes(i)) g.not.push(i);
+    required.clear(); excluded.clear();
   } else if (reqMode === "adv") {
-    required.clear();
-    for (const g of reqGroups) for (const i of g) required.add(i);
+    const live = liveGroups();
+    required.clear(); excluded.clear();
+    for (const g of live) for (const i of g.has) required.add(i);
+    if (live.length) for (const i of live[0].not) if (live.every(g => g.not.includes(i))) excluded.add(i);
   }
-  activeGrp = 0;
+  activeGrp = Math.min(activeGrp, reqGroups.length - 1);
   reqMode = next;
   syncReqMode();
 }
@@ -475,11 +502,12 @@ function renderGroups(box) {
                 ${reqGroups.length === 1 ? "hidden" : ""}>✕</button>
       </div>`);
     const chips = row.querySelector(".an-grp-chips");
-    if (!g.length) chips.appendChild(anNode(`<span class="type-meta text-prose-3 normal-case">empty — pick badges from the list</span>`));
-    for (const i of g) {
+    if (!g.has.length && !g.not.length) chips.appendChild(anNode(`<span class="type-meta text-prose-3 normal-case">empty — ✓ and ✕ in the list land here</span>`));
+    for (const [kind, ids] of [["do", g.has], ["dont", g.not]]) for (const i of ids) {
       const b = badgeMeta[i];
-      const chip = anNode(`<button type="button" class="an-chip an-chip-do type-meta" data-bi="${i}" data-g="${gi}" title="Remove from this group"><span></span> ×</button>`);
-      chip.firstElementChild.textContent = `${b.emoji} ${b.label}`;
+      const chip = anNode(`<button type="button" class="an-chip an-chip-${kind} type-meta" data-bi="${i}" data-g="${gi}" data-kind="${kind}"
+                                   title="Remove from this group"><span></span> ×</button>`);
+      chip.firstElementChild.textContent = `${kind === "do" ? "" : "✕ "}${b.emoji} ${b.label}`;
       chips.appendChild(chip);
     }
     wrap.appendChild(row);
@@ -487,7 +515,8 @@ function renderGroups(box) {
   wrap.appendChild(anNode(`<button type="button" class="an-grp-add type-meta" id="an-grp-add">+ another group</button>`));
   const live = liveGroups().length;
   wrap.appendChild(anNode(`<p class="type-meta text-prose-3 normal-case mt-1">${
-    live ? "A number matches when it earns every badge in any one group." : "No group has a badge yet, so every number still matches."
+    live ? "A number matches when it satisfies any one group: every ✓ in it, and none of its ✕."
+         : "No group has a badge yet, so every number still matches."
   }</p>`));
   box.appendChild(wrap);
 }
@@ -531,20 +560,20 @@ function wireControls() {
     if (!btn) return;
     const i = Number(btn.parentElement.dataset.bi);
     const act = btn.dataset.act;
-    const on = act === "do" ? isRequired(i) : excluded.has(i);
+    const on = act === "do" ? isRequired(i) : isExcluded(i);
     setBadge(i, on ? null : act);
     afterBadgeChange();
   });
   anEl("an-badge-sel").addEventListener("click", e => {
     if (e.target.closest("#an-grp-add")) {
-      reqGroups = reqGroups.concat([[]]);
+      reqGroups = reqGroups.concat([newGroup()]);
       activeGrp = reqGroups.length - 1;
       return afterBadgeChange();
     }
     const del = e.target.closest(".an-grp-del");
     if (del) {
       reqGroups = reqGroups.filter((_, gi) => gi !== Number(del.dataset.del));
-      if (!reqGroups.length) reqGroups = [[]];
+      if (!reqGroups.length) reqGroups = [newGroup()];
       activeGrp = Math.min(activeGrp, reqGroups.length - 1);
       return afterBadgeChange();
     }
@@ -553,7 +582,10 @@ function wireControls() {
       const gi = chip.dataset.g;
       // A chip in the builder only leaves its own group; elsewhere it clears outright.
       if (gi == null) setBadge(Number(chip.dataset.bi), null);
-      else reqGroups = reqGroups.map((g, j) => j === Number(gi) ? g.filter(x => x !== Number(chip.dataset.bi)) : g);
+      else {
+        const bi = Number(chip.dataset.bi), key = chip.dataset.kind === "do" ? "has" : "not";
+        reqGroups = reqGroups.map((g, j) => j !== Number(gi) ? g : { ...g, [key]: g[key].filter(x => x !== bi) });
+      }
       return afterBadgeChange();
     }
     const row = e.target.closest(".an-grp");
@@ -571,7 +603,7 @@ function wireControls() {
   });
   anEl("an-clear").addEventListener("click", () => {
     required.clear(); excluded.clear(); offLengths.clear(); offTiers.clear(); offRarities.clear();
-    reqMode = "all"; reqGroups = [[]]; activeGrp = 0;
+    reqMode = "all"; reqGroups = [newGroup()]; activeGrp = 0;
     for (const id of ["an-ep-min", "an-ep-max", "an-ep-eq", "an-n-min", "an-n-max"]) anEl(id).value = "";
     anEl("an-ep-min").disabled = anEl("an-ep-max").disabled = false;
     anEl("an-badge-search").value = "";
@@ -648,7 +680,8 @@ function renderSummary(total) {
   else if (ep.min != null) parts.push(`scoring more than ${fmt(ep.min)} EP`);
   else if (ep.max != null) parts.push(`scoring less than ${fmt(ep.max)} EP`);
   if (reqMode === "adv") {
-    const gs = liveGroups().map(g => g.map(i => badgeMeta[i].label).join(" + "));
+    const gs = liveGroups().map(g => g.has.map(i => badgeMeta[i].label)
+      .concat(g.not.map(i => `no ${badgeMeta[i].label}`)).join(" + "));
     if (gs.length) parts.push(`earning ${gs.length > 1 ? gs.map(g => `(${g})`).join(" or ") : gs[0]}`);
   } else if (required.size) {
     const labels = [...required].map(i => badgeMeta[i].label);
@@ -842,8 +875,10 @@ function matchingRows() {
 
 function exportCsv() {
   const rows = matchingRows();
-  const reqIds = reqMode === "adv" ? [...new Set(liveGroups().flat())] : [...required];
-  const slug = reqIds.map(i => badgeMeta[i].label).concat([...excluded].map(i => `no-${badgeMeta[i].label}`))
+  const live = reqMode === "adv" ? liveGroups() : null;
+  const reqIds = live ? [...new Set(live.flatMap(g => g.has))] : [...required];
+  const excIds = live ? [...new Set(live.flatMap(g => g.not))] : [...excluded];
+  const slug = reqIds.map(i => badgeMeta[i].label).concat(excIds.map(i => `no-${badgeMeta[i].label}`))
     .join("+").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
   const head = `# ${anEl("an-summary").textContent}\nnumber,totalEP,rarity`;
   download(`rngdle-${slug || "numbers"}.csv`, head + "\n" + rows.map(r => r.join(",")).join("\n"), "text/csv");
