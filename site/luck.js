@@ -149,8 +149,8 @@ const LUCK = (() => {
           <tbody>${rows.map(r => `<tr><td class="pr-num"><a href="/n/${r.n}">${fmt(r.n)}</a></td><td>${pillOf(tierIdx(r.ep))}</td><td class="pr-dim">${(100 * r.p).toFixed(2)}th</td><td class="pr-ep">${fmt(r.ep)}</td></tr>`).join("")}</tbody>
         </table></div>
         <span class="lk-fade" aria-hidden="true"></span>
-      </div>
-      ${rows.length > LUCK_ROWS ? `<button type="button" class="lk-more type-meta" id="lk-more" aria-controls="lk-list" aria-expanded="false"></button>` : ""}`;
+        ${rows.length > LUCK_ROWS ? `<button type="button" class="lk-more type-meta" id="lk-more" aria-controls="lk-list" aria-expanded="false"></button>` : ""}
+      </div>`;
     $("lk-verdict").querySelector(".lk-vhead span").textContent = label;
     if (rows.length > LUCK_ROWS) {
       clipRolls(false);
