@@ -120,7 +120,16 @@ html, body { background-color: var(--site-bg) }
    rarity accents rngdle's palette hands the script. The Tailwind bundle only
    ships the utilities rngdle's own markup uses, so the grids live here. */
 .an-controls { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: 1rem; align-items: start }
-@media (max-width: 640px) { .an-controls { grid-template-columns: minmax(0, 1fr) } }
+/* Rarity is seven wide pills — full width under both columns, rather than
+   wrapping onto three lines in the 15rem side and leaving it long. */
+.an-rarity { grid-column: 1 / -1 }
+/* Stacked, the badge list is a long scroll, so rarity keeps its old place
+   above it rather than being pushed past it. */
+@media (max-width: 640px) {
+  .an-controls { grid-template-columns: minmax(0, 1fr) }
+  .an-side { order: -1 }
+  .an-badges { order: 1 }
+}
 .an-side { display: flex; flex-direction: column; gap: 1rem }
 .an-lengths { display: grid; grid-template-columns: repeat(7, 1fr); gap: .25rem }
 .an-len {
