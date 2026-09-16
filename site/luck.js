@@ -159,10 +159,13 @@ const LUCK = (() => {
     }
   }
 
-  // Collapsed, the table is cut through the middle of the ninth row rather than
-  // between rows, so the list visibly continues rather than looking like it ends
-  // at eight. Every row is in the DOM either way — the toggle is a height — so
-  // the ones out of view give up their tab stop while they are unreachable.
+  // Collapsed, the table stops inside the ninth row rather than between rows, so
+  // the list visibly continues rather than looking like it ends at eight. The cut
+  // lands in that row's top padding, not through it: halfway down slices the
+  // number and the tier pill through the middle, which reads as a rendering
+  // fault rather than as a peek. What shows is the row's top border and its
+  // padding, under the fade. Every row is in the DOM either way — the toggle is
+  // a height — so the ones out of view give up their tab stop while unreachable.
   function clipRolls(open) {
     const box = $("lk-list"), wrap = box.firstElementChild, btn = $("lk-more");
     const trs = wrap.querySelectorAll("tbody tr");
@@ -170,8 +173,10 @@ const LUCK = (() => {
     if (open) wrap.style.maxHeight = "";
     else {
       wrap.style.maxHeight = "";                                  // measure unclipped
+      const cell = trs[LUCK_ROWS].firstElementChild;
+      const pad = parseFloat(getComputedStyle(cell).paddingTop) || 8;
       const cut = trs[LUCK_ROWS].getBoundingClientRect();
-      wrap.style.maxHeight = `${Math.round(cut.top - wrap.getBoundingClientRect().top + cut.height / 2)}px`;
+      wrap.style.maxHeight = `${Math.round(cut.top - wrap.getBoundingClientRect().top + pad)}px`;
     }
     trs.forEach((tr, i) => {
       const a = tr.querySelector("a");
