@@ -114,10 +114,11 @@ const LUCK = (() => {
   // among players with that many rolls (F(best)^k), and whether the whole set
   // drifted high or low — percentiles are uniform, so their mean has a known
   // spread and a streak shows up as sigma.
-  function score(nums) {
-    const valid = nums.filter(n => Number.isInteger(n) && n >= 0 && n < TABLE_LEN);
+  function score(nums, dates) {
+    const valid = nums.map((n, i) => ({ n, at: dates && dates[i] }))
+      .filter(r => Number.isInteger(r.n) && r.n >= 0 && r.n < TABLE_LEN);
     if (!valid.length) return null;
-    const rows = valid.map(n => ({ n, ep: table[n], p: cdf(table[n]) })).sort((a, b) => b.ep - a.ep);
+    const rows = valid.map(r => ({ ...r, ep: table[r.n], p: cdf(table[r.n]) })).sort((a, b) => b.ep - a.ep);
     const k = rows.length, best = rows[0], beat = Math.pow(best.p, k);
     const meanP = rows.reduce((s, r) => s + r.p, 0) / k;
     return { rows, k, best, beat, meanP, z: (meanP - .5) / Math.sqrt(1 / 12 / k), par: bestAt(k, .5) };
@@ -128,10 +129,11 @@ const LUCK = (() => {
   const verdictOf = b => b >= .999 ? "extraordinary" : b >= .99 ? "very lucky" : b >= .75 ? "lucky" : b >= .25 ? "about par" : b >= .01 ? "unlucky" : "brutal";
   const sigma = z => `${z >= 0 ? "+" : ""}${z.toFixed(2)}<span class="normal-case">σ</span>`;   // the site's caps would make it Σ
 
-  function reading(nums, label) {
-    const st = score(nums);
+  function reading(nums, label, dates) {
+    const st = score(nums, dates);
     if (!st) { $("lk-verdict").innerHTML = `<p class="type-ui text-prose-2 normal-case">No usable numbers — they need to be whole numbers from 0 to 1,000,000.</p>`; return; }
     const { rows, k, best, beat, meanP, z, par } = st;
+    const dated = rows.some(r => r.at);            // pasted numbers carry none
     $("lk-verdict").innerHTML = `
       <div class="lk-vhead"><span class="type-subsection-title text-prose"></span><span class="type-meta text-prose-3 normal-case">${fmt(k)} roll${k === 1 ? "" : "s"} · ${days(k)}</span></div>
       <dl class="polished-card grid grid-cols-2 gap-4 p-4 sm:grid-cols-4 sm:p-5 lk-tiles">
@@ -145,8 +147,8 @@ const LUCK = (() => {
       <div class="lk-stripax type-meta text-prose-3 normal-case"><span>worst possible</span><span>median</span><span>best possible</span></div>
       <div class="lk-list mt-4" id="lk-list">
         <div class="pr-table-wrap rounded-lg border border-outline bg-surface overflow-x-auto"><table class="pr-table">
-          <thead><tr><th class="pr-rank" title="Best first">#</th><th>Roll</th><th>Tier</th><th>Percentile</th><th>EP</th></tr></thead>
-          <tbody>${rows.map((r, i) => `<tr><td class="pr-rank">${i + 1}</td><td class="pr-num"><a href="/n/${r.n}">${fmt(r.n)}</a></td><td>${pillOf(tierIdx(r.ep))}</td><td class="pr-dim">${(100 * r.p).toFixed(2)}th</td><td class="pr-ep">${fmt(r.ep)}</td></tr>`).join("")}</tbody>
+          <thead><tr><th class="pr-rank" title="Best first">#</th><th>Roll</th><th>Tier</th><th>Percentile</th><th>EP</th>${dated ? "<th>Rolled</th>" : ""}</tr></thead>
+          <tbody>${rows.map((r, i) => `<tr><td class="pr-rank">${i + 1}</td><td class="pr-num"><a href="/n/${r.n}">${fmt(r.n)}</a></td><td>${pillOf(tierIdx(r.ep))}</td><td class="pr-dim">${(100 * r.p).toFixed(2)}th</td><td class="pr-ep">${fmt(r.ep)}</td>${dated ? `<td class="pr-dim pr-date">${escHtml(rollDate(r.at) || "—")}</td>` : ""}</tr>`).join("")}</tbody>
         </table></div>
         <span class="lk-fade" aria-hidden="true"></span>
         ${rows.length > LUCK_ROWS ? `<button type="button" class="lk-more type-meta" id="lk-more" aria-controls="lk-list" aria-expanded="false"></button>` : ""}
@@ -191,13 +193,13 @@ const LUCK = (() => {
   async function loadPlayer(u) {
     const r = await fetchRolls(u);
     if (r.error) throw new Error(r.error);
-    return { username: r.username, nums: r.rolls.map(x => x.number) };
+    return { username: r.username, nums: r.rolls.map(x => x.number), dates: r.rolls.map(x => x.rolledAt) };
   }
   // Several names rank the players against each other rather than pooling
   // their rolls — pooling is what /u does, and "who got luckier" only means
   // anything per player.
   async function compare(names) {
-    const loaded = await Promise.all(names.map(u => loadPlayer(u).then(p => ({ ...p, st: score(p.nums) })).catch(e => ({ username: u, error: e.message }))));
+    const loaded = await Promise.all(names.map(u => loadPlayer(u).then(p => ({ ...p, st: score(p.nums, p.dates) })).catch(e => ({ username: u, error: e.message }))));
     const ok = loaded.filter(p => p.st).sort((a, b) => b.st.beat - a.st.beat), bad = loaded.filter(p => !p.st);
     if (!ok.length) { $("lk-verdict").innerHTML = `<p class="type-ui text-prose-2 normal-case">${escHtml(bad.map(p => p.error || `${p.username} has no rolls yet`).join("; "))}</p>`; return; }
     $("lk-verdict").innerHTML = `
@@ -213,7 +215,7 @@ const LUCK = (() => {
       tr.addEventListener("click", e => {
         if (e.target.closest("a")) return;                     // the name goes to the profile
         const p = ok.find(x => x.username === tr.dataset.u);
-        reading(p.nums, p.username);
+        reading(p.nums, p.username, p.dates);
       });
     }
   }
@@ -227,7 +229,7 @@ const LUCK = (() => {
       if (names.length > 1) { await compare(names); return; }
       const p = await loadPlayer(names[0]);
       if (lookup !== key) return;
-      reading(p.nums, p.username);
+      reading(p.nums, p.username, p.dates);
     } catch (err) {
       if (lookup === key) $("lk-verdict").innerHTML = `<p class="type-ui text-prose-2 normal-case">${escHtml(err.message)}</p>`;
     }

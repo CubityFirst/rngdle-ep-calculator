@@ -438,7 +438,8 @@ that?" question has a closed-form answer:
   k rolls whose best would come in below it — par for that many rolls, and the
   overall drift as a z-score on the mean percentile. Every roll sits as a tick
   on a percentile strip, and the table under it ranks them best first,
-  #1 to #k, showing eight, clipped
+  #1 to #k, with the date each was rolled when the rolls came from a lookup
+  (a pasted list has none, so the column is left out), showing eight, clipped
   inside the ninth row - through its padding, not its text - so the list visibly
   continues, with a
   *show all* toggle. Every row is in the DOM either way — the toggle is a height,
