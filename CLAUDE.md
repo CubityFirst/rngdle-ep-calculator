@@ -2,7 +2,7 @@
 
 ## What this repo is
 
-One Cloudflare Worker, deployed at rng.cubityfir.st (rngdle.tools moves here later):
+One Cloudflare Worker, deployed at rng.cubityfir.st and rngdle.tools:
 
 - `site/` - the front end, a static single-page site in rngdle's own furniture around
   rngdle's own vendored engine (`site/vendor/`). Documented in `site/README.md`.

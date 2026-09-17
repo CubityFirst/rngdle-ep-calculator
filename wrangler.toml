@@ -26,11 +26,16 @@ not_found_handling = "single-page-application"
 # hands straight back to the shell.
 run_worker_first = ["/beta", "/beta/*", "/chains", "/engine.js", "/api", "/api/*", "/u/*"]
 
-# Custom domain (zone cubityfir.st must be on this Cloudflare account).
-# Wrangler provisions the hostname + cert on `wrangler deploy`. rngdle.tools will
-# move here later; until then it deploys from its own repo.
+# Custom domains (both zones must be on this Cloudflare account). Wrangler
+# provisions each hostname + cert on `wrangler deploy`, and a hostname can only
+# belong to one Worker - rngdle.tools is served from here now, not from its own
+# repo, which is frozen. The apex only; www is not routed.
 [[routes]]
 pattern = "rng.cubityfir.st"
+custom_domain = true
+
+[[routes]]
+pattern = "rngdle.tools"
 custom_domain = true
 
 # Palette gallery for /beta/boxes (src/gallery.js). Created 2026-08-19 in WEUR.
