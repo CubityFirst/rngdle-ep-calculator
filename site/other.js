@@ -1,7 +1,7 @@
 /* --- Other: the legacy tools ------------------------------------------------
    The tools rngdle_solver still renders itself — its EP graph and its /beta lab —
    have no tab here; this gallery lists them, in this site's furniture, and each
-   card opens the tool on its own page in the solver's look. The cards are drawn
+   card opens the tool on its own page, under this site's header. The cards are drawn
    from the solver's catalogue (/api/other): the titles, blurbs, marks and
    findings its old /beta index used, copied rather than retyped, so a tool added
    over there shows up here on the next legacy sync.

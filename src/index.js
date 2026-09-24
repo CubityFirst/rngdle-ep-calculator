@@ -2678,7 +2678,7 @@ var __name = (f) => f;
 const __CHAINS_WORKER_SRC = ${JSON.stringify('var __name=(f)=>f;(' + chainsWorker.toString() + ')()')};
 (${chainsClient.toString()})(__CHAINS_WORKER_SRC);`;
 
-  return pageShell({ title: 'RNGdle - The EP Graph', nav: 'chains', width: '1080px', css, body, script });
+  return pageShell({ title: 'RNGdle - The EP Graph', width: '1080px', css, body, script });
 }
 
 // ---------------------------------------------------------------------------

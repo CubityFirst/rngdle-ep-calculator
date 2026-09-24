@@ -1,18 +1,31 @@
-// Shared design system for every HTML page this Worker still serves: /chains and the
-// /beta tools. (The front end proper is rngdle.tools, in rngdle's own furniture; these
-// legacy pages keep this look.)
+// Shared shell for every HTML page this Worker still serves: /chains and the /beta
+// tools. They sit inside the front end's own furniture - the same header, tabs, theme
+// toggle, palette, fonts and footer as the tabs in site/ - so opening a tool from the
+// Other tab no longer looks like leaving the site.
 //
-// Before this existed each page carried its own hand-copied `:root` block, its own
-// content width, its own button/input/pill styling and its own ad-hoc row of links -
-// five near-identical dark themes plus /chains, which was a separate light-mode design
-// entirely. Everything visual that is not genuinely page-specific now lives here.
+// How that works without rewriting thirteen pages of CSS:
+//
+//   - The page links the front end's /style.css (rngdle's Tailwind bundle + extra.css)
+//     and drops the header markup from site/index.html in verbatim (SITE_HEADER,
+//     pinned to the original by tools/check.cjs).
+//   - The legacy pages' own CSS keeps the variable names it always used (--bg, --text,
+//     --border, --accent, ...), but TOKENS_CSS now defines each one in terms of the
+//     front end's theme variables (--site-bg, --prose, --outline, --status-info, ...).
+//     Those switch under `html.dark`, so every page follows the light/dark toggle.
+//   - All of it goes in a cascade layer, `legacy`, ordered after Tailwind's `base`
+//     and before its `components`/`utilities`. Legacy rules therefore beat
+//     Tailwind's preflight, but never the utility classes on the header markup - a
+//     bare `button {}` rule down here cannot restyle the theme toggle.
+//   - Preflight zeroes every margin and list style and makes <svg> a block. The pages
+//     were written against the browser defaults, so REVERT_CSS rolls those few
+//     properties back to the UA inside `.legacy` (svg internals excepted, where a
+//     revert would drop presentation attributes).
 //
 // Usage from a render function:
 //
 //   pageShell({
 //     title: 'RNGdle - Badge Index',
 //     width: '1100px',        // sets --wrap
-//     nav:   'badges',        // which site-nav link is current
 //     css:   PAGE_SPECIFIC_CSS,
 //     body:  `<div class="wrap">…</div>`,
 //     script: `…`,
@@ -24,49 +37,71 @@
 // Tokens
 // ---------------------------------------------------------------------------
 
-// The superset of what the old five `:root` blocks defined, plus a radius scale
-// (previously 2px/3px on /chains, 8px/10px/12px/14px elsewhere) and --wrap, which
-// pageShell overrides per page.
+// The legacy names, mapped onto the front end's theme. `--surface` and `--muted` are
+// not listed: the front end defines both under the same names with the same meaning.
+// --head-h is the site header's height, which the full-bleed pages sit below.
 export const TOKENS_CSS = `
   :root {
-    color-scheme: dark;
-    --bg:#08090c; --surface:#131419; --surface-2:#181a20; --surface-3:#20232c;
-    --border:#24262d; --border-2:#30333c; --border-3:#3a3e49;
-    --text:#e7e8ea; --dim:#c8ccd8; --muted:#8b8e97; --faint:#595c65;
-    --accent:#5b93d6; --accent-soft:#142a3e; --on-accent:#0a1220;
-    --hl:#e8924e; --hl-lt:#f4b27a;
-    --ok:#43d17f; --on-ok:#0a1a10; --bad:#e5484d; --bad-lt:#ffb3b8; --bad-dk:#7c2d3a;
-    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    --r-sm:6px; --r-ctl:8px; --r-card:12px; --r-hero:14px; --r-pill:999px;
-    --wrap:960px;
-  }`;
+    color-scheme: light;
+    --bg:var(--site-bg); --surface-2:var(--surface-raised);
+    --surface-3:color-mix(in srgb, var(--surface-raised) 80%, var(--prose));
+    --border:var(--outline-subtle); --border-2:var(--outline); --border-3:var(--outline-strong);
+    --text:var(--prose); --dim:var(--prose-2); --faint:var(--prose-3);
+    --accent:var(--status-info); --accent-soft:var(--status-info-surface); --on-accent:var(--site-bg);
+    --hl:var(--ep-text); --hl-lt:var(--ep-text);
+    --ok:var(--status-success); --on-ok:var(--site-bg);
+    --bad:var(--status-danger); --bad-lt:var(--status-danger-text); --bad-dk:var(--status-danger-outline);
+    --font: var(--font-ui), -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: var(--font-mono), ui-monospace, Menlo, Consolas, monospace;
+    --r-sm:4px; --r-ctl:8px; --r-card:8px; --r-hero:8px; --r-pill:999px;
+    --wrap:960px; --head-h:48px;
+  }
+  :root.dark { color-scheme: dark; }`;
+
+// ---------------------------------------------------------------------------
+// Preflight, undone
+// ---------------------------------------------------------------------------
+
+export const REVERT_CSS = `
+  :where(.legacy *:not(svg *)) { margin:revert; padding:revert; list-style:revert;
+    font-size:revert; font-weight:revert; text-decoration:revert; border-collapse:revert; }
+  :where(.legacy :is(img, svg, video, canvas)) { display:revert; vertical-align:revert; }`;
+
+// A handful of rngdle's own rules sit outside any layer (the tail of its bundle), so
+// no layered rule can beat them: an uppercase `button` and `input`, and a `body`
+// painted --background, which is black in light mode too. Answered here, unlayered.
+export const UNLAYERED_CSS = `
+  html, body { background-color:var(--site-bg); }
+  .legacy :is(button, input, select, textarea) { text-transform:none; }`;
 
 // ---------------------------------------------------------------------------
 // Base element styling
 // ---------------------------------------------------------------------------
 
+// Scoped to .legacy: <body> keeps the front end's own rules (uppercase, Inter), which
+// the header and footer rely on.
 export const BASE_CSS = `
   * { box-sizing:border-box; }
   /* Crossfade same-origin page navigations (MPA view transitions) where supported,
      instead of a hard cut between documents. Ignored by browsers without support. */
   @view-transition { navigation: auto; }
-  html { background:var(--bg); }
-  body { font-family:var(--font); background:var(--bg); color:var(--text); margin:0;
-    line-height:1.5; -webkit-font-smoothing:antialiased; }
-  a { color:var(--accent); }
-  h1 { font-size:1.45rem; font-weight:600; letter-spacing:-.02em; margin:0 0 .3rem; }
-  h2 { letter-spacing:-.01em; }
-  p.tag { color:var(--muted); margin:0 0 1.4rem; font-size:.92rem; }
+
+  .legacy { font-family:var(--font); color:var(--text); line-height:1.5; text-transform:none;
+    -webkit-font-smoothing:antialiased; }
+  :where(.legacy) a { color:var(--accent); }
+  :where(.legacy) h1 { font-size:var(--type-page-size); line-height:var(--type-page-leading); font-weight:700;
+    text-transform:uppercase; letter-spacing:normal; margin:0 0 .4rem; }
+  :where(.legacy) h2 { letter-spacing:normal; }
+  :where(.legacy) p.tag { color:var(--dim); margin:0 0 1.6rem; font-size:var(--type-body-size); line-height:var(--type-prose-leading); }
   .wrap { max-width:var(--wrap); margin:0 auto; }
   .mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
   .muted { color:var(--muted); }
-  .eyebrow { font-size:.7rem; letter-spacing:.14em; text-transform:uppercase; font-weight:700;
-    color:var(--faint); margin:0 0 .8rem; }
+  .eyebrow { font-size:var(--type-meta-size); letter-spacing:var(--type-label-tracking); text-transform:uppercase;
+    font-weight:700; color:var(--prose-3); margin:0 0 .8rem; }
   .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
-  footer { margin-top:2.5rem; color:var(--faint); font-size:.8rem; line-height:1.7; }
-  footer b { color:var(--muted); font-weight:600; }
-  footer code { color:var(--muted); font-family:var(--mono); }`;
+  :where(.legacy) footer { margin-top:2.5rem; color:var(--prose-3); font-size:.8rem; line-height:1.7; }
+  :where(.legacy) footer b { color:var(--muted); font-weight:600; }
+  :where(.legacy) footer code { color:var(--muted); font-family:var(--mono); }`;
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -76,64 +111,71 @@ export const BASE_CSS = `
 // control on every page picks up the shared look without touching its markup. Pages
 // that need something else already use a more specific selector (`#ctrls button`,
 // `.chip`, `#plate-hud button`, …), which still wins. Checkboxes and radios are held
-// out via :where(), which keeps the selector at plain-element specificity.
+// out via :where(), which keeps the selector at plain-element specificity. All of it
+// is scoped to .legacy so the header's own controls keep the front end's look.
+//
+// The looks are the front end's: an outlined surface button (the Share button), an
+// inverted primary (the selected theme toggle), polished cards, type-label headings.
 export const COMPONENTS_CSS = `
-  button, .btn { font-family:inherit; font-size:.92rem; font-weight:500; line-height:1.2;
+  :where(.legacy) button, .btn { font-family:inherit; font-size:var(--type-ui-size); font-weight:700; line-height:1.2;
     display:inline-flex; align-items:center; justify-content:center; gap:.45rem;
-    padding:.6rem 1.05rem; border-radius:var(--r-ctl); cursor:pointer; text-decoration:none;
-    color:var(--text); background:var(--surface-2); border:1px solid var(--border-2);
-    transition:background .12s, border-color .12s, color .12s, opacity .12s; }
-  button:hover, .btn:hover { background:var(--surface-3); border-color:var(--border-3); }
-  button:disabled, .btn:disabled { opacity:.4; cursor:not-allowed; }
-  button:disabled:hover, .btn:disabled:hover { background:var(--surface-2); border-color:var(--border-2); }
-  .btn-sm { font-size:.85rem; padding:.45rem .85rem; }
-  .btn-primary { color:var(--on-accent); background:var(--accent); border-color:var(--accent); font-weight:600; }
-  .btn-primary:hover { background:var(--accent); border-color:var(--accent); filter:brightness(1.08); }
-  .btn-ghost { background:transparent; color:var(--muted); }
-  .btn-ghost:hover { background:var(--surface-2); color:var(--text); }
+    padding:.55rem 1rem; border-radius:var(--r-ctl); cursor:pointer; text-decoration:none;
+    color:var(--dim); background:var(--surface); border:1px solid var(--border-2);
+    transition:background .15s, border-color .15s, color .15s, opacity .15s, transform .15s; }
+  :where(.legacy) button:hover, .btn:hover { background:var(--surface-2); border-color:var(--border-3); color:var(--text); }
+  :where(.legacy) button:active, .btn:active { transform:scale(.98); }
+  :where(.legacy) button:disabled, .btn:disabled { opacity:.4; cursor:not-allowed; transform:none; }
+  :where(.legacy) button:disabled:hover, .btn:disabled:hover { background:var(--surface); border-color:var(--border-2); color:var(--dim); }
+  .btn-sm { font-size:var(--type-meta-size); padding:.4rem .75rem; }
+  .btn-primary { color:var(--surface); background:var(--text); border-color:var(--text); }
+  .btn-primary:hover { color:var(--surface); background:var(--text); border-color:var(--text); filter:brightness(1.15); }
+  .btn-ghost { background:transparent; border-color:transparent; color:var(--muted); }
+  .btn-ghost:hover { background:var(--surface-2); border-color:transparent; color:var(--text); }
 
-  input:where(:not([type=checkbox]):not([type=radio])), select, textarea, .field {
-    font-family:inherit; font-size:.92rem; padding:.55rem .7rem; border-radius:var(--r-ctl);
-    border:1px solid var(--border); background:var(--surface); color:var(--text);
-    font-variant-numeric:tabular-nums; -webkit-appearance:none; appearance:none; }
-  select { cursor:pointer; }
+  :where(.legacy) :where(input:not([type=checkbox]):not([type=radio]), select, textarea), .field {
+    font-family:inherit; font-size:var(--type-ui-size); padding:.5rem .7rem; border-radius:var(--r-ctl);
+    border:1px solid var(--border-2); background:var(--surface); color:var(--text);
+    font-variant-numeric:tabular-nums; -webkit-appearance:none; appearance:none; transition:border-color .15s;
+  }
+  :where(.legacy) select { cursor:pointer; }
   /* The drop-down list is painted by the browser on its own backplate, which doesn't
-     inherit the control's dark surface - so name both colours here, or the options
-     come out as black text on the UA's light grey. */
-  select option { background:var(--surface); color:var(--text); }
-  ::placeholder { color:var(--faint); }
-  input:focus, select:focus, textarea:focus, .field:focus {
-    outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
-  input[type=checkbox], input[type=radio] { accent-color:var(--accent); }
-  .field-sm { font-size:.85rem; padding:.38rem .55rem; border-radius:var(--r-sm); }
+     inherit the control's surface - so name both colours here, or the options come
+     out as black text on the UA's light grey in dark mode. */
+  :where(.legacy) select option { background:var(--surface); color:var(--text); }
+  :where(.legacy) ::placeholder { color:var(--prose-3); }
+  :where(.legacy) :where(input, select, textarea):focus, .field:focus {
+    outline:none; border-color:var(--border-3); }
+  :where(.legacy) input[type=checkbox], :where(.legacy) input[type=radio] { accent-color:var(--text); }
+  .field-sm { font-size:var(--type-meta-size); padding:.35rem .55rem; border-radius:var(--r-sm); }
 
   /* Rarity / tier badge. Colour comes from --tc on the element (see TIER_PALETTE). */
   .pill { display:inline-block; flex:0 0 auto; font-size:.66rem; font-weight:700; letter-spacing:.07em;
-    padding:.14rem .5rem; border-radius:var(--r-pill); white-space:nowrap;
+    padding:.14rem .5rem; border-radius:var(--r-sm); white-space:nowrap; text-transform:uppercase;
     color:var(--tc,var(--accent)); border:1px solid var(--tc,var(--accent));
     background:color-mix(in srgb, var(--tc,var(--accent)) 14%, transparent); }
   .pill-lg { font-size:.72rem; letter-spacing:.1em; padding:.18rem .6rem; }
 
   /* Toggleable filter chip. */
-  .chip { font-family:inherit; font-size:.78rem; font-weight:600; padding:.3rem .65rem;
-    border-radius:var(--r-pill); cursor:pointer; color:var(--muted);
-    border:1px solid var(--border-2); background:var(--surface-2); --tc:var(--accent);
-    transition:color .12s, border-color .12s, background .12s; }
+  .chip { font-family:inherit; font-size:var(--type-meta-size); font-weight:700; padding:.3rem .65rem;
+    border-radius:var(--r-ctl); cursor:pointer; color:var(--muted);
+    border:1px solid var(--border-2); background:var(--surface); --tc:var(--text);
+    transition:color .15s, border-color .15s, background .15s; }
   .chip em { font-style:normal; font-weight:500; color:var(--faint); }
-  .chip:hover { border-color:var(--tc); color:var(--text); background:var(--surface-2); }
-  .chip.on { color:var(--text); border-color:var(--tc); background:color-mix(in srgb, var(--tc) 16%, var(--surface-2)); }
+  .chip:hover { border-color:var(--border-3); color:var(--text); background:var(--surface-2); }
+  .chip.on { color:var(--text); border-color:var(--tc); background:color-mix(in srgb, var(--tc) 14%, var(--surface)); }
   .chip.on em { color:inherit; opacity:.75; }
 
-  .card { border:1px solid var(--border); border-radius:var(--r-card); background:var(--surface); padding:1rem 1.1rem; }
-  .card > h2 { font-size:.78rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
-    color:var(--muted); margin:0 0 .7rem; }
+  .card { border:1px solid var(--border-2); border-radius:var(--r-card); background:var(--surface);
+    box-shadow:0 1px 3px 0 #0000001a, 0 1px 2px -1px #0000001a; padding:1rem 1.1rem; }
+  .card > h2 { font-size:var(--type-meta-size); line-height:var(--type-meta-leading); font-weight:700;
+    letter-spacing:var(--type-label-tracking); text-transform:uppercase; color:var(--prose-3); margin:0 0 .8rem; }
 
   /* Stat tile: <div class="stat"><span class="k">label</span><span class="v">value</span></div> */
-  .stat { border:1px solid var(--border); border-radius:var(--r-ctl); padding:.5rem .7rem; background:transparent; }
-  .stat .k { display:block; color:var(--faint); font-size:.66rem; text-transform:uppercase;
-    letter-spacing:.06em; margin-bottom:.15rem; font-weight:400; }
+  .stat { border:1px solid var(--border-2); border-radius:var(--r-ctl); padding:.55rem .75rem; background:var(--surface); }
+  .stat .k { display:block; color:var(--prose-3); font-size:.66rem; text-transform:uppercase;
+    letter-spacing:var(--type-label-tracking); margin-bottom:.15rem; font-weight:700; }
   .stat .v { display:block; color:var(--text); font-size:1.05rem; font-family:var(--mono);
-    font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+    font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
   .stat .sub { display:block; margin-top:.35rem; font-family:var(--font); font-size:.74rem;
     font-weight:400; letter-spacing:0; color:var(--muted); }
   .stat-lg .v { font-size:1.6rem; letter-spacing:-.03em; line-height:1.1; }
@@ -143,210 +185,100 @@ export const COMPONENTS_CSS = `
     padding:.4rem 0; border-bottom:1px solid var(--border); }
   .kv:last-child { border-bottom:none; }
   .kv .k { color:var(--muted); font-size:.9rem; }
-  .kv .v { font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; text-align:right; }
+  .kv .v { font-family:var(--mono); font-weight:700; font-variant-numeric:tabular-nums; text-align:right; }
   .kv .v small { color:var(--faint); font-weight:400; }
 
   /* Progress bar: <div class="progress"><i></i></div> */
   .progress { height:8px; border-radius:var(--r-pill); background:var(--surface-2); overflow:hidden; }
-  .progress > i { display:block; height:100%; width:0; background:var(--accent); transition:width .2s ease; }
+  .progress > i { display:block; height:100%; width:0; background:var(--text); transition:width .2s ease; }
 
   .spinner { width:1.05em; height:1.05em; flex:0 0 auto; border:2px solid var(--border-2);
-    border-top-color:var(--accent); border-radius:50%; animation:ui-spin .7s linear infinite; }
+    border-top-color:var(--text); border-radius:50%; animation:ui-spin .7s linear infinite; }
   @keyframes ui-spin { to { transform:rotate(360deg); } }
 
   .err { border:1px solid var(--bad-dk); border-radius:var(--r-card); padding:1rem 1.1rem;
-    color:var(--bad-lt); background:color-mix(in srgb, var(--bad) 8%, var(--surface)); }`;
+    color:var(--bad-lt); background:var(--status-danger-surface); }`;
 
 // ---------------------------------------------------------------------------
-// Site navigation
+// Site header and footer
 // ---------------------------------------------------------------------------
 
-// One header on every page. `key` is what siteNav(active) matches against, so a page
-// can mark itself current. Order is the reading order of the tools, not the routes.
-// 24x24 stroke icons, drawn with currentColor so they inherit the rail's states.
-// Inline because a strict CSP blocks external assets and this is five small paths.
-const ICON = {
-  calc: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8.5 11h1M14.5 11h1M8.5 15h1M14.5 15h1M8 19h8"/>',
-  grid: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
-  badges: '<circle cx="12" cy="8" r="6"/><path d="m15.48 12.89 1.52 9.11-5-3-5 3 1.52-9.11"/>',
-  chains: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98M15.41 6.51 8.59 10.49"/>',
-  profiles: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
-  beta: '<path d="M9 3h6M10 3v6.5L4.6 18a2 2 0 0 0 1.7 3h11.4a2 2 0 0 0 1.7-3L14 9.5V3"/><path d="M7.5 15h9"/>',
-  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
-  open: '<path d="m13 17 5-5-5-5M6 17l5-5-5-5"/>',
-  close: '<path d="m11 17-5-5 5-5M18 17l-5-5 5-5"/>',
-};
-const svg = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ` +
-  `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
-
-// Groups of [key, href, label, icon]. `key` is what siteNav(active) matches to mark the
-// current page. A null group title renders the links bare; a titled group gets a
-// sub-heading (text when the rail is open, a plain divider when collapsed).
-// Everything but /chains and "Other tools" is the new front end (rngdle.tools) - these
-// pages are served from its origin, so the links are relative and land on its tabs.
-export const NAV_GROUPS = [
-  [null, [
-    ['calc', '/', 'Roll', 'calc'],
-    ['badges', '/badges', 'Badges', 'badges'],
-    ['profiles', '/u', 'Profiles', 'profiles'],
-  ]],
-  ['Data vis', [
-    ['grid', '/grid', 'Grid', 'grid'],
-    ['chains', '/chains', 'The EP Graph', 'chains'],
-    ['beta', '/other', 'Other tools', 'beta'],
-  ]],
-];
-export const NAV_LINKS = NAV_GROUPS.flatMap(([, links]) => links);
-
-export const DISCLAIMER_HTML =
-  'Not affiliated with <strong>rngdle.com</strong> - scoring is reverse-engineered.';
-
-// A fixed icon rail down the left edge, collapsed by default.
-//
-// Everything that has to clear the rail - body padding here, the grid canvas and its
-// glass overlays on /grid - is expressed in var(--rail-w), and opening the rail simply
-// widens that variable. So expanding PUSHES the page rather than covering it, and no
-// page needs its own open/closed rule. The one cost is that the two canvas pages must
-// re-measure afterwards, which NAV_BOOT_JS handles by firing a resize event.
-export const NAV_CSS = `
-  /* Registering --rail-w makes it a real <length> the browser can interpolate, so the
-     rail and everything measured off it slide together. Without @property support the
-     declaration is ignored and the toggle simply snaps - which is fine. */
-  @property --rail-w { syntax:'<length>'; inherits:true; initial-value:52px; }
-  :root { --rail-w:52px; }
-  :root.nav-open { --rail-w:210px; }
-  /* Added by script after load, so restoring an open rail never animates on arrival. */
-  :root.nav-anim { transition:--rail-w .16s ease; }
-  @media (prefers-reduced-motion:reduce) { :root.nav-anim { transition:none; } }
-
-  .rail { position:fixed; top:0; bottom:0; left:0; z-index:60; width:var(--rail-w);
-    display:flex; flex-direction:column; padding:.45rem .4rem .6rem;
-    background:var(--surface); border-right:1px solid var(--border); }
-
-  /* Phones: pushing would leave ~210px of content, so hold --rail-w at the collapsed
-     width and let the open rail overlay the page instead. */
-  @media (max-width:640px) {
-    :root, :root.nav-open { --rail-w:46px; }
-    :root.nav-open .rail { width:210px; box-shadow:10px 0 30px -16px #000; transition:width .16s ease; }
-    @media (prefers-reduced-motion:reduce) { :root.nav-open .rail { transition:none; } }
-  }
-
-  .rail-head { display:flex; align-items:center; gap:.5rem; margin-bottom:.5rem;
-    padding-bottom:.5rem; border-bottom:1px solid var(--border); }
-  .rail-brand { flex:1; min-width:0; font-size:.86rem; font-weight:700; letter-spacing:-.01em;
-    color:var(--text); text-decoration:none; white-space:nowrap; display:none; }
-  .rail-brand span { color:var(--faint); font-weight:500; }
-  :root.nav-open .rail-brand { display:block; }
-
-  .rail-toggle { flex:0 0 auto; width:34px; height:34px; margin-inline:auto; padding:0;
-    border:1px solid transparent; background:transparent; color:var(--muted); border-radius:var(--r-ctl); }
-  .rail-toggle:hover { background:var(--surface-2); border-color:var(--border-2); color:var(--text); }
-  :root.nav-open .rail-toggle { margin-inline:0; }
-  .rail-toggle svg { width:18px; height:18px; }
-  .rail-toggle .i-close, :root.nav-open .rail-toggle .i-open { display:none; }
-  :root.nav-open .rail-toggle .i-close { display:block; }
-
-  .rail-links { display:flex; flex-direction:column; gap:.12rem; }
-  /* Group sub-heading: labelled when the rail is open, a bare divider when collapsed. */
-  .rail-sect { margin:.5rem .35rem .15rem; padding-top:.5rem; border-top:1px solid var(--border);
-    font-size:.62rem; font-weight:600; letter-spacing:.08em; text-transform:uppercase;
-    color:var(--faint); white-space:nowrap; }
-  .rail-sect span { display:none; padding-left:.15rem; }
-  :root.nav-open .rail-sect span { display:block; }
-  .rail-item { position:relative; display:flex; align-items:center; gap:.65rem;
-    height:38px; padding:0 .5rem; border-radius:var(--r-ctl); text-decoration:none;
-    color:var(--muted); transition:color .12s, background .12s; }
-  .rail-item svg { flex:0 0 22px; width:22px; height:22px; }
-  .rail-item b { font-size:.86rem; font-weight:500; white-space:nowrap; display:none; }
-  :root.nav-open .rail-item b { display:block; }
-  .rail-item:hover { color:var(--text); background:var(--surface-2); }
-  .rail-item.on { color:var(--text); background:color-mix(in srgb, var(--accent) 20%, transparent); }
-  .rail-item.on svg { color:var(--accent); }
-  .rail-item:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
-
-  /* Hover label, collapsed only - when the rail is open the name is already inline. */
-  .rail-item::after, .rail-note::after { content:attr(data-label); position:absolute; left:calc(100% + 10px);
-    top:50%; transform:translateY(-50%); z-index:1; width:max-content; max-width:15rem; padding:.35rem .6rem;
-    border-radius:var(--r-sm); background:#06070a; border:1px solid var(--border-2);
-    box-shadow:0 8px 24px rgba(0,0,0,.6); font-size:.78rem; font-weight:450; line-height:1.4;
-    color:var(--text); opacity:0; pointer-events:none; transition:opacity .12s; }
-  .rail-item:hover::after, .rail-item:focus-visible::after,
-  .rail-note:hover::after, .rail-note:focus-visible::after { opacity:1; }
-  :root.nav-open .rail-item::after, :root.nav-open .rail-note::after { display:none; }
-
-  /* "Not affiliated" disclaimer, pinned to the foot of the rail. */
-  .rail-foot { margin-top:auto; padding-top:.6rem; }
-  .rail-note { position:relative; display:flex; align-items:center; gap:.55rem; padding:.35rem .5rem;
-    border-radius:var(--r-ctl); color:var(--hl-lt); }
-  .rail-note svg { flex:0 0 18px; width:18px; height:18px; }
-  .rail-note small { display:none; font-size:.7rem; line-height:1.4; }
-  .rail-note small strong { color:var(--text); font-weight:600; }
-  :root.nav-open .rail-note { align-items:flex-start; }
-  :root.nav-open .rail-note small { display:block; }
-  :root.nav-open .rail-note svg { margin-top:.1rem; }`;
-
-/**
- * The icon rail. `active` is a NAV_LINKS key, or '' for none.
- * Open/closed state is restored in <head> (see pageShell) so it never flashes.
- */
-export function siteNav(active) {
-  const link = ([key, href, label, icon]) => {
-    const on = key === active;
-    return `    <a class="rail-item${on ? ' on' : ''}" href="${href}" data-label="${label}"` +
-      `${on ? ' aria-current="page"' : ''}>${svg(icon)}<b>${label}</b></a>`;
-  };
-  const items = NAV_GROUPS.map(([title, links]) => {
-    const group = links.map(link).join('\n');
-    return title ? `    <div class="rail-sect"><span>${title}</span></div>\n${group}` : group;
-  }).join('\n');
-
-  return `<nav class="rail" id="rail" aria-label="Tools">
-  <div class="rail-head">
-    <a class="rail-brand" href="/">RNGdle <span>tools</span></a>
-    <button type="button" id="rail-toggle" class="rail-toggle" aria-controls="rail" aria-expanded="false"
-      title="Expand sidebar" aria-label="Expand sidebar"><span class="i-open">${svg('open')}</span><span class="i-close">${svg('close')}</span></button>
-  </div>
-  <div class="rail-links">
-${items}
-  </div>
-  <div class="rail-foot">
-    <div class="rail-note" tabindex="0" role="note" data-label="${DISCLAIMER_HTML.replace(/<[^>]+>/g, '')}">
-      ${svg('info')}<small>${DISCLAIMER_HTML}</small>
+// site/index.html's <header>, character for character (tools/check.cjs fails if the
+// two drift). The Other tab is marked current: every page here is one of its tools.
+export const SITE_HEADER = `  <header class="flex items-center justify-between bg-site-bg px-2 py-1 ps-4 text-prose">
+    <div class="flex items-center gap-1 sm:gap-2 min-w-0">
+      <a class="text-lg font-bold tracking-widest hover:text-prose-2 transition-colors normal-case shrink-0" href="/">RNGdle</a>
+      <nav class="flex items-center gap-1" id="nav">
+        <a href="/" data-view="sandbox" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-dices h-4 w-4 shrink-0" aria-hidden="true"><rect width="12" height="12" x="2" y="10" rx="2" ry="2"></rect><path d="m17.92 14 3.5-3.5a2.24 2.24 0 0 0 0-3l-5-4.92a2.24 2.24 0 0 0-3 0L10 6"></path><path d="M6 18h.01"></path><path d="M10 14h.01"></path><path d="M15 6h.01"></path><path d="M18 9h.01"></path></svg><span class="hidden sm:inline">Roll</span></a>
+        <a href="/ep" data-view="ep" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-calculator h-4 w-4 shrink-0" aria-hidden="true"><rect width="16" height="20" x="4" y="2" rx="2"></rect><line x1="8" x2="16" y1="6" y2="6"></line><line x1="16" x2="16" y1="14" y2="18"></line><path d="M16 10h.01"></path><path d="M12 10h.01"></path><path d="M8 10h.01"></path><path d="M12 14h.01"></path><path d="M8 14h.01"></path><path d="M12 18h.01"></path><path d="M8 18h.01"></path></svg><span class="hidden sm:inline">EP&nbsp;to&nbsp;Number</span></a>
+        <a href="/analysis" data-view="analysis" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chart-column h-4 w-4 shrink-0" aria-hidden="true"><path d="M3 3v16a2 2 0 0 0 2 2h16"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path></svg><span class="hidden sm:inline">Analysis</span></a>
+        <a href="/grid" data-view="grid" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-grid-2x2 h-4 w-4 shrink-0" aria-hidden="true"><path d="M12 3v18"></path><path d="M3 12h18"></path><rect x="3" y="3" width="18" height="18" rx="2"></rect></svg><span class="hidden sm:inline">Grid</span></a>
+        <a href="/neighbours" data-view="neighbours" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-arrow-left-right h-4 w-4 shrink-0" aria-hidden="true"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg><span class="hidden sm:inline">Neighbours</span></a>
+        <a href="/luck" data-view="luck" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sparkles h-4 w-4 shrink-0" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path><path d="M4 17v2"></path><path d="M5 18H3"></path></svg><span class="hidden sm:inline">Luck</span></a>
+        <a href="/badges" data-view="badges" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-award h-4 w-4 shrink-0" aria-hidden="true"><path d="m15.477 12.89 1.515 8.526a.5.5 0 0 1-.81.47l-3.58-2.687a1 1 0 0 0-1.197 0l-3.586 2.686a.5.5 0 0 1-.81-.469l1.514-8.526"></path><circle cx="12" cy="8" r="6"></circle></svg><span class="hidden sm:inline">Badges</span></a>
+        <a href="/u" data-view="profiles" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-users h-4 w-4 shrink-0" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><path d="M16 3.128a4 4 0 0 1 0 7.744"></path><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><circle cx="9" cy="7" r="4"></circle></svg><span class="hidden sm:inline">Profiles</span></a>
+        <a href="/other" data-view="other" class="nav-tab flex items-center gap-1 rounded-lg p-2 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-flask-conical h-4 w-4 shrink-0" aria-hidden="true"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"></path><path d="M6.453 15h11.094"></path><path d="M8.5 2h7"></path></svg><span class="hidden sm:inline">Other</span></a>
+      </nav>
     </div>
-  </div>
-</nav>`;
-}
+    <div class="flex items-center gap-1">
+      <div class="flex items-center rounded-sm border border-outline overflow-hidden" id="theme-toggle">
+        <button data-theme="light" aria-label="Light mode" title="Light" class="p-1.5 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 pointer-events-none" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg></button>
+        <button data-theme="auto" aria-label="Auto mode" title="Auto" class="p-1.5 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 pointer-events-none" aria-hidden="true"><path d="M12 2v2"></path><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"></path><path d="M16 12a4 4 0 0 0-4-4"></path><path d="m19 5-1.256 1.256"></path><path d="M20 12h2"></path></svg></button>
+        <button data-theme="dark" aria-label="Dark mode" title="Dark" class="p-1.5 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 pointer-events-none" aria-hidden="true"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path></svg></button>
+      </div>
+      <a href="https://www.rngdle.com" target="_blank" rel="noopener noreferrer" class="type-button flex items-center gap-2 px-3 py-2 cursor-pointer rounded-lg border border-outline bg-surface text-prose hover:border-outline-strong hover:shadow-sm active:scale-[0.98] transition-all">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true"><path d="M15 3h6v6"></path><path d="M10 14 21 3"></path><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path></svg><span class="hidden sm:inline">Real Game</span>
+      </a>
+    </div>
+  </header>`;
 
-// Runs in <head>, before the rail paints, so a returning visitor never sees it flash
-// open-then-shut. The click handler is attached from the same script on DOMContentLoaded.
-export const NAV_BOOT_JS = `
+// The front end's footer, with the same wording.
+export const SITE_FOOTER = `  <footer class="type-meta text-prose-3 text-center pb-6 normal-case px-4">
+    RNGdle Tools is unofficial and not affiliated with RNGdle.
+    <a class="underline hover:text-prose-2" href="https://www.rngdle.com" target="_blank" rel="noopener noreferrer">Play the real game</a>,
+    where it really is one roll a day.
+    <span class="text-outline-strong px-1">·</span>
+    <a class="underline hover:text-prose-2" href="/credits">Credits</a>
+  </footer>`;
+
+const headerFor = active => SITE_HEADER.replace(
+  `data-view="${active}" class="nav-tab `,
+  `data-view="${active}" aria-current="page" class="nav-tab is-active `);
+
+// Runs in <head>, before first paint, so the page never flashes the wrong theme. The
+// storage key, the default ("dark") and the toggle's classes are app.js's applyTheme;
+// the tab tooltips are ep.js's (the labels fold away on narrow screens).
+export const THEME_BOOT_JS = `
 (function () {
-  var KEY = 'rngdle-nav-open';
   var root = document.documentElement;
-  function apply(open) {
-    root.classList.toggle('nav-open', open);
-    var b = document.getElementById('rail-toggle');
-    if (b) {
-      b.setAttribute('aria-expanded', open ? 'true' : 'false');
-      b.title = b.ariaLabel = open ? 'Collapse sidebar' : 'Expand sidebar';
-    }
+  function dark(mode) {
+    return mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
   }
-  try { apply(localStorage.getItem(KEY) === '1'); } catch (e) {}
+  var mode = 'dark';
+  try { mode = localStorage.getItem('theme') || 'dark'; } catch (e) {}
+  root.classList.toggle('dark', dark(mode));
+  function apply(m) {
+    mode = m;
+    root.classList.toggle('dark', dark(m));
+    var t = document.getElementById('theme-toggle');
+    if (t) for (var i = 0; i < t.children.length; i++) {
+      var b = t.children[i], on = b.dataset.theme === m;
+      b.classList.toggle('bg-prose', on);
+      b.classList.toggle('text-surface', on);
+      b.classList.toggle('text-prose-2', !on);
+    }
+    try { localStorage.setItem('theme', m); } catch (e) {}
+    // The canvas pages read their colours off the tokens when they draw.
+    dispatchEvent(new Event('themechange'));
+  }
   addEventListener('DOMContentLoaded', function () {
-    var b = document.getElementById('rail-toggle');
-    if (!b) return;
-    apply(root.classList.contains('nav-open'));
-    // Only animate from here on - the restored state above must appear instantly.
-    requestAnimationFrame(function () { root.classList.add('nav-anim'); });
-    b.addEventListener('click', function () {
-      var open = !root.classList.contains('nav-open');
-      apply(open);
-      try { localStorage.setItem(KEY, open ? '1' : '0'); } catch (e) {}
-      // Toggling --rail-w resizes the content area, and the canvas pages (/grid,
-      // /chains) only re-measure on a resize event. Fire once now for the snap case
-      // (no @property support, or reduced motion) and once after the slide.
-      dispatchEvent(new Event('resize'));
-      setTimeout(function () { dispatchEvent(new Event('resize')); }, 220);
+    apply(mode);
+    var tabs = document.querySelectorAll('.nav-tab');
+    for (var i = 0; i < tabs.length; i++) tabs[i].title = tabs[i].textContent.trim();
+    var t = document.getElementById('theme-toggle');
+    if (t) t.addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (b) apply(b.dataset.theme);
     });
   });
 })();`;
@@ -355,59 +287,74 @@ export const NAV_BOOT_JS = `
 // Page shell
 // ---------------------------------------------------------------------------
 
+// Inline so the browser never requests /favicon.ico. Three dots, as before, in the
+// front end's dark ground.
+const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+  '<rect width="32" height="32" rx="7" fill="#1b1922"/>' +
+  '<circle cx="10" cy="10" r="3" fill="#78aaff"/>' +
+  '<circle cx="22" cy="16" r="3" fill="#f59e0b"/>' +
+  '<circle cx="10" cy="22" r="3" fill="#78aaff"/></svg>');
+
+// @property must sit at the top level; everything else goes in the layer.
+const hoistProperties = css => {
+  const props = [];
+  const rest = css.replace(/@property\s+[^{]+\{[^}]*\}/g, m => { props.push(m); return ''; });
+  return [props.join('\n'), rest];
+};
+
 /**
- * Assemble a full document from the shared layer plus page-specific parts.
+ * Assemble a full document: the front end's header, then the page.
  *
  * @param {object}  o
  * @param {string}  o.title    <title> text (already escaped by the caller if dynamic)
- * @param {string}  o.body     markup that goes inside <body>, after the site header
+ * @param {string}  o.body     markup that goes inside the page, below the site header
  * @param {string} [o.css]     page-specific CSS, emitted after the shared layer
  * @param {string} [o.script]  contents of a trailing <script type="module">
- * @param {string} [o.nav]     NAV_LINKS key of the current page; '' for no page marked.
- *                             Pass null to omit the rail entirely.
  * @param {string} [o.width]   value for --wrap (default 960px)
- * @param {boolean}[o.full]    full-bleed app layout: no body padding, no page scroll.
- *                             The page must offset its own fixed overlays by --rail-w.
+ * @param {boolean}[o.full]    full-bleed app layout: no page padding, no page scroll,
+ *                             no footer. The page's fixed layers start at --head-h.
  * @param {boolean}[o.noindex] emit <meta name="robots" content="noindex">
  * @param {string} [o.head]    extra <head> markup (meta/link tags), escaped by the caller
  * @param {string} [o.viewport] override the viewport meta (canvas pages lock pinch-zoom)
  */
-// Inline so the browser never requests /favicon.ico - the Worker has no route for it,
-// so every page load was logging a 404. Three dots on the shared surface colour, which
-// is as much as reads at 16px.
-const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
-  '<rect width="32" height="32" rx="7" fill="#131419"/>' +
-  '<circle cx="10" cy="10" r="3" fill="#5b93d6"/>' +
-  '<circle cx="22" cy="16" r="3" fill="#e8924e"/>' +
-  '<circle cx="10" cy="22" r="3" fill="#5b93d6"/></svg>');
-
 export function pageShell(o) {
-  const rail = o.nav == null ? '' : siteNav(o.nav);
-  // Document pages reserve the collapsed rail with padding; full-bleed pages get out of
-  // the way themselves. Either way the reserved width never changes when the rail opens.
   const layout = o.full
     ? `  html, body { height:100%; overflow:hidden; }`
-    : `  body { padding:1.6rem 1.25rem 4rem calc(var(--rail-w) + 1.5rem); }`;
-
-  return `<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="color-scheme" content="dark"><meta name="viewport" content="${o.viewport || 'width=device-width,initial-scale=1'}">
-${o.noindex ? '<meta name="robots" content="noindex">\n' : ''}<link rel="icon" href="${FAVICON}">
-<title>${o.title}</title>
-${o.head || ''}
-<style>${TOKENS_CSS}
+    : `  .legacy-doc { flex:1; width:100%; padding:1.5rem 1.25rem 4rem; }
+  @media (max-width:640px) { .legacy-doc { padding:.75rem .75rem 3rem; } }`;
+  const [props, css] = hoistProperties(`${TOKENS_CSS}
   :root { --wrap:${o.width || '960px'}; }
+${REVERT_CSS}
 ${BASE_CSS}
 ${COMPONENTS_CSS}
-${NAV_CSS}
 ${layout}
-${o.css || ''}
-</style>${rail ? `\n<script>${NAV_BOOT_JS}</script>` : ''}
+${o.css || ''}`);
+
+  const page = o.full
+    ? `${headerFor('other')}\n<div class="legacy">\n${o.body}\n</div>`
+    : `<div class="app-shell flex flex-col bg-site-bg font-sans">\n${headerFor('other')}\n` +
+      `<main class="legacy legacy-doc">\n${o.body}\n</main>\n${SITE_FOOTER}\n</div>`;
+
+  return `<!doctype html>
+<html lang="en" class="dark"><head>
+<meta charset="utf-8"><meta name="viewport" content="${o.viewport || 'width=device-width,initial-scale=1'}">
+<meta name="theme-color" content="#0a0a0a">
+${o.noindex ? '<meta name="robots" content="noindex">\n' : ''}<link rel="icon" href="${FAVICON}">
+<title>${o.title}</title>
+<style>@layer properties, theme, base, legacy, components, utilities;</style>
+<link rel="stylesheet" href="/style.css">
+${o.head || ''}
+<script>${THEME_BOOT_JS}</script>
+<style>${props}
+${UNLAYERED_CSS}
+@layer legacy {
+${css}
+}
+</style>
 </head>
-<body>
-${rail}
-${o.body}
+<body class="antialiased">
+${page}
 ${o.script ? `<script type="module">\n${o.script}\n</script>` : ''}
 </body></html>`;
 }

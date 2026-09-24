@@ -86,7 +86,7 @@ panel (now **Roll** and **Analysis**), `/badges` (**Badges**, compact layout), `
 Three things worth knowing about the code:
 
 - Tool pages are marked `noindex`. Their only entry point is the front end's **Other**
-  tab; the rail down their left edge links to its tabs.
+  tab, and they wear its header, tabs, theme toggle and footer (`src/ui.js`).
 - The shared loading overlay is `.beta-ov`, deliberately prefixed: it is a full-screen
   fixed layer, so a tool reusing a bare class name would paint over the whole page.
 - `betaShell` prepends a no-op `__name` shim to every page script, because the clients

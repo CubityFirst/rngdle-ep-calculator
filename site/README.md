@@ -626,8 +626,7 @@ own - the "solver" - and most of it has been ported here: its calculator is the 
 is Analysis, its `/badges` is the compact Badges layout, its `/grid` is Grid, its
 `/u` is Profiles, and two of its `/beta` lab tools are Neighbours and Luck. What
 had not been ported had no way in. This tab is that way in: one card per remaining
-tool, in this site's furniture, each opening the tool on its own page in the
-solver's own style. The full map, tool by tool:
+tool, in this site's furniture, each opening the tool on its own page. The full map, tool by tool:
 
 | the solver (`src/`) | here |
 |---|---|
@@ -664,6 +663,15 @@ click on a card is a navigation, and a cold load of `/beta/atlas` never runs the
 shell at all. And it scores every number in the browser the first time - the
 solver's tools read a Web Worker sweep of the live rules, cached in IndexedDB,
 where this site's tabs read the shipped tables.
+
+They look like the tabs, though. `pageShell()` in `src/ui.js` links `/style.css`,
+drops in this file's `<header>` and `<footer>` verbatim (with Other marked current),
+and maps the old pages' own variables (`--bg`, `--text`, `--border`, `--accent`, ...)
+onto this site's theme, so they follow the light/dark toggle. Their CSS sits in a
+`legacy` cascade layer between Tailwind's `base` and `utilities`: it beats preflight
+but never the header's utility classes. The canvases keep their dark plates in
+both themes. `tools/check.cjs` fails if the copied header or footer drifts from
+`index.html`.
 
 The Box Lab's shared palette gallery is the D1 database bound in `wrangler.toml`
 (`npm run serve` has no D1, so there `/api/palettes` answers 503 and the Box Lab

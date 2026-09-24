@@ -450,7 +450,21 @@ console.log("ok  EP->Number spot values");
   for (const p of ["/", "/grid", "/grid/pronic", "/badges", "/u", "/u/alice", "/u/alice,bob/raw", "/luck", "/neighbours", "/other", "/api/rolls", "/api/other"]) {
     assert.ok(!legacyRe.test(p), `worker.js would hand ${p} to the legacy Worker`);
   }
-  console.log(`ok  other: ${slugs.length} legacy tools (${slugs.join(", ")}), ${cat.findings.length} findings, none ported here`);
+  // The legacy pages wear the front end's header and footer (src/ui.js), copied from
+  // index.html. Pin both copies to the original, and render one page to see they land.
+  const uiSrc = `import { SITE_HEADER, SITE_FOOTER, pageShell } from ${JSON.stringify(pathToFileURL(path.join(REPO, "src/ui.js")).href)};
+    console.log(JSON.stringify({ SITE_HEADER, SITE_FOOTER, page: pageShell({ title: "t", body: "<p>b</p>" }) }));`;
+  const ui = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", uiSrc], { cwd: REPO, encoding: "utf8" }));
+  const lf = s => s.replace(/\r\n/g, "\n");
+  const siteHeader = /\n(  <header[\s\S]*?<\/header>)/.exec(lf(html))[1];
+  const siteFooter = /\n(  <footer[\s\S]*?<\/footer>)/.exec(lf(html))[1];
+  assert.strictEqual(ui.SITE_HEADER, siteHeader, "src/ui.js SITE_HEADER no longer matches the <header> in site/index.html - copy it across");
+  assert.strictEqual(ui.SITE_FOOTER, siteFooter, "src/ui.js SITE_FOOTER no longer matches the <footer> in site/index.html - copy it across");
+  assert.ok(ui.page.includes('data-view="other" aria-current="page" class="nav-tab is-active '), "legacy pages no longer mark the Other tab current");
+  assert.ok(ui.page.includes('<link rel="stylesheet" href="/style.css">') && ui.page.indexOf("@layer properties, theme, base, legacy") < ui.page.indexOf("/style.css"),
+    "legacy pages must declare the layer order before linking /style.css, or Tailwind's layers outrank theirs");
+  assert.ok(!/class="rail/.test(ui.page), "the legacy sidebar is back");
+  console.log(`ok  other: ${slugs.length} legacy tools (${slugs.join(", ")}), ${cat.findings.length} findings, none ported here; legacy pages wear the site header`);
 }
 
 // --- Credits ---------------------------------------------------------------
