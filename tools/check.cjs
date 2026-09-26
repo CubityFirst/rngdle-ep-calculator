@@ -301,6 +301,12 @@ console.log("ok  EP->Number spot values");
         `badge-table.bin.gz is stale at ${n} / ${b.id}: has ${has}, engine says ${want.has(b.id)} — run: node tools/build-ep-table.cjs`);
     });
   }
+  // The legacy tools (src/) index badges in src/index.js order, not prod's, and map
+  // the rows by this list - so it has to be the order the table was written in.
+  const idsPath = path.join(ROOT, "badge-table.ids.json");
+  assert.ok(fs.existsSync(idsPath), "badge-table.ids.json missing — run: node tools/build-ep-table.cjs");
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(idsPath, "utf8")), Array.from(defs, b => b.id),
+    "badge-table.ids.json is not the row order of badge-table.bin.gz — run: node tools/build-ep-table.cjs");
   assert.ok(fs.existsSync(path.join(ROOT, "analysis.js")), "missing analysis.js");
   console.log(`ok  badge-table.bin.gz matches the engine (${samples.length} samples x ${defs.length} badges, ${(gz.length / 1e6).toFixed(2)} MB on the wire)`);
 }

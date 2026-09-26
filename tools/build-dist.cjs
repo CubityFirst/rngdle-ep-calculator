@@ -22,6 +22,7 @@ const FILES = [
   "style.css",              // already contains vendor/rngdle.css
   "ep-table.bin.gz",
   "badge-table.bin.gz",
+  "badge-table.ids.json",   // row order of the above, for the legacy tools
   "vendor/rngdle-engine.js",
 ];
 

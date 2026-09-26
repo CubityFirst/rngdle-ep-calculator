@@ -16,6 +16,9 @@
 //                       row is a sparse or periodic bit pattern, and the whole
 //                       thing gzips to a few MB where the per-number layout would
 //                       not. The Analysis tab filters straight off these rows.
+//   badge-table.ids.json   the badge id of each row, in order. The site reads the
+//                       order off the vendored engine; the legacy tools (src/),
+//                       which index badges in src/index.js order, map rows by it.
 //
 // Re-run this whenever tools/refresh.cjs pulls a new engine — tools/check.cjs
 // fails if either table and the engine disagree.
@@ -28,6 +31,7 @@ const zlib = require("zlib");
 const ROOT = path.join(__dirname, "..", "site");   // the static front end
 const EP_OUT = path.join(ROOT, "ep-table.bin.gz");
 const BADGE_OUT = path.join(ROOT, "badge-table.bin.gz");
+const IDS_OUT = path.join(ROOT, "badge-table.ids.json");
 const N = 1000001;
 const ROWB = Math.ceil(N / 8);   // bytes per badge row in the badge table
 
@@ -69,6 +73,7 @@ if (Buffer.from(Uint32Array.of(1).buffer)[0] !== 1) {
 // on any host. gzip not brotli because DecompressionStream has no brotli.
 fs.writeFileSync(EP_OUT, zlib.gzipSync(Buffer.from(ep.buffer), { level: 9 }));
 fs.writeFileSync(BADGE_OUT, zlib.gzipSync(Buffer.from(bits.buffer), { level: 9 }));
+fs.writeFileSync(IDS_OUT, JSON.stringify([...badgeIndex.keys()]) + "\n");
 
 const distinct = new Set(ep).size;
 const mb = f => (fs.statSync(f).size / 1e6).toFixed(2);

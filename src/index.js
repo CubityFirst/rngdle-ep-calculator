@@ -1329,8 +1329,73 @@ function sweepFresh(hit, ver) {
     (Date.now() - hit.ts) < SWEEP_TTL_MS;
 }
 
-// { ep, cnt, bits, ROW, examples, ver, ts, cached }.
-// onProgress(pct) fires only when an actual sweep runs.
+// The front end ships the whole range already scored (tools/build-ep-table.cjs): the EP
+// of every number, and one earned-badge bitset per badge in prod's badge order, with
+// that order beside it. Rebuilding the sweep's arrays from those is ~2.5MB of download
+// and a transpose, where sweeping is 233 tests x 1,000,001 numbers.
+//
+// The tables are prod's engine, not this one, so a spread of numbers is re-scored here
+// first and must agree on EP and on every earned badge. Anything off - a missing file,
+// no DecompressionStream, a port half done - returns null and the caller sweeps.
+const SWEEP_TABLE_SAMPLES = 2000;
+async function sweepFromTables(origin, onProgress) {
+  try {
+    const inflate = async url => {
+      const r = await fetch(origin + url);
+      if (!r.ok) throw new Error(url + ' ' + r.status);
+      return new Uint8Array(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+    };
+    const idsRes = await fetch(origin + '/badge-table.ids.json');
+    if (!idsRes.ok) return null;
+    const [ids, epBytes, tbl] = await Promise.all([idsRes.json(), inflate('/ep-table.bin.gz'), inflate('/badge-table.bin.gz')]);
+    const N = SWEEP_CAP, ROWB = (N + 7) >> 3, ROW = (BADGE_META.length + 7) >> 3;
+    if (ids.length !== BADGE_META.length || epBytes.length !== N * 4 || tbl.length !== ids.length * ROWB) return null;
+    const ours = new Map(BADGE_META.map((b, i) => [b.id, i]));
+    const map = ids.map(id => ours.get(id));             // table row -> BADGE_META index
+    if (map.some(i => i === undefined)) return null;
+    const ep32 = new Uint32Array(epBytes.buffer, 0, N);
+
+    const want = new Uint8Array(BADGE_META.length);
+    for (let s = 0; s < SWEEP_TABLE_SAMPLES; s++) {
+      const n = s < 20 ? s : (s * 499979) % N;
+      const r = computeLean(n);
+      if (r.ep !== ep32[n]) return null;
+      want.fill(0);
+      for (const i of r.earned) want[i] = 1;
+      for (let row = 0; row < ids.length; row++) {
+        if (((tbl[row * ROWB + (n >> 3)] >> (n & 7)) & 1) !== want[map[row]]) return null;
+      }
+    }
+
+    const ep = Float64Array.from(ep32);
+    const cnt = new Uint8Array(N), bits = new Uint8Array(N * ROW);
+    const examples = BADGE_META.map(() => []);
+    const LOG2 = new Uint8Array(256);
+    for (let i = 0; i < 8; i++) LOG2[1 << i] = i;
+    for (let row = 0; row < ids.length; row++) {
+      const bi = map[row], byte = bi >> 3, mask = 1 << (bi & 7), ex = examples[bi], off = row * ROWB;
+      for (let j = 0; j < ROWB; j++) {
+        let v = tbl[off + j];
+        while (v) {
+          const lo = v & -v, n = (j << 3) + LOG2[lo];
+          v ^= lo;
+          bits[n * ROW + byte] |= mask;
+          cnt[n]++;
+          if (ex.length < SWEEP_EX_PER_BADGE) ex.push([n, ep[n]]);
+        }
+      }
+      if (onProgress && (row & 15) === 15) onProgress((row + 1) / ids.length);
+    }
+    if (onProgress) onProgress(1);
+    return { ep, cnt, bits, ROW, examples };
+  } catch (e) {
+    return null;
+  }
+}
+
+// { ep, cnt, bits, ROW, examples, ver, ts, cached, source }. source is 'tables' when it
+// came from the shipped tables, 'sweep' when every number was scored here.
+// onProgress(pct) fires only when the data set is actually built (not on a cache hit).
 async function sweepShared(origin, onProgress, force) {
   const ver = await sweepVersion(origin);
   if (!force) {
@@ -1345,9 +1410,10 @@ async function sweepShared(origin, onProgress, force) {
       const hit = await sweepCacheGet();          // the lock holder may have just written it
       if (sweepFresh(hit, ver)) return { ...hit, cached: true };
     }
-    const swept = await sweepAll(origin + '/engine.js', 0, SWEEP_CAP - 1, SWEEP_EX_PER_BADGE, onProgress);
+    const tables = force ? null : await sweepFromTables(origin, onProgress);
+    const swept = tables || await sweepAll(origin + '/engine.js', 0, SWEEP_CAP - 1, SWEEP_EX_PER_BADGE, onProgress);
     const rec = { ver, ts: Date.now(), ep: swept.ep, cnt: swept.cnt, bits: swept.bits,
-                  ROW: swept.ROW, examples: swept.examples };
+                  ROW: swept.ROW, examples: swept.examples, source: tables ? 'tables' : 'sweep' };
     await sweepCachePut(rec);
     sweepDropLegacy();
     return { ...rec, cached: false };
@@ -1690,10 +1756,10 @@ function chainsWorker() {
     const say = (phase, pct) => self.postMessage({ type: 'progress', phase, pct });
     try {
       const E = await import(m.origin + '/engine.js');
-      say('Scoring every number', 0);
+      say('Loading every score', 0);
       // Shared with / and /grid: on a warm cache this returns immediately and only the
       // graph build below (edges, loops, layout) actually costs anything.
-      const swept = await E.sweepShared(m.origin, p => say('Scoring every number', p));
+      const swept = await E.sweepShared(m.origin, p => say('Loading every score', p));
       const EP = swept.ep;
 
       // --- edges -----------------------------------------------------------
@@ -2562,8 +2628,8 @@ function renderChains() {
     <h1>Each number points at its own score.</h1>
     <p class="lede">Take any number, work out the EP it earns, and treat that score as the next number.
       Almost every number can do this, so the whole range becomes one graph with a single arrow leaving
-      every node. This is all of them - scored in your browser from the live badge rules, not from a
-      stored snapshot.</p>
+      every node. This is all of them - read from the score tables this site ships, and checked against
+      the live badge rules as they load.</p>
     <div id="loading">
       <p id="status" class="mono">Starting…</p>
       <div id="track" class="progress"><i id="bar"></i></div>
@@ -2787,7 +2853,7 @@ function combinedSummary(loaded) {
   return sum;
 }
 
-export { compute, BADGES, FAMILIES, engineModuleSource, CARD_TIERS, cardTier,
+export { compute, BADGES, FAMILIES, FAMILY_NAMES, DESCRIPTIONS, engineModuleSource, CARD_TIERS, cardTier,
   BADGE_HISTORY, BADGE_PORT_DATE, badgeAdded, legacyCatalogue };
 
 // ---------------------------------------------------------------------------

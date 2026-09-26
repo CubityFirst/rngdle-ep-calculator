@@ -54,8 +54,12 @@ shipped indexes; `npm run check` proves they agree (see `site/README.md`).
 
 The tools that have no tab on rngdle.tools yet, all in `src/beta.js` (and `/chains` in
 `src/index.js`), all reading the **same** cached full-range sweep (`sweepShared` in
-`engine.js`). Nothing here is precomputed on the server, so every one of them tracks the
-live badge rules; the sweep runs once per browser and every tool after that is instant.
+`engine.js`). That data set is built from the two score tables the front end ships
+(`site/ep-table.bin.gz`, `site/badge-table.bin.gz`, rows mapped through
+`badge-table.ids.json`), after re-scoring 2,000 numbers with the live rules to
+confirm they agree. If they don't (a port half done) or the tables can't load, it
+falls back to sweeping all 1,000,001 numbers in the browser. Either way it is cached
+in IndexedDB, and every tool after the first is instant.
 
 Each tool is a dedicated Web Worker that sweeps and derives, plus a page that only
 draws - so neither the sweep nor a heavy derivation (a 233×233 co-occurrence pass is

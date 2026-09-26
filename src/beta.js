@@ -180,9 +180,9 @@ function betaShell(o) {
 // The standard overlay markup. `what` is the one-line explanation under the bar.
 function overlayHTML(what) {
   return `<div class="beta-ov" id="ov">
-  <h2 id="ovhead">Scoring 1,000,000 numbers…</h2>
+  <h2 id="ovhead">Loading every score…</h2>
   <div class="progress"><i id="ovbar"></i></div>
-  <p id="ovtext">${what} One-time - the result is cached in this browser and shared with the other tools.</p>
+  <p id="ovtext">All 1,000,001 scores come from the tables this site ships. ${what} The result is cached in this browser and shared with the other tools.</p>
 </div>`;
 }
 
@@ -256,7 +256,7 @@ async function betaSweep(origin, frac) {
   E = await import(origin + '/engine.js');
   const swept = await E.sweepShared(origin, p =>
     self.postMessage({ type: 'progress', pct: p * frac }));
-  if (swept.cached) self.postMessage({ type: 'progress', pct: frac, msg: 'Reading the cached sweep…' });
+  if (swept.cached) self.postMessage({ type: 'progress', pct: frac, msg: 'Reading the cached scores…' });
   return swept;
 }
 // Decode one number's earned-badge indices out of the sweep bitmask into 'out',

@@ -660,9 +660,11 @@ that were ported, and link to Neighbours and Luck instead). A tool added to
 Two things a legacy page does differently from a tab. It is a real page load:
 the shell's router steps aside for those paths (`WORKER_PATHS` in `ep.js`), so a
 click on a card is a navigation, and a cold load of `/beta/atlas` never runs the
-shell at all. And it scores every number in the browser the first time - the
-solver's tools read a Web Worker sweep of the live rules, cached in IndexedDB,
-where this site's tabs read the shipped tables.
+shell at all. And its data set is one IndexedDB entry (`sweepShared` in `/engine.js`),
+built the first time from the same two tables the tabs read - `badge-table.ids.json`
+maps their rows onto the engine's own badge order - once a 2,000-number sample
+re-scored with the live rules agrees with them. If it doesn't, the tools sweep
+every number in the browser instead, as they used to.
 
 They look like the tabs, though. `pageShell()` in `src/ui.js` links `/style.css`,
 drops in this file's `<header>` and `<footer>` verbatim (with Other marked current),
@@ -683,7 +685,15 @@ that no path the shell routes is forwarded.
 
 ## Refreshing from upstream
 
-When rngdle ships changes, re-scrape the two files it publishes:
+When rngdle ships changes, first file the new scoring chunk and read what moved:
+
+```bash
+node tools/snapshot.cjs      # research/rngdle-<date> + research/rngdle-dump-<date>/DIFF.md
+```
+
+The report lists what changed upstream since the previous snapshot and what
+`src/index.js` now disagrees with; the `ingest-bundle` skill in `.claude/skills/` is
+the porting procedure. Then re-scrape the two files this front end vendors:
 
 ```bash
 node tools/refresh.cjs
@@ -724,6 +734,7 @@ there, `node tools/check.cjs` re-checks the catalogue.
 | `src/index.js` etc. | the engine and the legacy tools - the root README |
 | `ep-table.bin.gz` | precomputed EP for every number, built by `tools/` |
 | `badge-table.bin.gz` | precomputed badge bitsets, one row per badge, same build |
+| `badge-table.ids.json` | the badge id of each row above, for the legacy tools (whose badge order differs), same build |
 | `engine-shim.js` | Turbopack runtime shim, shared by page and tools |
 | `vendor/` | upstream files, unmodified |
 | `wrangler.toml` | Cloudflare Workers config (custom domain, assets, D1) |
