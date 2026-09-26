@@ -13,7 +13,9 @@ One Cloudflare Worker, deployed at rng.cubityfir.st and rngdle.tools:
   the legacy mount, and the asset binding for everything else.
 - `tools/*.cjs` - `check.cjs` (run before every deploy; wrangler's build runs it),
   `build-dist.cjs` (site/ -> dist/), `refresh.cjs` (re-vendor rngdle's bundle),
-  `build-ep-table.cjs` (the two shipped indexes).
+  `build-ep-table.cjs` (the two shipped indexes), `snapshot.cjs` (file + diff a new
+  upstream bundle), `parity.cjs` (engine vs that bundle, whole range), `prod-bundle.cjs`
+  (the loader both use).
 
 Rules that follow from that:
 
@@ -44,9 +46,13 @@ files with the change:
 `npm run deploy` runs the generator automatically via `predeploy`, but the resulting
 diff still has to be committed. Never hand-edit `*.gen.js` files.
 
-When rngdle ships a new bundle: `npm run refresh`, `npm run ep-table`, `npm run check`
-(see `site/README.md`, "Refreshing from upstream"), and commit `site/vendor/`, the two
-`.bin.gz` indexes and `site/style.css` together.
+When rngdle ships a new bundle, follow the `ingest-bundle` skill (`.claude/skills/`):
+`npm run snapshot` files the chunk as `research/rngdle-<date>` and writes a report of
+what moved upstream and what `src/index.js` now disagrees with; port that, then
+`npm run refresh`, `npm run ep-table`, `npm run check`, `npm run parity`, and commit
+`site/vendor/`, the two `.bin.gz` indexes and `site/style.css` with the engine change.
+`tools/prod-bundle.cjs` is the one loader for saved bundles (finds modules by export
+name, not id); `tools/parity.cjs` is the full-range oracle check.
 
 ## Commit messages
 

@@ -10,6 +10,8 @@
     "check": "node tools/check.cjs",
     "build": "node tools/build-dist.cjs",
     "refresh": "node tools/refresh.cjs",
+    "snapshot": "node tools/snapshot.cjs",
+    "parity": "node tools/parity.cjs",
     "ep-table": "node tools/build-ep-table.cjs",
     "predeploy": "node research/gen-snapshot.mjs",
     "deploy": "wrangler deploy",

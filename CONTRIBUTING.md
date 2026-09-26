@@ -7,6 +7,8 @@ npm install          # installs wrangler
 npm run serve        # plain-Node dev server: site/ from disk + the Worker (http://127.0.0.1:8787)
 npm run dev          # wrangler dev: serves dist/, so run npm run build after editing site/; has a local D1
 npm run check        # tools/check.cjs - engine, indexes, markup, legacy catalogue
+npm run snapshot     # tools/snapshot.cjs - file today's rngdle.com bundle under research/ and report what moved
+npm run parity       # tools/parity.cjs - src/index.js vs that bundle on every number (--quick: 1 in 97)
 npm run build        # tools/build-dist.cjs - assemble dist/ from site/
 npm test             # badge-logic test harness
 npm run test:browser # real-browser smoke test of /chains and the /beta tools
