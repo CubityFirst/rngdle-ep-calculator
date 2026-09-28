@@ -1,4 +1,4 @@
-# RNGdle sandbox (Cloudflare Worker)
+# RNGdle Tools (Cloudflare Worker)
 
 One Worker, three parts:
 
