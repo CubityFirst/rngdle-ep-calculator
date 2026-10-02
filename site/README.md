@@ -495,8 +495,9 @@ Two things the sets alone don't cover, both pinned by `tools/check.cjs`:
   sandbox's own and not rngdle's.
 - **`BOOB` is named by Calculator Words but no longer exists** — it became
   `BOOB_8008`, `BOOB_58008` and `BOOB_80085`. Unresolvable ids are dropped
-  rather than drawn as blank pills, which is why that set shows 4 and rngdle
-  shows 5. The check asserts that `BOOB` is the *only* such id, so if rngdle
+  rather than drawn as blank pills; in their place the card ends with rngdle's
+  locked `???` pill, which is what rngdle shows for it to everyone (nobody can
+  earn it). So the set reads 5, with 4 named pills and one `???`, as on rngdle. The check asserts that `BOOB` is the *only* such id, so if rngdle
   renames anything else it fails instead of quietly shrinking a set.
 
 ### Compact layout

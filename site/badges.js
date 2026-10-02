@@ -67,9 +67,11 @@ const chevron = () => node(`
   </svg>`);
 
 // A set can name a badge the engine no longer defines — rngdle's own Calculator
-// Words still lists BOOB, which split into BOOB_8008 and friends. Drop those
-// rather than render a pill with no name; tools/check.js pins the list, so a
-// rename upstream shows up as a failure instead of a silently shorter set.
+// Words still lists BOOB, which split into BOOB_8008 and friends. There is no
+// name or EP to draw for those, so they are left out here and drawn after the
+// rest as rngdle's locked "???" pill, which is all rngdle can ever show for
+// one: nobody can earn it. tools/check.cjs pins the list, so a rename upstream
+// shows up as a failure instead of a silently wrong set.
 const knownBadges = ids => ids
   .map(id => ({ id, info: ENGINE.getBadgeInfo(id) }))
   .filter(b => b.info)
@@ -102,6 +104,11 @@ function badgePill({ id, info }) {
   link.append(pill);
   return link;
 }
+
+// rngdle's pill for a badge the player hasn't earned, used here only for the
+// ids that no longer name a badge.
+const lockedPill = () => node(`
+  <div class="type-label inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-surface-raised text-prose-3">???</div>`);
 
 // One badge, laid out as rngdle's own badge page lays it out: the emoji, the
 // name, the description, then a three-column card of rarity / EP / probability.
@@ -154,11 +161,14 @@ function setCard(set, badges) {
   card.querySelector(".text-2xl").textContent = set.icon;
   card.querySelector("h3").textContent = set.name;
   card.querySelector("p").textContent = set.description;
-  card.querySelector(".text-right > div").textContent = badges.length;
+  // rngdle counts the set's ids, BOOB included.
+  card.querySelector(".text-right > div").textContent = set.badges.length;
 
   const arrow = chevron();
   card.querySelector("button .flex.items-center.gap-3:last-child").append(arrow);
-  for (const b of badges) card.querySelector(".flex-wrap").append(badgePill(b));
+  const pills = card.querySelector(".flex-wrap");
+  for (const b of badges) pills.append(badgePill(b));
+  for (let i = badges.length; i < set.badges.length; i++) pills.append(lockedPill());
 
   const button = card.querySelector("button"), panel = card.lastElementChild;
   button.addEventListener("click", () => {
