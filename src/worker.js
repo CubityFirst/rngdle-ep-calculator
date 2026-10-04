@@ -88,6 +88,42 @@ function rawNames(list) {
   return [...seen].slice(0, MAX_COMBINE);
 }
 
+// --- Nearest misses -----------------------------------------------------------
+// A roll's nearest miss is its best neighbour, as the Neighbours tab defines it: of
+// the 54 numbers one digit away in its six-digit zero-padded form, the highest EP,
+// first in scan order on a tie. Scoring 54 numbers per roll with the engine is ~3.5s
+// of CPU for a full 2,000-roll profile, so the neighbours are read off the EP table
+// the site already ships (check.cjs keeps it in step with the engine) - fetched from
+// the asset binding and inflated once per isolate.
+const EP_TABLE_PATH = "/ep-table.bin.gz";
+const NB_POW = [100000, 10000, 1000, 100, 10, 1];
+let epTable = null;                               // Promise<Uint32Array>
+function loadEpTable(env, origin) {
+  epTable ??= (async () => {
+    const res = await env.ASSETS.fetch(new Request(origin + EP_TABLE_PATH));
+    if (!res.ok) throw new Error(`${EP_TABLE_PATH}: ${res.status}`);
+    const buf = await new Response(res.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+    return new Uint32Array(buf);
+  })().catch(e => { epTable = null; throw e; });  // a failed load is retried next request
+  return epTable;
+}
+
+// The best neighbour of n, or null when none beats ep (a local peak) - a swap that
+// scores less is not a miss. 1,000,000 has seven digits and no six-digit neighbours.
+function nearestMiss(t, n, ep) {
+  if (!(n >= 0 && n < 1000000)) return null;
+  let best = -1, bestN = -1;
+  for (const pw of NB_POW) {
+    const d0 = Math.floor(n / pw) % 10, base = n - d0 * pw;
+    for (let d = 0; d < 10; d++) {
+      if (d === d0) continue;
+      const e = t[base + d * pw];
+      if (e > best) { best = e; bestN = base + d * pw; }
+    }
+  }
+  return best > ep ? { number: bestN, ep: best } : null;
+}
+
 const text = (body, status, extra = {}) => new Response(body, {
   status,
   headers: { "content-type": "text/plain; charset=utf-8", "access-control-allow-origin": "*", ...extra },
@@ -97,7 +133,7 @@ const text = (body, status, extra = {}) => new Response(body, {
 // badge count are recomputed rather than read from rngdle's roll record, so a roll
 // scored before a badge batch shows what it is worth today. Rolls come newest first,
 // players interleaved by date, exactly as the pooled page lists them.
-async function rawProfiles(names, byPlayer) {
+async function rawProfiles(names, byPlayer, env, origin) {
   const loaded = await Promise.all(names.map(async username => {
     try { return { username, rolls: await fetchRolls(username) }; }
     catch (e) { return { username, error: e.status === 404 ? "not found" : "unreachable" }; }
@@ -110,6 +146,7 @@ async function rawProfiles(names, byPlayer) {
   }
 
   let body;
+  const extraHeaders = {};
   if (byPlayer) {
     body = csvRow(["player", "rolls", "total_ep", "badges", "best_number", "best_ep", "first_roll", "last_roll", "capped"]);
     for (const m of ok) {
@@ -127,18 +164,26 @@ async function rawProfiles(names, byPlayer) {
     }
   } else {
     // badge_list is every badge the roll earned as "Label+EP", biggest first, in one
-    // cell; a badge its family outranked is there with +0, earned but unpaid.
-    body = csvRow(["date", "user", "roll", "tier", "ep", "badges", "hearts", "poem", "badge_list"]);
+    // cell; a badge its family outranked is there with +0, earned but unpaid. The
+    // near_miss columns are the roll's best neighbour (above), blank on a local peak
+    // - or for every roll, with a header saying so, if the EP table would not load.
+    let t = null;
+    try { t = await loadEpTable(env, origin); } catch (e) { console.error("near misses unavailable:", e); }
+    body = csvRow(["date", "user", "roll", "tier", "ep", "badges", "hearts", "poem", "badge_list",
+      "near_miss", "near_miss_tier", "near_miss_ep"]);
     const rows = [];
     for (const m of ok) for (const r of m.rolls) rows.push({ ...r, owner: m.username });
     rows.sort((a, b) => (Date.parse(b.rolledAt) || 0) - (Date.parse(a.rolledAt) || 0));
     for (const r of rows) {
       const s = compute(r.number);
       const list = s.badges.map(b => `${b.label}+${b.ep}`).join(", ");
-      body += csvRow([r.rolledAt, r.owner, r.number, cardTier(s.totalEP), s.totalEP, s.count, r.heartCount ?? 0, r.poem || "", list]);
+      const miss = t && nearestMiss(t, r.number, s.totalEP);
+      body += csvRow([r.rolledAt, r.owner, r.number, cardTier(s.totalEP), s.totalEP, s.count, r.heartCount ?? 0, r.poem || "", list,
+        miss?.number, miss && cardTier(miss.ep), miss?.ep]);
     }
+    if (!t) extraHeaders["x-near-miss"] = "unavailable";
   }
-  const extra = { "cache-control": CACHE, "content-disposition": `inline; filename="${ok.map(m => m.username).join(",")}.csv"` };
+  const extra = { ...extraHeaders, "cache-control": CACHE, "content-disposition": `inline; filename="${ok.map(m => m.username).join(",")}.csv"` };
   // A pooled list with a name that failed still answers for the rest; the miss is
   // in a header, since a CSV has nowhere to put a note.
   if (failed.length) extra["x-missing-players"] = failed.map(m => `${m.username} (${m.error})`).join(", ");
@@ -174,7 +219,7 @@ export default {
       if (request.method !== "GET") return text("GET only\n", 405);
       const names = rawNames(raw[1]);
       if (!names.length) return text("Provide usernames: letters, digits, - and _, comma-separated.\n", 400);
-      return rawProfiles(names, url.searchParams.get("by") === "player");
+      return rawProfiles(names, url.searchParams.get("by") === "player", env, url.origin);
     }
 
     // /badges/raw before the shell: run_worker_first lists it, as /badges/<slug> is not.

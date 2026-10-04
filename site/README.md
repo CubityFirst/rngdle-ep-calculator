@@ -568,7 +568,13 @@ ever see the empty shell; this is the server-rendered version, for `IMPORTDATA`:
 One row per roll, newest first, players interleaved by date as the pooled page
 lists them: `date, user, roll, tier, ep, badges, hearts, poem, badge_list`, where
 `badge_list` is every badge the roll earned as `Label+EP` in one cell (a badge its
-family outranked shows `+0`). `?by=player` gives one row per player instead:
+family outranked shows `+0`), then `near_miss, near_miss_tier, near_miss_ep`: the
+roll's nearest miss, its best neighbour as the Neighbours tab defines it (of the 54
+numbers one digit away, the highest EP, first on a tie). Those three are blank on a
+local peak, where no swap would have scored more, and for 1000000. They are read off
+`ep-table.bin.gz` through the asset binding rather than scored - 54 engine calls a
+roll is seconds of CPU on a full profile - and if it fails to load they are blank on
+every row with an `x-near-miss: unavailable` header. `?by=player` gives one row per player instead:
 `player, rolls, total_ep, badges` (distinct badges collected), `best_number,
 best_ep, first_roll, last_roll, capped`. EP, tier and badges are the engine's,
 from the number alone, exactly as on the page. A name that fails in a pooled
