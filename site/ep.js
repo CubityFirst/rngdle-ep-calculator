@@ -198,9 +198,10 @@ const VIEWS = {
 };
 
 // Paths the Worker answers itself rather than the shell: the legacy tools under
-// /beta/ and /chains, and their engine and APIs (worker.js). A click on one is a
-// real navigation, and a cold load of one never runs this script at all.
-const WORKER_PATHS = /^\/(?:beta|chains)(?:\/|$)|^\/engine\.js$|^\/api(?:\/|$)/;
+// /beta/ and /chains, their engine and APIs, and the CSVs at /u/<names>/raw and
+// /badges/raw (worker.js). A click on one is a real navigation, and a cold load of
+// one never runs this script at all.
+const WORKER_PATHS = /^\/(?:beta|chains)(?:\/|$)|^\/engine\.js$|^\/api(?:\/|$)|^\/(?:u\/[^/]+|badges)\/raw\/?$/;
 const VIEW_BY_PATH = Object.fromEntries(Object.entries(VIEWS).map(([k, v]) => [v.path, k]));
 
 // Links shared while the site was on hashes still land in the right place.
