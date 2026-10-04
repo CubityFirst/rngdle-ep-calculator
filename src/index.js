@@ -2942,7 +2942,12 @@ export default {
           status: 400, headers: { 'content-type': 'application/json' },
         });
       }
-      return new Response(JSON.stringify(compute(n)), {
+      // `rarity` is the number's own card tier (from its total EP), as rngdle.com shows
+      // it - each badge's `rarity` is that badge's tier from its EP alone.
+      const { number, totalEP, ...rest } = compute(n);
+      const tier = cardTier(totalEP);
+      const rarity = tier.charAt(0).toUpperCase() + tier.slice(1);
+      return new Response(JSON.stringify({ number, totalEP, rarity, ...rest }), {
         headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
       });
     }
