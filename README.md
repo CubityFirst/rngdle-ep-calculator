@@ -8,7 +8,7 @@ One Worker, three parts:
 - **`src/index.js`** and friends - the badge engine reverse-engineered to full parity
   with rngdle.com (this README), and the legacy tools the front end has no tab for.
 - **`src/worker.js`** - the entry point: `/api/rolls`, `/u/<names>/raw` (a profile as CSV, for
-  a spreadsheet's `IMPORTDATA`), the legacy mount, static assets.
+  a spreadsheet's `IMPORTDATA`), `/badges/raw` (the badge list as CSV), the legacy mount, static assets.
 
 Deployed at **rng.cubityfir.st**; rngdle.tools moves here later. This repo used to be
 the front end in its own right - the calculator, `/badges`, `/grid`, `/u` - and all

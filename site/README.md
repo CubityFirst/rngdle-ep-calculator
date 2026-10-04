@@ -33,8 +33,8 @@ npm run deploy             # gen-snapshot, then wrangler: check.js, build-dist.j
 `wrangler.toml` attaches the custom domain and runs `tools/check.cjs && tools/build-dist.cjs`
 as its build, so a bare `npx wrangler deploy` works too. `src/worker.js` is the
 server code. It answers `/api/rolls` - rngdle's rolls API sends no CORS header, so
-the Profiles page cannot read it from the browser - and `/u/<names>/raw`, the
-profile as CSV for spreadsheets, mounts `src/index.js` for the Other tab's tools
+the Profiles page cannot read it from the browser - `/u/<names>/raw`, the
+profile as CSV for spreadsheets, and `/badges/raw`, the badge list as CSV; it mounts `src/index.js` for the Other tab's tools
 (below), and hands every other path to the asset binding.
 
 The EP index ships **gzipped** and is inflated in the browser with
@@ -500,6 +500,21 @@ Two things the sets alone don't cover, both pinned by `tools/check.cjs`:
   earn it). So the set reads 5, with 4 named pills and one `???`, as on rngdle. The check asserts that `BOOB` is the *only* such id, so if rngdle
   renames anything else it fails instead of quietly shrinking a set.
 
+**The badge list as CSV: `/badges/raw`** (the `CSV ↓` link under the count), the
+Badges tab's counterpart to a profile's `/u/<name>/raw`, for `IMPORTDATA`:
+
+```
+=IMPORTDATA("https://rng.cubityfir.st/badges/raw")
+```
+
+One row per live badge, highest EP first - the same data as `/api/badges`:
+`id, label, emoji, ep, rarity, percent, family, added, rule, examples`, where
+`percent` is the share of all 1,000,001 numbers that earn it, `family` is blank
+for a badge in none, and `examples` is the first few numbers that earn it,
+space-separated in one cell. It only changes on a deploy, so it caches for an
+hour. `/badges/raw` (and only that path) is in `run_worker_first`; no badge
+slugs as `raw`, so it shadows no badge page.
+
 ### Compact layout
 
 A toggle beside the title switches the map between **Official** — the `/sets`
@@ -731,7 +746,7 @@ there, `node tools/check.cjs` re-checks the catalogue.
 | `badges.js` | the Badges map and the per-badge page |
 | `profile.js` | the Profiles page |
 | `other.js` | the Other tab: the legacy tools' gallery |
-| `src/worker.js` | the `/api/rolls` proxy, `/u/<names>/raw` (the profile as CSV) and the legacy mount; everything else falls through to the assets |
+| `src/worker.js` | the `/api/rolls` proxy, `/u/<names>/raw` (the profile as CSV), `/badges/raw` (the badge list as CSV) and the legacy mount; everything else falls through to the assets |
 | `src/index.js` etc. | the engine and the legacy tools - the root README |
 | `ep-table.bin.gz` | precomputed EP for every number, built by `tools/` |
 | `badge-table.bin.gz` | precomputed badge bitsets, one row per badge, same build |

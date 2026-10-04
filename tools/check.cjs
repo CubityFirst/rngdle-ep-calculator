@@ -426,7 +426,7 @@ console.log("ok  EP->Number spot values");
   const wranglerCfg = fs.readFileSync(path.join(REPO, "wrangler.toml"), "utf8");
   const rwf = /run_worker_first\s*=\s*\[([^\]]*)\]/.exec(wranglerCfg);
   assert.ok(rwf, "wrangler.toml has no run_worker_first list, so the legacy pages would render as the app shell");
-  for (const p of ["/beta", "/beta/*", "/chains", "/engine.js", "/api", "/api/*", "/u/*"]) {
+  for (const p of ["/beta", "/beta/*", "/chains", "/engine.js", "/api", "/api/*", "/u/*", "/badges/raw"]) {
     assert.ok(rwf[1].includes(JSON.stringify(p)), `wrangler.toml run_worker_first is missing ${p}`);
   }
   // /u/<names>/raw is the profile as CSV for spreadsheets; it needs /u/* above, and

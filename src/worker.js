@@ -10,6 +10,7 @@
 //    ?by=player - for a spreadsheet's IMPORTDATA. The profile page is drawn in the
 //    browser, so IMPORTHTML / IMPORTXML see nothing but the empty shell; this is the
 //    server-rendered version of it, scored with the engine exactly as the page is.
+//    /badges/raw does the same for the Badges tab: every live badge, one row each.
 //
 // 2. The legacy tools. index.js - the badge engine, and the site this front end
 //    replaced - still renders the tools that were never ported into site/ (/chains and
@@ -23,12 +24,14 @@
 // a reload. The legacy paths run the Worker first (wrangler.toml), or a navigation
 // to one of them would get the shell too.
 
-import legacy, { legacyCatalogue, compute, cardTier } from "./index.js";
+import legacy, { legacyCatalogue, compute, cardTier, badgeList } from "./index.js";
 
 const VALID_USERNAME = /^[A-Za-z0-9_-]{1,40}$/;   // rngdle's own shape
 const MAX_COMBINE = 10;                           // players pooled at once, as the page caps it
 // /u/alice,bob/raw - the names as the Profiles route takes them, then /raw.
 const RAW_PATH = /^\/u\/([A-Za-z0-9_,-]{1,450})\/raw\/?$/;
+// /badges/raw - the badge list as CSV. No badge slugs as "raw", so it shadows nothing.
+const BADGES_RAW_PATH = /^\/badges\/raw\/?$/;
 const PAGE = 100;                                 // the API's max page size
 const MAX_ROLLS = 2000;                           // 20 upstream requests, worst case
 const UPSTREAM = "https://www.rngdle.com/api/users";
@@ -142,6 +145,25 @@ async function rawProfiles(names, byPlayer) {
   return text(body, 200, { ...extra, "content-type": "text/csv; charset=utf-8" });
 }
 
+// --- /badges/raw: the badge list as CSV ---------------------------------------
+// The same rows as /api/badges, highest EP first. percent is the share of all
+// 1,000,001 numbers that earn the badge; examples are the first few that do,
+// space-separated in one cell. Fixed per deploy, so it caches for an hour.
+let BADGES_CSV = null;
+function rawBadges() {
+  if (!BADGES_CSV) {
+    BADGES_CSV = csvRow(["id", "label", "emoji", "ep", "rarity", "percent", "family", "added", "rule", "examples"]);
+    for (const b of badgeList()) {
+      BADGES_CSV += csvRow([b.id, b.label, b.emoji, b.ep, b.rarity, b.prob, b.family, b.added, b.desc, b.examples.join(" ")]);
+    }
+  }
+  return text(BADGES_CSV, 200, {
+    "cache-control": "public, max-age=3600",
+    "content-disposition": 'inline; filename="rngdle-badges.csv"',
+    "content-type": "text/csv; charset=utf-8",
+  });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -153,6 +175,12 @@ export default {
       const names = rawNames(raw[1]);
       if (!names.length) return text("Provide usernames: letters, digits, - and _, comma-separated.\n", 400);
       return rawProfiles(names, url.searchParams.get("by") === "player");
+    }
+
+    // /badges/raw before the shell: run_worker_first lists it, as /badges/<slug> is not.
+    if (BADGES_RAW_PATH.test(url.pathname)) {
+      if (request.method !== "GET") return text("GET only\n", 405);
+      return rawBadges();
     }
 
     if (url.pathname === "/api/rolls") {

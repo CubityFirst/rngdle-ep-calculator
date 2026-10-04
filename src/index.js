@@ -1598,18 +1598,22 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-// The /api/badges body. Nothing in it changes between deploys, so build it once.
-let BADGES_JSON = null;
-function badgesJson() {
-  if (BADGES_JSON) return BADGES_JSON;
+// Every live badge, highest EP first: the /api/badges body, and the rows of
+// /badges/raw (worker.js). Nothing in it changes between deploys, so build it once.
+let BADGE_LIST = null, BADGES_JSON = null;
+function badgeList() {
+  if (BADGE_LIST) return BADGE_LIST;
   const familyOf = {};
   FAMILIES.forEach((fam, i) => { for (const id of fam) familyOf[id] = FAMILY_NAMES[i]; });
-  const badges = BADGES.map(([id, label, emoji, ep]) => ({
+  return BADGE_LIST = BADGES.map(([id, label, emoji, ep]) => ({
     id, label, emoji, ep, rarity: rarityFromScore(ep), desc: DESCRIPTIONS[id],
     prob: PROBABILITIES[id], family: familyOf[id] || null, added: badgeAdded(id),
     examples: EXAMPLES[id] || [],
   })).sort((a, b) => b.ep - a.ep);
-  return BADGES_JSON = JSON.stringify({ count: badges.length, badges });
+}
+function badgesJson() {
+  const badges = badgeList();
+  return BADGES_JSON ??= JSON.stringify({ count: badges.length, badges });
 }
 
 function parseN(raw) {
@@ -2868,7 +2872,7 @@ function combinedSummary(loaded) {
 }
 
 export { compute, BADGES, FAMILIES, FAMILY_NAMES, DESCRIPTIONS, engineModuleSource, CARD_TIERS, cardTier,
-  BADGE_HISTORY, BADGE_PORT_DATE, badgeAdded, legacyCatalogue };
+  BADGE_HISTORY, BADGE_PORT_DATE, badgeAdded, legacyCatalogue, badgeList };
 
 // ---------------------------------------------------------------------------
 // The new front end
