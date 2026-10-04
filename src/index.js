@@ -1598,6 +1598,20 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// The /api/badges body. Nothing in it changes between deploys, so build it once.
+let BADGES_JSON = null;
+function badgesJson() {
+  if (BADGES_JSON) return BADGES_JSON;
+  const familyOf = {};
+  FAMILIES.forEach((fam, i) => { for (const id of fam) familyOf[id] = FAMILY_NAMES[i]; });
+  const badges = BADGES.map(([id, label, emoji, ep]) => ({
+    id, label, emoji, ep, rarity: rarityFromScore(ep), desc: DESCRIPTIONS[id],
+    prob: PROBABILITIES[id], family: familyOf[id] || null, added: badgeAdded(id),
+    examples: EXAMPLES[id] || [],
+  })).sort((a, b) => b.ep - a.ep);
+  return BADGES_JSON = JSON.stringify({ count: badges.length, badges });
+}
+
 function parseN(raw) {
   if (raw === null || raw === undefined || raw.trim() === '') return null;
   if (!/^\d+$/.test(raw.trim())) return NaN;
@@ -2949,6 +2963,14 @@ export default {
       const rarity = tier.charAt(0).toUpperCase() + tier.slice(1);
       return new Response(JSON.stringify({ number, totalEP, rarity, ...rest }), {
         headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
+      });
+    }
+
+    // Every live badge, highest EP first, with what /api reports per badge plus its
+    // family, the date it arrived and the first numbers that earn it.
+    if (url.pathname === '/api/badges') {
+      return new Response(badgesJson(), {
+        headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=3600' },
       });
     }
 

@@ -38,10 +38,11 @@ const UA = "rngdle.tools (+https://rngdle.tools) - profile view";
 const CACHE = "public, max-age=300";
 
 // What the legacy Worker answers: the tools themselves, their browser engine, and the
-// JSON they read (/api is the scorer, /api/profile feeds /beta/collection, the
-// palette routes are the Box Lab's gallery). Nothing the shell routes is in here —
-// /grid, /badges, /u and the rest are this site's own — so the two never overlap.
-const LEGACY = /^\/(?:beta\/|chains$|engine\.js$|api$|api\/(?:profile|palettes|palettes-liked)(?:\/|$))/;
+// JSON they read (/api is the scorer, /api/badges the badge list, /api/profile feeds
+// /beta/collection, the palette routes are the Box Lab's gallery). Nothing the shell
+// routes is in here — /grid, /badges, /u and the rest are this site's own — so the
+// two never overlap.
+const LEGACY = /^\/(?:beta\/|chains$|engine\.js$|api$|api\/(?:badges|profile|palettes|palettes-liked)(?:\/|$))/;
 
 const json = (body, status = 200, extra = {}) => new Response(JSON.stringify(body), {
   status,
