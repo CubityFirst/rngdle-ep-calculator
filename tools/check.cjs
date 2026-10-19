@@ -18,7 +18,7 @@ const app = fs.readFileSync(path.join(ROOT, "app.js"), "utf8");
 // Run app.js's shim (everything above the first "--- formatting" banner) plus
 // the vendored chunk, in a bare context. Same code the browser runs.
 const shim = fs.readFileSync(path.join(ROOT, "engine-shim.js"), "utf8");
-assert.ok(shim.includes("load(10163)"), "engine-shim.js not found — did the file get restructured?");
+assert.ok(shim.includes("load(710163)"), "engine-shim.js not found — did the file get restructured?");
 
 const ctx = vm.createContext({ console });
 ctx.globalThis = ctx;

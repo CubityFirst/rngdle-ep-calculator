@@ -205,7 +205,7 @@ export const COMPONENTS_CSS = `
 
 // site/index.html's <header>, character for character (tools/check.cjs fails if the
 // two drift). The Other tab is marked current: every page here is one of its tools.
-export const SITE_HEADER = `  <header class="flex items-center justify-between bg-site-bg px-2 py-1 ps-4 text-prose">
+export const SITE_HEADER = `  <header class="flex items-center justify-between bg-site-bg py-1 pe-2 ps-6 sm:ps-4 text-prose">
     <div class="flex items-center gap-1 sm:gap-2 min-w-0">
       <a class="text-lg font-bold tracking-widest hover:text-prose-2 transition-colors normal-case shrink-0" href="/">RNGdle</a>
       <nav class="flex items-center gap-1" id="nav">

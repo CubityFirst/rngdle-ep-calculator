@@ -40,9 +40,9 @@ function load(id) {
   }
   return ns(id);
 }
-const ENGINE = load(10163);   // analyzeNumber, composeRollResult, getPercentileForScore, rollRandomNumber
-const RARITY = load(5641);    // RARITY_PALETTE, RARITY_ARTIFACT_STYLES, getCardRarityTier, getBadgeRarityTier
-const DIGITS = load(47558);   // findEquation, for the EQUATION badge's own diagram
-const BADGES = load(67711);   // BADGE_DEFINITIONS — every badge, for the Badges map
+const ENGINE = load(710163);  // analyzeNumber, composeRollResult, getPercentileForScore, rollRandomNumber
+const RARITY = load(405641);  // RARITY_PALETTE, RARITY_ARTIFACT_STYLES, getCardRarityTier, getBadgeRarityTier
+const DIGITS = load(847558);  // findEquation, for the EQUATION badge's own diagram
+const BADGES = load(167711);  // BADGE_DEFINITIONS — every badge, for the Badges map
 
 
