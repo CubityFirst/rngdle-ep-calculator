@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" role="img" aria-labelledby="title desc">
+<title id="title">RNGdle Tools: Reels</title><desc id="desc">The selected number reel: a vermilion tile with a cream seven.</desc>
+<g transform="rotate(-8 20 20)">
+<rect x="6" y="3" width="28" height="34" rx="3" fill="#f2552c"/>
+<path fill="#fff3df" transform="translate(14 11) scale(0.4188710117262067 0.2996001336882374) translate(-0.4453125 -16.58789)" d="M29.094 16.588 L29.094 29.678 L19.52 76.668 L4.602 76.668 L15.271 27.387 L0.445 27.387 L0.445 16.588 Z"/>
+<path d="M6 20H34" stroke="#f2552c" stroke-width="1"/>
+<path d="M11 5H29M11 35H29" stroke="#fff3df" stroke-opacity=".35" stroke-width="1"/>
+</g></svg>
