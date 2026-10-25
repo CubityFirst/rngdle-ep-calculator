@@ -27,3 +27,8 @@ research/*
 
 # Exported conversation transcripts
 /20??-??-??-*.txt
+
+# Nothing from ProtoType Studios is committed: not their page dumps (research/*
+# already covers those), not the harness that evals them (it quotes their source),
+# and not the skill that drives it.
+/.claude/skills/check-prototype/
