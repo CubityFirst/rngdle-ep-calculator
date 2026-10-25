@@ -1,10 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect x="1" y="1" width="30" height="30" rx="7" fill="#7c3aed"/>
-  <g fill="#fff">
-    <circle cx="9.5" cy="9.5" r="3.3"/>
-    <circle cx="22.5" cy="9.5" r="3.3"/>
-    <circle cx="16" cy="16" r="3.3"/>
-    <circle cx="9.5" cy="22.5" r="3.3"/>
-    <circle cx="22.5" cy="22.5" r="3.3"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <title>RNGdle Tools</title>
+  <style>
+    .cell { fill: #0f766e; }
+    .selected { fill: #d97706; }
+    @media (prefers-color-scheme: dark) {
+      .cell { fill: #5eead4; }
+      .selected { fill: #fbbf24; }
+    }
+  </style>
+  <rect class="cell" x="1" y="1" width="8" height="8" rx="1.5"/>
+  <rect class="cell" x="12" y="1" width="8" height="8" rx="1.5"/>
+  <rect class="selected" x="23" y="1" width="8" height="8" rx="1.5"/>
+  <rect class="cell" x="1" y="12" width="8" height="8" rx="1.5"/>
+  <rect class="cell" x="12" y="12" width="8" height="8" rx="1.5"/>
+  <rect class="cell" x="23" y="12" width="8" height="8" rx="1.5"/>
+  <rect class="cell" x="1" y="23" width="8" height="8" rx="1.5"/>
+  <rect class="cell" x="12" y="23" width="8" height="8" rx="1.5"/>
+  <rect class="cell" x="23" y="23" width="8" height="8" rx="1.5"/>
 </svg>

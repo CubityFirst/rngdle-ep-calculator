@@ -287,15 +287,6 @@ export const THEME_BOOT_JS = `
 // Page shell
 // ---------------------------------------------------------------------------
 
-// Inline so the browser never requests /favicon.ico. Three dots, as before, in the
-// front end's dark ground.
-const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
-  '<rect width="32" height="32" rx="7" fill="#1b1922"/>' +
-  '<circle cx="10" cy="10" r="3" fill="#78aaff"/>' +
-  '<circle cx="22" cy="16" r="3" fill="#f59e0b"/>' +
-  '<circle cx="10" cy="22" r="3" fill="#78aaff"/></svg>');
-
 // @property must sit at the top level; everything else goes in the layer.
 const hoistProperties = css => {
   const props = [];
@@ -340,7 +331,9 @@ ${o.css || ''}`);
 <html lang="en" class="dark"><head>
 <meta charset="utf-8"><meta name="viewport" content="${o.viewport || 'width=device-width,initial-scale=1'}">
 <meta name="theme-color" content="#0a0a0a">
-${o.noindex ? '<meta name="robots" content="noindex">\n' : ''}<link rel="icon" href="${FAVICON}">
+${o.noindex ? '<meta name="robots" content="noindex">\n' : ''}<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
 <title>${o.title}</title>
 <style>@layer properties, theme, base, legacy, components, utilities;</style>
 <link rel="stylesheet" href="/style.css">

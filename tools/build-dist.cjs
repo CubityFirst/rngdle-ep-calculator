@@ -9,6 +9,9 @@ const DIST = path.join(__dirname, "..", "dist");
 
 const FILES = [
   "index.html",
+  "favicon.svg",
+  "favicon.ico",
+  "apple-touch-icon.png",
   "app.js",
   "ep.js",
   "badges.js",

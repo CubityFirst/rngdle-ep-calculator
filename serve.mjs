@@ -25,7 +25,7 @@ const SITE = new URL('./site/', import.meta.url).pathname.replace(/^\/([A-Za-z]:
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.gz': 'application/octet-stream',
-  '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json',
+  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json',
 };
 
 // The asset binding: a file from site/ if the path names one, else the shell.
