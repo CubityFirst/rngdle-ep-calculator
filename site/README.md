@@ -761,6 +761,5 @@ there, `node tools/check.cjs` re-checks the catalogue.
 | `vendor/` | upstream files, unmodified |
 | `wrangler.toml` | Cloudflare Workers config (custom domain, assets, D1) |
 | `tools/` | refresh, table build, dist build, checks |
-| `site/rngdle.html` | ProtoType Studios' RNGdle calculator, kept as reference; not shipped |
 
 Not affiliated with RNGdle.

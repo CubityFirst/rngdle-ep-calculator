@@ -1,6 +1,6 @@
 // Assembles dist/ from site/ — exactly the files the site needs at runtime, nothing
 // else. An explicit allowlist rather than an ignore list: this gets published, and
-// site/ also holds rngdle.html (a reference page) and a README that should not ship.
+// site/ also holds a README that should not ship.
 const fs = require("fs");
 const path = require("path");
 
