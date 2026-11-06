@@ -3,6 +3,7 @@ node_modules/
 
 # Wrangler / Cloudflare local state
 .wrangler/
+.cloudflare/
 .dev.vars
 
 # Assembled from site/ by tools/build-dist.js (and by wrangler's build on deploy)

@@ -1,3 +1,6 @@
+# cf deploy / cf dev read cloudflare.config.ts (and wrangler.config.ts for the build) and
+# ignore this file. It stays for the Wrangler commands cf cannot do yet - d1 execute,
+# secret put, tail - and tools/check.cjs fails if it drifts from cloudflare.config.ts.
 name = "rngdle-ep-calculator"
 main = "src/worker.js"
 compatibility_date = "2025-01-01"

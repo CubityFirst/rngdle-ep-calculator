@@ -9,9 +9,9 @@ One Cloudflare Worker, deployed at rng.cubityfir.st and rngdle.tools:
 - `src/index.js` + `beta.js`, `gallery.js`, `ui.js` - the badge engine (full parity with
   rngdle.com) and the legacy tools the front end has no tab for: `/chains`, `/beta/<tool>`,
   `/engine.js`, `/api`, `/api/profile`, the D1 palette gallery.
-- `src/worker.js` - the entry point (`wrangler.toml` main): `/api/rolls`, `/api/other`,
+- `src/worker.js` - the entry point (`cloudflare.config.ts` entrypoint): `/api/rolls`, `/api/other`,
   the legacy mount, and the asset binding for everything else.
-- `tools/*.cjs` - `check.cjs` (run before every deploy; wrangler's build runs it),
+- `tools/*.cjs` - `check.cjs` (run before every deploy; the build in `wrangler.config.ts` runs it),
   `build-dist.cjs` (site/ -> dist/), `refresh.cjs` (re-vendor rngdle's bundle),
   `build-ep-table.cjs` (the two shipped indexes), `snapshot.cjs` (file + diff a new
   upstream bundle), `parity.cjs` (engine vs that bundle, whole range), `prod-bundle.cjs`
@@ -26,11 +26,12 @@ Rules that follow from that:
 - Links emitted by the legacy pages point at the front end's paths (`/n/<number>`,
   `/badges/<slug>`, `/grid/<slug>`, `/other`); `src/index.js` 301s its retired pages
   (`/`, `/badges`, `/grid`, `/u`, `/beta`) to the same origin (`FRONT_END_PATHS`).
-- The legacy paths are listed in `run_worker_first` in `wrangler.toml`. Without that a
+- The legacy paths are listed in `runWorkerFirst` in `cloudflare.config.ts` (mirrored in
+  `wrangler.toml`; `tools/check.cjs` fails if the two differ). Without that a
   browser navigation to `/beta/atlas` gets the app shell (curl does not show this).
 - `tools/*.cjs` are CommonJS on purpose (the package is `"type": "module"`).
-- `npm run serve` serves `site/` from disk; `npm run dev` (wrangler) serves `dist/`, so
-  after editing `site/` under wrangler run `npm run build` or the change is invisible.
+- `npm run serve` serves `site/` from disk; `npm run dev` (cf dev) serves `dist/`, so
+  after editing `site/` under cf dev run `npm run build` or the change is invisible.
 - The rngdle.tools repo is frozen; it carries a note. Don't develop there.
 
 ## Before any commit or deploy
@@ -78,6 +79,9 @@ CONTRIBUTING.md. Pre-2026-07-21 history uses an older style; don't rewrite it.
   card on the Other tab through `legacyCatalogue()`, so give it a `THUMBS` mark.
 - The page scripts in `site/` are classic `<script>` tags sharing one global scope; a
   duplicate top-level name silently overwrites (`tools/check.cjs` scans for this).
+- Deploys go through `cf` (`npm run deploy` / `npx cf deploy`), which reads
+  `cloudflare.config.ts` + `wrangler.config.ts` and ignores `wrangler.toml`. Keep
+  `wrangler.toml` in step for `npx wrangler d1 execute` / `secret put` / `tail`.
 - Wrangler is invoked via npm scripts / `npx wrangler`, never a global install.
 - `HOT_RANK` in `src/gallery.js` and the `palettes_hot` index in `schema.sql` must spell
   the same expression character for character - SQLite only uses an expression index

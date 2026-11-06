@@ -44,12 +44,12 @@ gets a card with nothing retyped.
 ## Run / deploy
 
 ```bash
-npm install          # installs wrangler
+npm install          # installs cf (and the wrangler it builds with)
 npm run serve        # plain-Node dev server, site/ straight from disk (http://127.0.0.1:8787)
-npm run dev          # wrangler dev: the same plus a local D1 for the gallery
+npm run dev          # cf dev: the same plus a local D1 for the gallery
 npm run check        # tools/check.cjs - vendored engine, EP index, markup, legacy catalogue
 npm run build        # tools/build-dist.cjs - assemble dist/ from site/
-npm run deploy       # gen-snapshot, then wrangler (check + build-dist run as its build step)
+npm run deploy       # gen-snapshot, then cf deploy (check + build-dist run as its build step)
 npm test             # run the badge-logic test harness
 npm run test:browser # real-browser smoke test of /chains and the /beta tools
 ```
