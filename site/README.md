@@ -20,18 +20,18 @@ it is now the engine and the legacy tools only, mounted for those paths (see
 Static site, but it routes on real paths (`/badges/pronic`), so it has to be
 *served* rather than opened off disk — `file://` has no way to hand an unknown
 path back to the app shell. `npm run serve` serves it straight from `site/`;
-`npm run dev` (wrangler) matches production exactly.
+`npm run dev` (cf dev) matches production exactly.
 
 ## Deploying
 
 Cloudflare Workers Static Assets, from the repo root:
 
 ```bash
-npm run deploy             # gen-snapshot, then wrangler: check.js, build-dist.js, deploy
+npm run deploy             # gen-snapshot, then cf deploy: check.js, build-dist.js, deploy
 ```
 
-`wrangler.toml` attaches the custom domain and runs `tools/check.cjs && tools/build-dist.cjs`
-as its build, so a bare `npx wrangler deploy` works too. `src/worker.js` is the
+`cloudflare.config.ts` attaches the custom domains and `wrangler.config.ts` runs
+`tools/check.cjs && tools/build-dist.cjs` as the build, so a bare `npx cf deploy` works too. `src/worker.js` is the
 server code. It answers `/api/rolls` - rngdle's rolls API sends no CORS header, so
 the Profiles page cannot read it from the browser - `/u/<names>/raw`, the
 profile as CSV for spreadsheets, and `/badges/raw`, the badge list as CSV; it mounts `src/index.js` for the Other tab's tools
@@ -697,7 +697,7 @@ but never the header's utility classes. The canvases keep their dark plates in
 both themes. `tools/check.cjs` fails if the copied header or footer drifts from
 `index.html`.
 
-The Box Lab's shared palette gallery is the D1 database bound in `wrangler.toml`
+The Box Lab's shared palette gallery is the D1 database bound in `cloudflare.config.ts`
 (`npm run serve` has no D1, so there `/api/palettes` answers 503 and the Box Lab
 runs without its gallery; `npm run dev` provisions a local one).
 
@@ -759,7 +759,7 @@ there, `node tools/check.cjs` re-checks the catalogue.
 | `badge-table.ids.json` | the badge id of each row above, for the legacy tools (whose badge order differs), same build |
 | `engine-shim.js` | Turbopack runtime shim, shared by page and tools |
 | `vendor/` | upstream files, unmodified |
-| `wrangler.toml` | Cloudflare Workers config (custom domain, assets, D1) |
+| `cloudflare.config.ts` | Cloudflare Workers config (custom domains, assets, D1); `wrangler.config.ts` holds the build step; `wrangler.toml` mirrors both for `npx wrangler d1` / `secret` / `tail` |
 | `tools/` | refresh, table build, dist build, checks |
 
 Not affiliated with RNGdle.

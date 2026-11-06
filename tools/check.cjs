@@ -429,6 +429,21 @@ console.log("ok  EP->Number spot values");
   for (const p of ["/beta", "/beta/*", "/chains", "/engine.js", "/api", "/api/*", "/u/*", "/badges/raw"]) {
     assert.ok(rwf[1].includes(JSON.stringify(p)), `wrangler.toml run_worker_first is missing ${p}`);
   }
+  // cf deploy reads cloudflare.config.ts and ignores wrangler.toml, which stays only for
+  // the commands cf cannot do yet (npx wrangler d1 execute / secret put / tail). The two
+  // must describe the same Worker, or a deploy and a d1 execute disagree about it.
+  const cfCfg = fs.readFileSync(path.join(REPO, "cloudflare.config.ts"), "utf8");
+  const list = (s) => JSON.stringify((s.match(/"[^"]*"/g) || []).map((q) => JSON.parse(q)));
+  const cfRwf = /runWorkerFirst:\s*\[([^\]]*)\]/.exec(cfCfg);
+  assert.ok(cfRwf, "cloudflare.config.ts has no assets.runWorkerFirst list, so the legacy pages would render as the app shell");
+  assert.strictEqual(list(cfRwf[1]), list(rwf[1]), "run_worker_first differs between wrangler.toml and cloudflare.config.ts");
+  assert.ok(/entrypoint:\s*"src\/worker\.js"/.test(cfCfg), "cloudflare.config.ts must point entrypoint at src/worker.js");
+  assert.ok(/\bASSETS:\s*bindings\.assets\(\)/.test(cfCfg), "cloudflare.config.ts must bind the assets as ASSETS");
+  const cfDomains = /domains:\s*\[([^\]]*)\]/.exec(cfCfg);
+  const tomlDomains = [...wranglerCfg.matchAll(/^pattern\s*=\s*("[^"]*")\s*\ncustom_domain\s*=\s*true/gm)].map((m) => m[1]).join();
+  assert.ok(cfDomains && list(cfDomains[1]) === list(tomlDomains), "custom domains differ between wrangler.toml and cloudflare.config.ts");
+  const d1Id = /^database_id\s*=\s*"([^"]+)"/m.exec(wranglerCfg)[1];
+  assert.ok(cfCfg.includes(`id: "${d1Id}"`) && /\bDB:\s*bindings\.d1\(/.test(cfCfg), "the D1 binding differs between wrangler.toml and cloudflare.config.ts");
   // /u/<names>/raw is the profile as CSV for spreadsheets; it needs /u/* above, and
   // the Worker must hand every other /u path back to the shell.
   assert.ok(/RAW_PATH = \/\^\\\/u\\\/\(/.test(worker) && worker.includes('"text/csv; charset=utf-8"'), "src/worker.js no longer serves /u/<names>/raw as CSV");

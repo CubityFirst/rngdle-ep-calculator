@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "serve": "node serve.mjs",
-    "dev": "wrangler dev",
+    "dev": "cf dev",
     "gen": "node research/gen-snapshot.mjs",
     "check": "node tools/check.cjs",
     "build": "node tools/build-dist.cjs",
@@ -14,7 +14,7 @@
     "parity": "node tools/parity.cjs",
     "ep-table": "node tools/build-ep-table.cjs",
     "predeploy": "node research/gen-snapshot.mjs",
-    "deploy": "wrangler deploy",
+    "deploy": "cf deploy",
     "test": "node test/test.mjs && node test/raw.mjs",
     "test:browser": "node test/browser.mjs",
     "test:deploy": "node test/browser.mjs --bundle",
@@ -23,6 +23,7 @@
     "test:gallery-ui": "node test/gallery-ui.mjs"
   },
   "devDependencies": {
-    "wrangler": "^4.124.0"
+    "cf": "^1.0.0-beta.19",
+    "wrangler": "^4.156.0"
   }
 }

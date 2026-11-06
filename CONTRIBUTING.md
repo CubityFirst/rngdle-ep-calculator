@@ -3,9 +3,9 @@
 ## Setup & dev loop
 
 ```bash
-npm install          # installs wrangler
+npm install          # installs cf (and the wrangler it builds with)
 npm run serve        # plain-Node dev server: site/ from disk + the Worker (http://127.0.0.1:8787)
-npm run dev          # wrangler dev: serves dist/, so run npm run build after editing site/; has a local D1
+npm run dev          # cf dev: serves dist/, so run npm run build after editing site/; has a local D1
 npm run check        # tools/check.cjs - engine, indexes, markup, legacy catalogue
 npm run snapshot     # tools/snapshot.cjs - file today's rngdle.com bundle under research/ and report what moved
 npm run parity       # tools/parity.cjs - src/index.js vs that bundle on every number (--quick: 1 in 97)
@@ -16,7 +16,7 @@ npm run test:deploy  # the same, against the esbuild bundle - run before deployi
 npm run test:supersession  # /beta's family rule vs research/badge-tally.json (~2 min)
 npm run test:gallery # the /beta/boxes gallery's routes, against schema.sql
 npm run test:gallery-ui    # the same gallery in a browser, against a real D1
-npm run deploy       # publish to Cloudflare (gen-snapshot first; wrangler runs check + build)
+npm run deploy       # publish to Cloudflare (gen-snapshot first; cf deploy runs check + build)
 ```
 
 The repo is one Worker in three parts - `site/` (the front end), `src/index.js` and
@@ -24,7 +24,7 @@ friends (the engine and the legacy tools), `src/worker.js` (the entry point) - s
 CLAUDE.md for the map and the rules that follow from it. `site/README.md` documents
 the front end page by page.
 
-`tools/check.cjs` is the deploy gate: wrangler's build runs it, so a stale EP index,
+`tools/check.cjs` is the deploy gate: the build step in `wrangler.config.ts` runs it, so a stale EP index,
 a duplicate top-level name across the page scripts, or a legacy tool the site has
 already ported all fail the deploy rather than shipping.
 
@@ -58,6 +58,12 @@ esbuild's `keepNames` rewrites those functions to call `__name()` - a helper tha
 exists inside the bundle. A page can therefore work perfectly from `src/` and be broken
 in production. `src/beta.js` ships a no-op `__name` shim to prevent that; the bundle run
 is what proves it is still there.
+
+The Worker is configured in `cloudflare.config.ts` (bindings, domains, assets routing)
+and built per `wrangler.config.ts` (build command, `dist/`); `cf dev`, `cf build` and
+`cf deploy` read those two and ignore `wrangler.toml`. `wrangler.toml` stays for the
+commands cf cannot do yet - `npx wrangler d1 execute`, `secret put`, `tail` - and
+`tools/check.cjs` fails if the two configs stop describing the same Worker.
 
 Wrangler is always invoked through npm scripts / `npx wrangler` - never a global
 install.
