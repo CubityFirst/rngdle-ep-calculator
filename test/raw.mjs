@@ -6,6 +6,7 @@
 // stand-in that serves two players from a table (paged, as rngdle pages) and 404s
 // the rest. The engine is real: every EP, tier and badge in the CSV comes from
 // compute(), so the numbers below are pinned to what the number card says.
+import { readFileSync } from 'node:fs';
 import { compute } from '../src/index.js';
 import worker from '../src/worker.js';
 
@@ -27,9 +28,33 @@ globalThis.fetch = async (url) => {
   const all = ROLLS[m[1]], offset = Number(m[3]), page = all.slice(offset, offset + Number(m[2]));
   return Response.json({ rolls: page, hasMore: offset + page.length < all.length });
 };
+// The asset binding serves the EP table the near_miss columns are read from (the
+// one site/ ships, which tools/check.cjs keeps in step with the engine) and the
+// app shell for everything else, as single-page-application handling does.
+const EP_TABLE = readFileSync(new URL('../site/ep-table.bin.gz', import.meta.url));
 const shell = new Response('<!doctype html>shell', { headers: { 'content-type': 'text/html' } });
-const env = { ASSETS: { fetch: async () => shell.clone() } };
-const get = (path) => worker.fetch(new Request(`https://rng.test${path}`), env);
+const env = { ASSETS: { fetch: async (req) => new URL(req.url).pathname === '/ep-table.bin.gz'
+  ? new Response(EP_TABLE, { headers: { 'content-type': 'application/gzip' } })
+  : shell.clone() } };
+const get = (path, e = env) => worker.fetch(new Request(`https://rng.test${path}`), e);
+
+// The nearest miss straight from the engine, as worker.js defines it: of the 54
+// numbers one digit away in the six-digit zero-padded form, the highest EP, first in
+// scan order (most significant digit first, 0-9) on a tie; none unless it beats n.
+function nearestMiss(n) {
+  if (n >= 1000000) return null;
+  const ep = compute(n).totalEP;
+  let best = -1, bestN = -1;
+  for (const pw of [100000, 10000, 1000, 100, 10, 1]) {
+    const d0 = Math.floor(n / pw) % 10;
+    for (let d = 0; d < 10; d++) {
+      if (d === d0) continue;
+      const m = n + (d - d0) * pw, e = compute(m).totalEP;
+      if (e > best) { best = e; bestN = m; }
+    }
+  }
+  return best > ep ? { number: bestN, ep: best } : null;
+}
 
 const must = (cond, msg) => { if (!cond) throw new Error(msg); };
 // A CSV parser sufficient for what the Worker writes: quoted cells, doubled quotes,
@@ -50,6 +75,21 @@ function parseCsv(text) {
   return rows;
 }
 
+// --- no EP table: the rolls still answer, the near_miss columns go blank --------
+// First, while the Worker has not cached a table: a failed load is not cached, so
+// the next block still gets the real one.
+{
+  const logError = console.error;
+  console.error = () => {};                       // the Worker logs the failed load; expected here
+  const res = await get('/u/alice/raw', { ASSETS: { fetch: async () => new Response('gone', { status: 404 }) } })
+    .finally(() => { console.error = logError; });
+  must(res.status === 200, `no table: status ${res.status}`);
+  must(res.headers.get('x-near-miss') === 'unavailable', 'no table: x-near-miss header says so');
+  const rows = parseCsv(await res.text());
+  must(rows.length === 3 && rows.slice(1).every(r => r.slice(9).join('') === ''), 'no table: near_miss cells are blank');
+  console.log('ok  EP table unavailable -> x-near-miss: unavailable, blank near_miss cells');
+}
+
 // --- one row per roll, two players pooled -----------------------------------
 {
   const res = await get('/u/alice,bob/raw');
@@ -60,7 +100,9 @@ function parseCsv(text) {
   const text = await res.text();
   must(text.includes('\r\n') && !/[^\r]\n/.test(text.replace(/"[^"]*"/g, '')), 'rows must end in CRLF');
   const rows = parseCsv(text);
-  must(rows[0].join() === 'date,user,roll,tier,ep,badges,hearts,poem,badge_list', `header: ${rows[0].join()}`);
+  must(!res.headers.get('x-near-miss'), 'pooled: the EP table should have loaded');
+  must(rows[0].join() === 'date,user,roll,tier,ep,badges,hearts,poem,badge_list,near_miss,near_miss_tier,near_miss_ep',
+    `header: ${rows[0].join()}`);
   must(rows.length === 4, `pooled: ${rows.length - 1} rows, expected 3`);
   // Newest first, players interleaved by date.
   must(rows.slice(1).map(r => r[1]).join() === 'alice,bob,alice', `order: ${rows.slice(1).map(r => `${r[1]}@${r[0]}`).join(' ')}`);
@@ -75,7 +117,18 @@ function parseCsv(text) {
   must(list[0] === `${s.badges[0].label}+${s.badges[0].ep}`, `badge_list starts ${list[0]}`);
   must(list.some(x => /\+0$/.test(x)), '111111 has superseded badges, so some entry should be +0');
   must(list.includes('Pair+0') && list.includes('Six Digits+111'), `expected Pair+0 and Six Digits+111 in ${a[8]}`);
-  console.log(`ok  /u/alice,bob/raw: 3 rolls, newest first, ${list.length} badges listed on 111111`);
+  // near_miss: the EP table's answer agrees with the engine's, roll by roll.
+  const TIERS = ['trash', 'common', 'uncommon', 'rare', 'epic', 'anomaly', 'mythic'];
+  let misses = 0;
+  for (const r of rows.slice(1)) {
+    const want = nearestMiss(Number(r[2]));
+    if (!want) { must(r.slice(9).join('') === '', `${r[2]} is a local peak, near_miss should be blank: ${r.slice(9)}`); continue; }
+    misses++;
+    must(r[9] === String(want.number) && r[11] === String(want.ep), `${r[2]}: near_miss ${r[9]} (${r[11]}), engine says ${want.number} (${want.ep})`);
+    must(TIERS.includes(r[10]), `${r[2]}: near_miss_tier is a card tier name, got ${r[10]}`);
+  }
+  must(misses > 0, 'fixture: at least one roll should have a nearest miss');
+  console.log(`ok  /u/alice,bob/raw: 3 rolls, newest first, ${list.length} badges listed on 111111, ${misses} near misses match the engine`);
 }
 
 // --- one row per player --------------------------------------------------------

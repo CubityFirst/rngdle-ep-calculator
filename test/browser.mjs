@@ -22,8 +22,9 @@ import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { BADGES } from '../src/index.js';
 import { EXAMPLES } from '../src/examples.gen.js';
-import { readdirSync, existsSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, existsSync, rmSync, readFileSync, statSync } from 'node:fs';
+import { join, resolve, extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir } from 'node:os';
 
 const BUNDLE = process.argv.includes('--bundle');
@@ -435,21 +436,54 @@ const INTERACTIONS = {
 };
 
 // --- server ----------------------------------------------------------------
+// A stand-in for the ASSETS binding: files from site/ (or dist/ for the bundle),
+// and the app shell for any other path, as notFoundHandling: single-page-application
+// does in production.
+const SITE = fileURLToPath(new URL('../site/', import.meta.url));
+const DIST = fileURLToPath(new URL('../dist/', import.meta.url));
+const TYPES = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon', '.png': 'image/png', '.gz': 'application/gzip',
+};
+function assetBinding(root) {
+  return {
+    async fetch(request) {
+      const rel = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, '');
+      let file = resolve(root, rel);
+      if (!file.startsWith(resolve(root)) || !existsSync(file) || !statSync(file).isFile()) {
+        file = join(root, 'index.html');
+      }
+      return new Response(readFileSync(file), { headers: { 'content-type': TYPES[extname(file)] || 'application/octet-stream' } });
+    },
+  };
+}
+
 async function startServer() {
   if (process.env.BASE) return { base: process.env.BASE, stop() {} };
-  let mod;
+  // The Worker's entry point is src/worker.js, which hands the legacy paths to
+  // src/index.js and everything else to the asset binding - so the pages' own
+  // stylesheet and icons come from the static front end, as in production.
+  let mod, assetRoot;
   if (BUNDLE) {
     console.log('building the deploy bundle…');
     rmSync(OUT, { recursive: true, force: true });
+    // wrangler.toml's [build] runs check.cjs + build-dist.cjs first, so dist/ is fresh.
     execFileSync('npx', ['wrangler', 'deploy', '--dry-run', '--outdir', OUT],
       { stdio: 'pipe', shell: process.platform === 'win32' });
-    mod = await import(new URL(`file:///${join(OUT, 'index.js').replace(/\\/g, '/')}`).href);
+    // esbuild names the output after the entry point (worker.js today).
+    const out = readdirSync(OUT).filter(f => f.endsWith('.js'));
+    if (out.length !== 1) throw new Error(`expected one bundled .js in ${OUT}, found: ${out.join(', ') || 'none'}`);
+    mod = await import(new URL(`file:///${join(OUT, out[0]).replace(/\\/g, '/')}`).href);
+    assetRoot = DIST;
   } else {
-    mod = await import('../src/index.js');
+    mod = await import('../src/worker.js');
+    assetRoot = SITE;
   }
   const worker = mod.default;
+  const env = { ASSETS: assetBinding(assetRoot) };
   const server = http.createServer(async (req, res) => {
-    const r = await worker.fetch(new Request(`http://127.0.0.1${req.url}`, { method: req.method }));
+    const r = await worker.fetch(new Request(`http://127.0.0.1${req.url}`, { method: req.method }), env);
     res.statusCode = r.status;
     r.headers.forEach((v, k) => res.setHeader(k, v));
     res.end(Buffer.from(await r.arrayBuffer()));
