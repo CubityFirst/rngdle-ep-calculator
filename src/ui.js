@@ -205,7 +205,7 @@ export const COMPONENTS_CSS = `
 
 // site/index.html's <header>, character for character (tools/check.cjs fails if the
 // two drift). The Other tab is marked current: every page here is one of its tools.
-export const SITE_HEADER = `  <header class="flex items-center justify-between bg-site-bg py-1 pe-2 ps-6 sm:ps-4 text-prose">
+export const SITE_HEADER = `  <header class="flex items-center justify-between bg-site-bg px-page-gutter py-1 sm:ps-4 sm:pe-2 text-prose">
     <div class="flex items-center gap-1 sm:gap-2 min-w-0">
       <a class="text-lg font-bold tracking-widest hover:text-prose-2 transition-colors normal-case shrink-0" href="/">RNGdle</a>
       <nav class="flex items-center gap-1" id="nav">
@@ -226,7 +226,7 @@ export const SITE_HEADER = `  <header class="flex items-center justify-between b
         <button data-theme="auto" aria-label="Auto mode" title="Auto" class="p-1.5 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 pointer-events-none" aria-hidden="true"><path d="M12 2v2"></path><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"></path><path d="M16 12a4 4 0 0 0-4-4"></path><path d="m19 5-1.256 1.256"></path><path d="M20 12h2"></path></svg></button>
         <button data-theme="dark" aria-label="Dark mode" title="Dark" class="p-1.5 transition-colors cursor-pointer text-prose-2 hover:bg-surface-raised"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 pointer-events-none" aria-hidden="true"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path></svg></button>
       </div>
-      <a href="https://www.rngdle.com" target="_blank" rel="noopener noreferrer" class="type-button flex items-center gap-2 px-3 py-2 cursor-pointer rounded-lg border border-outline bg-surface text-prose hover:border-outline-strong hover:shadow-sm active:scale-[0.98] transition-all">
+      <a href="https://www.rngdle.com" target="_blank" rel="noopener noreferrer" class="type-button flex items-center gap-2 px-3 py-2 cursor-pointer rounded-lg border border-outline bg-surface text-prose hover:border-outline-strong hover:bg-surface-raised active:scale-[0.98] transition-all">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true"><path d="M15 3h6v6"></path><path d="M10 14 21 3"></path><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path></svg><span class="hidden sm:inline">Real Game</span>
       </a>
     </div>

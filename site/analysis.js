@@ -700,7 +700,7 @@ function renderSummary(total) {
 function renderChart(buckets, total) {
   const chart = anEl("an-chart");
   if (!total) {
-    chart.replaceChildren(anNode(`<p class="type-ui text-prose-3 normal-case text-center py-10">No numbers match these filters.</p>`));
+    chart.replaceChildren(anNode(`<p class="type-ui text-prose-3 normal-case text-center py-8">No numbers match these filters.</p>`));
     return;
   }
   let first = -1, last = 0;

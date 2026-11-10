@@ -136,7 +136,7 @@ const LUCK = (() => {
     const dated = rows.some(r => r.at);            // pasted numbers carry none
     $("lk-verdict").innerHTML = `
       <div class="lk-vhead"><span class="type-subsection-title text-prose"></span><span class="type-meta text-prose-3 normal-case">${fmt(k)} roll${k === 1 ? "" : "s"} · ${days(k)}</span></div>
-      <dl class="polished-card grid grid-cols-2 gap-4 p-4 sm:grid-cols-4 sm:p-5 lk-tiles">
+      <dl class="polished-card grid grid-cols-2 gap-4 p-4 sm:grid-cols-4 lk-tiles">
         ${tile("Best roll", `${compact(best.ep)} EP`, `<a class="underline hover:text-prose" href="/n/${best.n}">${fmt(best.n)}</a> · ${(100 * best.p).toFixed(3)}th percentile`, pillOf(tierIdx(best.ep)))}
         ${tile("Luckier than", beatPct(beat), `of players with ${fmt(k)} rolls — <b class="text-prose-2">${verdictOf(beat)}</b>`)}
         ${tile(`Par for ${fmt(k)} rolls`, `${compact(par)} EP`, "what a median player's best would be", pillOf(tierIdx(par)))}
