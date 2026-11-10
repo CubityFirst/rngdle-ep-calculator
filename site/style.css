@@ -8,6 +8,12 @@
   --font-space-mono: "Space Mono", ui-monospace, monospace;
 }
 
+/* The legacy pages (src/ui.js BASE_CSS) crossfade same-origin navigations. A
+   cross-document view transition needs both documents to opt in: without this, every
+   link from /chains or /beta into the front end has its transition skipped, and
+   Chrome reports that as an uncaught "AbortError: Transition was skipped". */
+@view-transition { navigation: auto; }
+
 /* Verbatim from rngdle's styled-jsx block (component id 127bce407691d237). */
 @keyframes gem-shimmer { 0% { background-position: 200% 0 } to { background-position: -200% 0 } }
 @keyframes digit-spin { 0%, to { opacity: 1 } }
