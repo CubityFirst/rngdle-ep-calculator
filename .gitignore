@@ -6,7 +6,7 @@ node_modules/
 .cloudflare/
 .dev.vars
 
-# Assembled from site/ by tools/build-dist.js (and by wrangler's build on deploy)
+# Assembled from site/ by tools/build-dist.js (and by the cf build on deploy, per wrangler.config.ts)
 dist/
 
 # Logs

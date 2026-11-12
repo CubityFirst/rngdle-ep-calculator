@@ -8,6 +8,10 @@ import { defineWranglerConfig } from "wrangler/experimental-config";
 mkdirSync(new URL("./dist", import.meta.url), { recursive: true });
 
 export default defineWranglerConfig({
+	// Runs before every `cf dev` / `cf build` / `cf deploy`. check.cjs is here rather than
+	// only in a test script so the guard travels with the deploy: it fails the build if the
+	// EP index has gone stale against the vendored engine, or if the legacy tools'
+	// catalogue drifts. build-dist.cjs then assembles site/ into dist/.
 	build: {
 		command: "node tools/check.cjs && node tools/build-dist.cjs",
 	},

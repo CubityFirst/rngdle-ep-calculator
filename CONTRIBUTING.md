@@ -6,6 +6,7 @@
 npm install          # installs cf (and the wrangler it builds with)
 npm run serve        # plain-Node dev server: site/ from disk + the Worker (http://127.0.0.1:8787)
 npm run dev          # cf dev: serves dist/, so run npm run build after editing site/; has a local D1
+npm run db:local     # apply schema.sql to that local D1 (tools/local-d1.cjs)
 npm run check        # tools/check.cjs - engine, indexes, markup, legacy catalogue
 npm run snapshot     # tools/snapshot.cjs - file today's rngdle.com bundle under research/ and report what moved
 npm run parity       # tools/parity.cjs - src/index.js vs that bundle on every number (--quick: 1 in 97)
@@ -41,7 +42,7 @@ costs more per call for ever without breaking, slowing down, or saying anything.
 
 `test:gallery-ui` covers the half of the gallery that only exists in the browser: the
 cursor paging, the hearts and the sort tabs. It needs a database to do anything, so it
-starts `wrangler dev` against a throwaway one (`--persist-to` a temp directory, seeded
+starts `wrangler dev --experimental-new-config` against a throwaway one (`--persist-to` a temp directory, seeded
 and then deleted) - your own local gallery is never touched. Like `test:browser`, it
 skips itself with exit 0 when playwright-core or wrangler cannot be started.
 
@@ -61,9 +62,23 @@ is what proves it is still there.
 
 The Worker is configured in `cloudflare.config.ts` (bindings, domains, assets routing)
 and built per `wrangler.config.ts` (build command, `dist/`); `cf dev`, `cf build` and
-`cf deploy` read those two and ignore `wrangler.toml`. `wrangler.toml` stays for the
-commands cf cannot do yet - `npx wrangler d1 execute`, `secret put`, `tail` - and
-`tools/check.cjs` fails if the two configs stop describing the same Worker.
+`cf deploy` read those two. There is no `wrangler.toml` (`tools/check.cjs` fails if one
+reappears), so the Wrangler commands cf cannot do yet name the Worker or database
+themselves:
+
+```bash
+npx wrangler secret put IP_SALT --name rngdle-ep-calculator   # also ADMIN_TOKEN
+npx wrangler secret list --name rngdle-ep-calculator
+npx wrangler tail rngdle-ep-calculator
+npm run db:remote    # npx wrangler d1 execute rngdle --file=schema.sql --remote
+npm run db:local     # schema.sql into cf dev's local D1 (tools/local-d1.cjs)
+```
+
+`wrangler d1 execute --local` only finds a database through a toml binding and
+`cf d1 query --local` has no local backend yet, hence `tools/local-d1.cjs`: it opens the
+same Miniflare D1 that `cf dev` persists under `.wrangler/state`, keyed by the id in
+`cloudflare.config.ts`. `wrangler dev` and `wrangler deploy` read the new config when
+given `--experimental-new-config` (the test harnesses use that).
 
 Wrangler is always invoked through npm scripts / `npx wrangler` - never a global
 install.

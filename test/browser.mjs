@@ -468,8 +468,9 @@ async function startServer() {
   if (BUNDLE) {
     console.log('building the deploy bundle…');
     rmSync(OUT, { recursive: true, force: true });
-    // wrangler.toml's [build] runs check.cjs + build-dist.cjs first, so dist/ is fresh.
-    execFileSync('npx', ['wrangler', 'deploy', '--dry-run', '--outdir', OUT],
+    // wrangler.config.ts's build runs check.cjs + build-dist.cjs first, so dist/ is fresh;
+    // --experimental-new-config makes Wrangler read cloudflare.config.ts, as cf deploy does.
+    execFileSync('npx', ['wrangler', 'deploy', '--experimental-new-config', '--dry-run', '--outdir', OUT],
       { stdio: 'pipe', shell: process.platform === 'win32' });
     // esbuild names the output after the entry point (worker.js today).
     const out = readdirSync(OUT).filter(f => f.endsWith('.js'));

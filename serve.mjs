@@ -1,8 +1,8 @@
 // Stable local dev server - wraps src/worker.js in node:http, with a stand-in for
 // the static-asset binding that serves site/ straight from disk (no dist/ build):
 // a file when there is one, the app shell for anything else, the way Workers Static
-// Assets does with not_found_handling = "single-page-application". Unlike
-// `wrangler dev`, this has no interactive hotkey loop, so it survives as a detached
+// Assets does with notFoundHandling: "single-page-application". Unlike
+// `cf dev`, this has no interactive hotkey loop, so it survives as a detached
 // background process. Binds to 127.0.0.1 (localhost only).
 //
 //   node serve.mjs            # http://127.0.0.1:8787
@@ -10,8 +10,9 @@
 //
 // Bindings: this passes no D1, so the palette gallery (/api/palettes, src/gallery.js)
 // answers 503 "not configured" - every other route is storage-free and behaves exactly
-// as it does in production. To work on the gallery, run `npx wrangler dev` instead,
-// which provisions a real local D1 from the binding in wrangler.toml.
+// as it does in production. To work on the gallery, run `npm run dev` (cf dev) instead,
+// which provisions a real local D1 from the binding in cloudflare.config.ts
+// (`npm run db:local` applies schema.sql to it).
 //
 // For deploying to Cloudflare, use `npm run deploy` (the worker code is identical).
 

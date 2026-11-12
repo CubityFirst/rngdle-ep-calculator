@@ -8,7 +8,8 @@
 // that the section degrades quietly. So the paging, the hearts and the sort tabs, which
 // are the parts a person actually touches, had no test at all. This is that test.
 //
-// It runs `wrangler dev` against a throwaway database: `--persist-to` a temp directory,
+// It runs `wrangler dev --experimental-new-config` (cloudflare.config.ts) against a
+// throwaway database: `--persist-to` a temp directory,
 // seeded from schema.sql and thrown away at the end, so a developer's own local gallery
 // is never read, written or emptied by running this.
 //
@@ -101,8 +102,10 @@ function seedSql() {
   return rows.join('\n');
 }
 
+// There is no wrangler.toml for `wrangler d1 execute --local` to find the database in;
+// tools/local-d1.cjs opens the same local D1 from the id in cloudflare.config.ts.
 const d1 = (state, file) => execFileSync(process.execPath,
-  [WRANGLER, 'd1', 'execute', 'rngdle', '--local', '--persist-to', state, '--file', file],
+  [join('tools', 'local-d1.cjs'), '--persist-to', state, file],
   { stdio: 'pipe', windowsHide: true });
 
 // --- checks ----------------------------------------------------------------
@@ -158,8 +161,10 @@ async function run() {
   }
 
   const port = await freePort();
+  // --experimental-new-config reads cloudflare.config.ts + wrangler.config.ts, as cf dev
+  // does; plain `wrangler dev` would look for a wrangler.toml that no longer exists.
   server = spawn(process.execPath,
-    [WRANGLER, 'dev', '--local', '--port', String(port), '--persist-to', state],
+    [WRANGLER, 'dev', '--experimental-new-config', '--local', '--port', String(port), '--persist-to', state],
     { stdio: 'ignore', windowsHide: true });
 
   const base = `http://127.0.0.1:${port}`;

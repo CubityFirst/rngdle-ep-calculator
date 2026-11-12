@@ -759,7 +759,7 @@ there, `node tools/check.cjs` re-checks the catalogue.
 | `badge-table.ids.json` | the badge id of each row above, for the legacy tools (whose badge order differs), same build |
 | `engine-shim.js` | Turbopack runtime shim, shared by page and tools |
 | `vendor/` | upstream files, unmodified |
-| `cloudflare.config.ts` | Cloudflare Workers config (custom domains, assets, D1); `wrangler.config.ts` holds the build step; `wrangler.toml` mirrors both for `npx wrangler d1` / `secret` / `tail` |
+| `cloudflare.config.ts` | Cloudflare Workers config (custom domains, assets, D1); `wrangler.config.ts` holds the build step (there is no `wrangler.toml`) |
 | `tools/` | refresh, table build, dist build, checks |
 
 Not affiliated with RNGdle.

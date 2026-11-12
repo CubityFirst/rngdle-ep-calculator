@@ -1,13 +1,13 @@
 -- D1 schema for the Box Lab palette gallery (/beta/boxes).
 --
 -- Apply it with:
---   npx wrangler d1 execute rngdle --file=schema.sql --local    # the local wrangler dev db
---   npx wrangler d1 execute rngdle --file=schema.sql --remote   # the real database
+--   npm run db:local    # node tools/local-d1.cjs schema.sql - the local cf dev db
+--   npm run db:remote   # npx wrangler d1 execute rngdle --file=schema.sql --remote - the real one
 --
 -- Everything here is IF NOT EXISTS, so re-running is safe - which is also how an index
 -- added here reaches an existing database: re-apply the file, it is the migration.
 -- `node serve.mjs` passes no bindings at all, so the gallery is simply 503 there - use
--- `npx wrangler dev` to work on it.
+-- `npm run dev` (cf dev) to work on it.
 --
 -- Every index below exists because some query would otherwise scan a whole table, and
 -- D1 bills rows read. The comment on each names the query it is for; if that query

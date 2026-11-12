@@ -108,7 +108,7 @@ function runAll(db, statements) {
  * The key is also stable, so it links one person's submissions and hearts to each
  * other. This is pseudonymous data, not anonymous data.
  *
- * `env.IP_SALT` must be set in production (`npx wrangler secret put IP_SALT`). The
+ * `env.IP_SALT` must be set in production (`npx wrangler secret put IP_SALT --name rngdle-ep-calculator`). The
  * fallback below is a literal in this file, so with it every key is reversible by
  * anyone who can read the source - it exists so the tests run, and nothing else.
  */
@@ -576,7 +576,7 @@ async function likePalette(id, request, env, db) {
   return json({ id, likes, liked: !had });
 }
 
-// Moderation. Guarded by env.ADMIN_TOKEN (`npx wrangler secret put ADMIN_TOKEN`);
+// Moderation. Guarded by env.ADMIN_TOKEN (`npx wrangler secret put ADMIN_TOKEN --name rngdle-ep-calculator`);
 // with no token set, nothing can be hidden through the API at all - which is the
 // right default for a route that would otherwise be an open delete button.
 async function hidePalette(id, request, env, db) {

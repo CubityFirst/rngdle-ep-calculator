@@ -1,7 +1,7 @@
 // Smallest thing that fails if the vendored engine, the runtime shim, or the
 // reveal schedule in site/app.js stops matching rngdle, or if the legacy tools'
 // catalogue drifts from what the site has ported. Run after tools/refresh.cjs and
-// before every deploy (wrangler's build runs it).
+// before every deploy (the build in wrangler.config.ts runs it).
 //   node tools/check.cjs
 const assert = require("assert");
 const fs = require("fs");
@@ -178,9 +178,10 @@ console.log("ok  finale glow + palettes for all " + TIERS.length + " tiers");
   const worker = fs.readFileSync(path.join(REPO, "src/worker.js"), "utf8");
   assert.ok(worker.includes("env.ASSETS.fetch"), "src/worker.js must fall through to the assets");
   assert.ok(worker.includes("/api/rolls"), "src/worker.js must serve /api/rolls");
-  const wrangler = fs.readFileSync(path.join(REPO, "wrangler.toml"), "utf8");
-  assert.ok(/^main\s*=\s*"src\/worker\.js"/m.test(wrangler), "wrangler.toml must point main at src/worker.js");
-  assert.ok(/^binding\s*=\s*"ASSETS"/m.test(wrangler), "the asset binding must be named ASSETS");
+  const cfConfig = fs.readFileSync(path.join(REPO, "cloudflare.config.ts"), "utf8");
+  assert.ok(/entrypoint:\s*"src\/worker\.js"/.test(cfConfig), "cloudflare.config.ts must point entrypoint at src/worker.js");
+  assert.ok(/\bASSETS:\s*bindings\.assets\(\)/.test(cfConfig), "the asset binding must be named ASSETS");
+  assert.ok(!fs.existsSync(path.join(REPO, "wrangler.toml")), "wrangler.toml is back - the Worker config is cloudflare.config.ts now, and a second copy only drifts");
   const dist = fs.readFileSync(path.join(REPO, "tools/build-dist.cjs"), "utf8");
   for (const f of ["badges.js", "profile.js", "analysis.js", "grid.js", "neighbours.js", "luck.js", "other.js", "badge-table.bin.gz"]) {
     assert.ok(dist.includes(`"${f}"`), `${f} is missing from the dist allowlist`);
@@ -423,27 +424,17 @@ console.log("ok  EP->Number spot values");
   assert.ok(worker.includes("FRONT_END: url.origin"), "src/worker.js must hand the legacy module its own origin, or its redirects leave the site");
   // A navigation to a path with no static file gets the shell before the Worker runs,
   // unless the path is listed here - so without this every legacy page IS the shell.
-  const wranglerCfg = fs.readFileSync(path.join(REPO, "wrangler.toml"), "utf8");
-  const rwf = /run_worker_first\s*=\s*\[([^\]]*)\]/.exec(wranglerCfg);
-  assert.ok(rwf, "wrangler.toml has no run_worker_first list, so the legacy pages would render as the app shell");
-  for (const p of ["/beta", "/beta/*", "/chains", "/engine.js", "/api", "/api/*", "/u/*", "/badges/raw"]) {
-    assert.ok(rwf[1].includes(JSON.stringify(p)), `wrangler.toml run_worker_first is missing ${p}`);
-  }
-  // cf deploy reads cloudflare.config.ts and ignores wrangler.toml, which stays only for
-  // the commands cf cannot do yet (npx wrangler d1 execute / secret put / tail). The two
-  // must describe the same Worker, or a deploy and a d1 execute disagree about it.
+  // cloudflare.config.ts is the Worker's only config (cf deploy / cf dev read it).
   const cfCfg = fs.readFileSync(path.join(REPO, "cloudflare.config.ts"), "utf8");
-  const list = (s) => JSON.stringify((s.match(/"[^"]*"/g) || []).map((q) => JSON.parse(q)));
+  const list = (s) => (s.match(/"[^"]*"/g) || []).map((q) => JSON.parse(q));
   const cfRwf = /runWorkerFirst:\s*\[([^\]]*)\]/.exec(cfCfg);
   assert.ok(cfRwf, "cloudflare.config.ts has no assets.runWorkerFirst list, so the legacy pages would render as the app shell");
-  assert.strictEqual(list(cfRwf[1]), list(rwf[1]), "run_worker_first differs between wrangler.toml and cloudflare.config.ts");
-  assert.ok(/entrypoint:\s*"src\/worker\.js"/.test(cfCfg), "cloudflare.config.ts must point entrypoint at src/worker.js");
-  assert.ok(/\bASSETS:\s*bindings\.assets\(\)/.test(cfCfg), "cloudflare.config.ts must bind the assets as ASSETS");
+  for (const p of ["/beta", "/beta/*", "/chains", "/engine.js", "/api", "/api/*", "/u/*", "/badges/raw"]) {
+    assert.ok(list(cfRwf[1]).includes(p), `cloudflare.config.ts runWorkerFirst is missing ${p}`);
+  }
   const cfDomains = /domains:\s*\[([^\]]*)\]/.exec(cfCfg);
-  const tomlDomains = [...wranglerCfg.matchAll(/^pattern\s*=\s*("[^"]*")\s*\ncustom_domain\s*=\s*true/gm)].map((m) => m[1]).join();
-  assert.ok(cfDomains && list(cfDomains[1]) === list(tomlDomains), "custom domains differ between wrangler.toml and cloudflare.config.ts");
-  const d1Id = /^database_id\s*=\s*"([^"]+)"/m.exec(wranglerCfg)[1];
-  assert.ok(cfCfg.includes(`id: "${d1Id}"`) && /\bDB:\s*bindings\.d1\(/.test(cfCfg), "the D1 binding differs between wrangler.toml and cloudflare.config.ts");
+  assert.deepStrictEqual(cfDomains && list(cfDomains[1]).sort(), ["rng.cubityfir.st", "rngdle.tools"], "cloudflare.config.ts must attach both custom domains");
+  assert.ok(/\bDB:\s*bindings\.d1\(/.test(cfCfg), "cloudflare.config.ts must bind the palette gallery's D1 as DB");
   // /u/<names>/raw is the profile as CSV for spreadsheets; it needs /u/* above, and
   // the Worker must hand every other /u path back to the shell.
   assert.ok(/RAW_PATH = \/\^\\\/u\\\/\(/.test(worker) && worker.includes('"text/csv; charset=utf-8"'), "src/worker.js no longer serves /u/<names>/raw as CSV");

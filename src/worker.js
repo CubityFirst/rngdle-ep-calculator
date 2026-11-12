@@ -1,4 +1,4 @@
-// The Worker's entry point (wrangler.toml: main). The front end under site/ is static,
+// The Worker's entry point (cloudflare.config.ts: entrypoint). The front end under site/ is static,
 // so there is not much here. Two jobs:
 //
 // 1. /api/rolls proxies rngdle's rolls API, which sends no `access-control-allow-origin`,
@@ -21,7 +21,7 @@
 //
 // Everything else is a static asset — the asset binding serves the app shell for any
 // path it has no file for, which is what keeps /badges/pronic and friends working on
-// a reload. The legacy paths run the Worker first (wrangler.toml), or a navigation
+// a reload. The legacy paths run the Worker first (cloudflare.config.ts: runWorkerFirst), or a navigation
 // to one of them would get the shell too.
 
 import legacy, { legacyCatalogue, compute, cardTier, badgeList } from "./index.js";

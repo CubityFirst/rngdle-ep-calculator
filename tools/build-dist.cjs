@@ -29,7 +29,7 @@ const FILES = [
   "vendor/rngdle-engine.js",
 ];
 
-// Empty dist/ rather than remove it: a running `wrangler dev` holds the
+// Empty dist/ rather than remove it: a running `cf dev` holds the
 // directory open on Windows, and rmSync on the directory itself fails with
 // EPERM while its contents can still be replaced.
 fs.mkdirSync(DIST, { recursive: true });

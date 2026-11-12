@@ -8,7 +8,7 @@
 // surface the Worker binding exposes, so every query below is the query that runs
 // in production. This lives in the test and not in serve.mjs on purpose: the dev
 // server has no bindings and the gallery is 503 there, which is a state worth
-// keeping honest. To exercise the real D1, use `npx wrangler dev`.
+// keeping honest. To exercise the real D1, use `npm run dev` (cf dev).
 //
 // A submission is ONE tier somebody designed. Prod's seven are fixed reference in
 // the UI and are never sent here, so nothing in this file describes a palette.
