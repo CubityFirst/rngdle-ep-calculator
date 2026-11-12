@@ -26,8 +26,8 @@ Rules that follow from that:
 - Links emitted by the legacy pages point at the front end's paths (`/n/<number>`,
   `/badges/<slug>`, `/grid/<slug>`, `/other`); `src/index.js` 301s its retired pages
   (`/`, `/badges`, `/grid`, `/u`, `/beta`) to the same origin (`FRONT_END_PATHS`).
-- The legacy paths are listed in `runWorkerFirst` in `cloudflare.config.ts` (mirrored in
-  `wrangler.toml`; `tools/check.cjs` fails if the two differ). Without that a
+- The legacy paths are listed in `runWorkerFirst` in `cloudflare.config.ts`
+  (`tools/check.cjs` fails if one goes missing). Without that a
   browser navigation to `/beta/atlas` gets the app shell (curl does not show this).
 - `tools/*.cjs` are CommonJS on purpose (the package is `"type": "module"`).
 - `npm run serve` serves `site/` from disk; `npm run dev` (cf dev) serves `dist/`, so
@@ -79,9 +79,14 @@ CONTRIBUTING.md. Pre-2026-07-21 history uses an older style; don't rewrite it.
   card on the Other tab through `legacyCatalogue()`, so give it a `THUMBS` mark.
 - The page scripts in `site/` are classic `<script>` tags sharing one global scope; a
   duplicate top-level name silently overwrites (`tools/check.cjs` scans for this).
-- Deploys go through `cf` (`npm run deploy` / `npx cf deploy`), which reads
-  `cloudflare.config.ts` + `wrangler.config.ts` and ignores `wrangler.toml`. Keep
-  `wrangler.toml` in step for `npx wrangler d1 execute` / `secret put` / `tail`.
+- `cloudflare.config.ts` is the Worker's only config (build step in `wrangler.config.ts`);
+  there is no `wrangler.toml`, and `tools/check.cjs` fails if one comes back. Deploys go
+  through `cf` (`npm run deploy` / `npx cf deploy`). Wrangler commands that need the
+  Worker take it explicitly: `npx wrangler secret put <NAME> --name rngdle-ep-calculator`,
+  `npx wrangler tail rngdle-ep-calculator`, `npx wrangler d1 execute rngdle --remote ...`
+  (found by name). Local D1: `npm run db:local` (`tools/local-d1.cjs`), since
+  `wrangler d1 execute --local` needs a toml binding. `wrangler dev` / `deploy` need
+  `--experimental-new-config` to read the new config.
 - Wrangler is invoked via npm scripts / `npx wrangler`, never a global install.
 - `HOT_RANK` in `src/gallery.js` and the `palettes_hot` index in `schema.sql` must spell
   the same expression character for character - SQLite only uses an expression index
@@ -90,5 +95,5 @@ CONTRIBUTING.md. Pre-2026-07-21 history uses an older style; don't rewrite it.
   `node test/gallery.mjs` catches this: it replays every statement the Worker issued
   through `EXPLAIN QUERY PLAN` and fails on a full scan or a temp B-tree.
 - `schema.sql` is all `IF NOT EXISTS`, so it is also the migration - after adding an
-  index, re-apply it (`npx wrangler d1 execute rngdle --file=schema.sql --remote`) or
+  index, re-apply it (`npm run db:remote`, i.e. `npx wrangler d1 execute rngdle --file=schema.sql --remote`) or
   production keeps the old plan. Deploying the Worker does not touch the database.

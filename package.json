@@ -6,6 +6,8 @@
   "scripts": {
     "serve": "node serve.mjs",
     "dev": "cf dev",
+    "db:local": "node tools/local-d1.cjs schema.sql",
+    "db:remote": "wrangler d1 execute rngdle --file=schema.sql --remote",
     "gen": "node research/gen-snapshot.mjs",
     "check": "node tools/check.cjs",
     "build": "node tools/build-dist.cjs",
